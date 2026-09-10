@@ -160,6 +160,26 @@ GHUL
 out="$(dotnet "$cli" --no-cache "$no_cache_script")"
 check "$out" "second version" "second --no-cache run output"
 
+# '--no-cache' is documented as valid both before everything and right
+# after the verb - the second form is the one that regressed silently
+# behind a review finding rather than this test, so it gets its own case.
+echo "smoke: '--no-cache' also works placed after the verb..." >&2
+cat > "$no_cache_script" <<'GHUL'
+entry() is
+    IO.Std.write_line("third version");
+si
+GHUL
+out="$(dotnet "$cli" run --no-cache "$no_cache_script")"
+check "$out" "third version" "'ghul run --no-cache' output"
+cat > "$no_cache_script" <<'GHUL'
+entry() is
+    IO.Std.write_line("fourth version");
+si
+GHUL
+compiled_no_cache="$(dotnet "$cli" compile --no-cache "$no_cache_script")"
+out="$(dotnet "$compiled_no_cache")"
+check "$out" "fourth version" "'ghul compile --no-cache' output"
+
 echo "smoke: 'ghul cache clear' empties the script cache..." >&2
 cache_root="$HOME/.cache/ghul-cli/scripts"
 if [[ ! -d "$cache_root" ]]; then

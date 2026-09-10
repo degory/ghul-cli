@@ -548,19 +548,27 @@ namespace Ghul.Cli is
         return 1
     si
 
+    // `--no-cache` is documented (and accepted) in two positions: before
+    // everything, or immediately after the `run`/`compile` verb. Strips it
+    // from the front of `list` if present, returning what's left alongside
+    // whether it was found.
+    strip_no_cache(list: Collections.List[string]) -> (items: Collections.List[string], no_cache: bool) is
+        if list.count > 0 /\ list[0] =~ "--no-cache" then
+            return (items = list[1..<0], no_cache = true)
+        fi
+
+        return (items = list, no_cache = false)
+    si
+
     entry(args: string[]) -> int is
         if args.count < 1 then
             print_usage()
             return 1
         fi
 
-        let items mut = args[0..<0]
-        let no_cache mut = false
-
-        if items.count > 0 /\ items[0] =~ "--no-cache" then
-            no_cache = true
-            items = items[1..<0]
-        fi
+        let leading = strip_no_cache(args[0..<0])
+        let items mut = leading.items
+        let no_cache mut = leading.no_cache
 
         if items.count < 1 then
             print_usage()
@@ -571,7 +579,9 @@ namespace Ghul.Cli is
         // so a script literally named `run`, `compile`, `cache` or
         // `install-compiler` can still be reached by the default verb.
         if items[0] =~ "--" then
-            return cmd_run(items[1..<0], false, no_cache)
+            let after_dashdash = strip_no_cache(items[1..<0])
+
+            return cmd_run(after_dashdash.items, false, no_cache \/ after_dashdash.no_cache)
         fi
 
         let verb = items[0]
@@ -582,11 +592,15 @@ namespace Ghul.Cli is
         fi
 
         if verb =~ "compile" then
-            return cmd_compile(rest, no_cache)
+            let after_verb = strip_no_cache(rest)
+
+            return cmd_compile(after_verb.items, no_cache \/ after_verb.no_cache)
         fi
 
         if verb =~ "run" then
-            return cmd_run(rest, true, no_cache)
+            let after_verb = strip_no_cache(rest)
+
+            return cmd_run(after_verb.items, true, no_cache \/ after_verb.no_cache)
         fi
 
         if verb =~ "cache" then
