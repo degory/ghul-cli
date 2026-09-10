@@ -1,0 +1,192 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# Serialise release builds so concurrent pushes to main can't race over the
+# version number; PR builds keep their own per-ref group and cancel
+# superseded runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: 1
+
+jobs:
+  version:
+    name: Create a version number
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      package: ${{ steps.version.outputs.package }}
+
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: '0'
+
+    # Patch bump the latest vX.Y.Z tag unless VERSION declares a higher
+    # minor/major floor. Pull request builds get a -beta.<run> suffix so
+    # they can't collide with a real release.
+    - name: Determine the version
+      id: version
+      uses: degory/create-version@v1.0.0
+      with:
+        prerelease: ${{ github.event_name == 'pull_request' && format('beta.{0}', github.run_number) || '' }}
+
+  unit_tests:
+    name: Unit tests
+    needs: [version]
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 5
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Restore local tools
+      run: dotnet tool restore
+
+    - name: Run unit tests
+      run: dotnet test unit-tests
+
+  build_and_smoke_test:
+    name: Build and smoke test
+    needs: [version]
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 10
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Restore local tools
+      run: dotnet tool restore
+
+    - name: Run smoke test
+      run: ./tests/smoke.sh
+
+    - name: Create package
+      run: dotnet pack -nologo -p:Version=${{ needs.version.outputs.package }}
+
+    - uses: actions/upload-artifact@v7
+      with:
+        name: package
+        path: nupkg
+
+  publish_package:
+    name: Publish package
+    needs: [version, unit_tests, build_and_smoke_test]
+
+    timeout-minutes: 10
+
+    runs-on: ubuntu-latest
+
+    if: ${{ github.event_name != 'pull_request' }}
+    permissions:
+      # Lets the job ask GitHub for the short-lived token nuget.org trades
+      # for a publishing key. Nothing here holds a NuGet secret.
+      contents: read
+      id-token: write
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Download package
+      uses: actions/download-artifact@v8
+      with:
+        name: package
+        path: nupkg
+
+    # Trusted publishing: nuget.org trades a token GitHub signs for this
+    # workflow for a publishing key that lasts an hour and is spent once. No
+    # long-lived key exists to leak or to rotate, and the policy on
+    # nuget.org names this repository and this file, so no other workflow
+    # can publish.
+    - name: Ask nuget.org for a publishing key
+      id: login
+      uses: NuGet/login@v1
+      with:
+        user: ${{ secrets.NUGET_USER }}
+
+    - name: Publish package to NuGet
+      run: |
+        dotnet nuget push ./nupkg/*.nupkg \
+          --api-key ${{ steps.login.outputs.NUGET_API_KEY }} \
+          --source https://api.nuget.org/v3/index.json \
+          --skip-duplicate \
+          --no-symbols
+
+  create_release:
+    needs: [version, publish_package]
+    name: Create release
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 5
+    if: ${{ github.event_name != 'pull_request' }}
+
+    permissions:
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: '0'
+
+    - name: Download package
+      uses: actions/download-artifact@v8
+      with:
+        name: package
+        path: nupkg
+
+    - name: Create changelog
+      run: git log -1 --format="%s%n%n%b%n%n" >changelog.txt
+
+    - name: Create a release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh release create "${{ needs.version.outputs.tag }}" \
+          ./nupkg/ghul.cli.${{ needs.version.outputs.package }}.nupkg \
+          --title "${{ needs.version.outputs.tag }}" \
+          --notes-file changelog.txt
+
+  code_review:
+    name: Code review
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository }}
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: claude-review-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    uses: degory/ghul-code-review/.github/workflows/review.yml@v9
+    with:
+      idle-timeout-seconds: ${{ fromJSON(vars.CLAUDE_REVIEW_IDLE_TIMEOUT_SECONDS || '90') }}
+      max-attempts: ${{ fromJSON(vars.CLAUDE_REVIEW_MAX_ATTEMPTS || '3') }}
+      gh-app-id: ${{ vars.GHUL_REVIEWER_APP_ID }}
+      ghul-reference: true
+      prompt: |
+        Review pull request #${{ github.event.pull_request.number }} on ${{ github.repository }}.
+
+        You run in parallel with CI. Whether the diff builds and passes tests is gated by CI before merge - that's not your job. Trust the diff as written.
+
+        Read these files first, in order:
+        1. .github/claude-review.md - what this repo is, and what to watch for in it
+        2. GHUL.md - ghūl language reference (consult as needed while reading the diff)
+    secrets:
+      claude-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      qwen-auth-token: ${{ secrets.QWEN_API_KEY }}
+      openrouter-auth-token: ${{ secrets.OPENROUTER_API_KEY }}
+      zai-auth-token: ${{ secrets.ZAI_API_KEY }}
+      gh-app-private-key: ${{ secrets.GHUL_REVIEWER_PRIVATE_KEY }}

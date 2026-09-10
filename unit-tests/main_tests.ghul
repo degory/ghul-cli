@@ -1,0 +1,61 @@
+namespace Ghul.Cli.Tests is
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    entry()
+
+    @TestClass()
+    class CACHE_TESTS is
+        init() is si
+
+        _with_temp_script(content: string, body: (string) -> void) is
+            let path = IO.Path.get_temp_file_name();
+
+            try
+                IO.File.write_all_text(path, content);
+                body(path);
+            finally
+                IO.File.delete(path);
+            yrt
+        si
+
+        @Test()
+        cache_entry_dir__is_the_same_for_the_same_content_and_compiler_version() is
+            _with_temp_script("write_line(\"a\");", path is
+                let first = Ghul.Cli.cache_entry_dir(path, "1.0.0");
+                let second = Ghul.Cli.cache_entry_dir(path, "1.0.0");
+
+                assert first =~ second;
+            si);
+        si
+
+        @Test()
+        cache_entry_dir__differs_when_the_script_content_differs() is
+            _with_temp_script("write_line(\"a\");", first_path is
+                _with_temp_script("write_line(\"b\");", second_path is
+                    let first = Ghul.Cli.cache_entry_dir(first_path, "1.0.0");
+                    let second = Ghul.Cli.cache_entry_dir(second_path, "1.0.0");
+
+                    assert first !~ second;
+                si);
+            si);
+        si
+
+        @Test()
+        cache_entry_dir__differs_when_the_compiler_version_differs() is
+            _with_temp_script("write_line(\"a\");", path is
+                let first = Ghul.Cli.cache_entry_dir(path, "1.0.0");
+                let second = Ghul.Cli.cache_entry_dir(path, "2.0.0");
+
+                assert first !~ second;
+            si);
+        si
+
+        @Test()
+        installed_compiler_version__is_absent_when_no_tools_are_installed() is
+            let tools_dir = IO.Path.combine(IO.Path.get_temp_path(), System.Guid.new_guid().to_string());
+
+            assert !Ghul.Cli.installed_compiler_version(tools_dir)?;
+        si
+    si
+si

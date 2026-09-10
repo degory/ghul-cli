@@ -1,0 +1,180 @@
+namespace Ghul.Cli is
+    use IO.Std
+    use IO.File
+    use IO.Directory
+    use IO.Path
+
+    home_directory() -> string is
+        let home = System.Environment.get_environment_variable("HOME")
+
+        assert home? else "ghul: the HOME environment variable is not set";
+
+        return home
+    si
+
+    tools_directory() -> string => "{home_directory()}/.local/share/ghul-cli/tools"
+
+    cache_root() -> string is
+        let xdg = System.Environment.get_environment_variable("XDG_CACHE_HOME")
+
+        if xdg? /\ xdg.length > 0 then
+            return "{xdg}/ghul-cli/scripts"
+        fi
+
+        return "{home_directory()}/.cache/ghul-cli/scripts"
+    si
+
+    // Keyed on the script's own content plus the compiler version that will
+    // build it, so a compiler update invalidates every cached script rather
+    // than serving a binary built by a version that no longer matches.
+    cache_entry_dir(script_path: string, compiler_version: string) -> string is
+        let bytes = File.read_all_bytes(script_path)
+        let digest = System.Security.Cryptography.SHA256.hash_data(bytes)
+        let hex = System.Convert.to_hex_string(digest).to_lower()
+
+        return "{cache_root()}/{hex}-{compiler_version}"
+    si
+
+    installed_compiler_version(tools_dir: string) -> string? is
+        let store_dir = "{tools_dir}/.store/ghul.compiler"
+
+        if !Directory.exists(store_dir) then
+            return null
+        fi
+
+        let versions = Directory.get_directories(store_dir)
+
+        if versions.count == 0 then
+            return null
+        fi
+
+        return Path.get_file_name(versions[0])
+    si
+
+    install_compiler(tools_dir: string) -> bool is
+        Directory.create_directory(tools_dir)
+
+        Std.error.write_line("ghul: installing ghul.compiler...")
+
+        let start_info = System.Diagnostics.ProcessStartInfo()
+        start_info.file_name = "dotnet"
+        start_info.use_shell_execute = false
+        // dotnet's own install chatter (and, on a fresh machine, its
+        // first-time-experience banner) goes to stdout - redirect it so it
+        // never lands on ours, which is reserved for the run script's own
+        // output.
+        start_info.redirect_standard_output = true
+        start_info.argument_list.add("tool")
+        start_info.argument_list.add("install")
+        start_info.argument_list.add("--tool-path")
+        start_info.argument_list.add(tools_dir)
+        start_info.argument_list.add("ghul.compiler")
+
+        if let process: System.Diagnostics.Process = System.Diagnostics.Process.start(start_info) then
+            let output = process.standard_output.read_to_end()
+
+            process.wait_for_exit()
+
+            if process.exit_code == 0 then
+                return true
+            fi
+
+            Std.error.write(output)
+        fi
+
+        Std.error.write_line("ghul: failed to install ghul.compiler")
+        return false
+    si
+
+    compile_script(compiler_shim: string, script_path: string, output: string, run_dir: string, tools_dir: string, compiler_version: string) -> bool is
+        Directory.create_directory(run_dir)
+
+        let start_info = System.Diagnostics.ProcessStartInfo()
+        start_info.file_name = compiler_shim
+        start_info.use_shell_execute = false
+        start_info.argument_list.add(script_path)
+        start_info.argument_list.add("-o")
+        start_info.argument_list.add(output)
+
+        if let process: System.Diagnostics.Process = System.Diagnostics.Process.start(start_info) then
+            process.wait_for_exit()
+
+            if process.exit_code != 0 then
+                return false
+            fi
+
+            // Every ghul.compiler tool package carries ghul-runtime.dll beside
+            // its own dll; a compiled script needs a copy sitting beside it too.
+            let runtime_dll = "{tools_dir}/.store/ghul.compiler/{compiler_version}/ghul.compiler/{compiler_version}/tools/net10.0/any/ghul-runtime.dll"
+
+            if File.exists(runtime_dll) then
+                File.copy(runtime_dll, "{run_dir}/ghul-runtime.dll", true)
+            fi
+
+            return true
+        fi
+
+        Std.error.write_line("ghul: failed to start the compiler")
+        return false
+    si
+
+    run_script(output: string, script_args: Collections.List[string]) -> int is
+        let start_info = System.Diagnostics.ProcessStartInfo()
+        start_info.file_name = "dotnet"
+        start_info.use_shell_execute = false
+        start_info.argument_list.add(output)
+
+        for a in script_args do
+            start_info.argument_list.add(a)
+        od
+
+        if let process: System.Diagnostics.Process = System.Diagnostics.Process.start(start_info) then
+            process.wait_for_exit()
+            return process.exit_code
+        fi
+
+        Std.error.write_line("ghul: failed to run the compiled script")
+        return 1
+    si
+
+    entry(args: string[]) -> int is
+        if args.count < 1 then
+            Std.error.write_line("usage: ghul <script.ghul> [args...]")
+            return 1
+        fi
+
+        let script_path = args[0]
+
+        if !File.exists(script_path) then
+            Std.error.write_line("ghul: no such file: {script_path}")
+            return 1
+        fi
+
+        let script_args = args[1..<0]
+
+        let tools_dir = tools_directory()
+        let compiler_shim = "{tools_dir}/ghul-compiler"
+
+        if !File.exists(compiler_shim) then
+            if !install_compiler(tools_dir) then
+                return 1
+            fi
+        fi
+
+        if let compiler_version: string = installed_compiler_version(tools_dir) then
+            let run_dir = cache_entry_dir(script_path, compiler_version)
+            let output = "{run_dir}/run.exe"
+
+            if !File.exists(output) then
+                if !compile_script(compiler_shim, script_path, output, run_dir, tools_dir, compiler_version) then
+                    return 1
+                fi
+            fi
+
+            return run_script(output, script_args)
+        fi
+
+        Std.error.write_line("ghul: could not determine the installed ghul.compiler version")
+        return 1
+    si
+si

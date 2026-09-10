@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <GhulCompiler>dotnet ghul-compiler</GhulCompiler>
+
+    <!-- Publishable as a global .NET tool: `dotnet tool install -g ghul.cli`,
+         then run scripts as `ghul script.ghul` or via a `#!/usr/bin/env ghul`
+         shebang line. -->
+    <PackageId>ghul.cli</PackageId>
+    <IsTool>true</IsTool>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>ghul</ToolCommandName>
+
+    <Title>ghūl CLI</Title>
+    <Authors>degory</Authors>
+    <Description>Run ghūl scripts directly, including via a #!/usr/bin/env ghul shebang line on Linux: resolves and installs the ghul.compiler tool on first use, compiles, caches the result by script content, and runs it.</Description>
+    <PackageDescription>Run ghūl scripts directly, including via a #!/usr/bin/env ghul shebang line on Linux: resolves and installs the ghul.compiler tool on first use, compiles, caches the result by script content, and runs it.</PackageDescription>
+    <PackageTags>ghul;ghūl;cli;script;shebang</PackageTags>
+    <PackageOutputPath>./nupkg</PackageOutputPath>
+    <PackageProjectUrl>https://ghul.dev</PackageProjectUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/degory/ghul-cli</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryBranch>main</RepositoryBranch>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="LICENSE*" Pack="true" PackagePath="\" />
+
+    <GhulSources Include="src/**/*.ghul" />
+  </ItemGroup>
+</Project>
