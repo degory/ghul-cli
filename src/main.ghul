@@ -3,6 +3,10 @@ namespace Ghul.Cli is
     use IO.File
     use IO.Directory
     use IO.Path
+    use IO.FileMode
+    use IO.FileAccess
+    use IO.FileShare
+    use IO.UnixFileMode
 
     home_directory() -> string is
         let home = System.Environment.get_environment_variable("HOME")
@@ -51,43 +55,179 @@ namespace Ghul.Cli is
         return Path.get_file_name(versions[0])
     si
 
-    install_compiler(tools_dir: string) -> bool is
-        Directory.create_directory(tools_dir)
+    is_readable(path: string) -> bool is
+        try
+            let stream = File.open_read(path)
+            stream.close()
+            return true
+        catch e: System.Exception
+            return false
+        yrt
+    si
 
-        Std.error.write_line("ghul: installing ghul.compiler...")
+    is_executable(path: string) -> bool is
+        try
+            let mode = File.get_unix_file_mode(path)
+            return (cast int(mode) & cast int(UnixFileMode.USER_EXECUTE)) != 0
+        catch e: System.Exception
+            return false
+        yrt
+    si
+
+    starts_with_shebang(path: string) -> bool is
+        try
+            let reader = File.open_text(path)
+            let first = reader.read()
+            let second = reader.read()
+            reader.close()
+            return first == 35 /\ second == 33  // '#' then '!'
+        catch e: System.Exception
+            return false
+        yrt
+    si
+
+    // The default (no explicit verb) rules: a readable file ending in
+    // `.ghul` runs regardless of its executable bit, and a readable
+    // executable file starting `#!` runs regardless of its extension -
+    // covering both `ghul script.ghul` and a chmod +x'd shebang script
+    // invoked as `./script`. Anything else needs an explicit `run`.
+    is_runnable_by_default(path: string) -> bool is
+        if !is_readable(path) then
+            return false
+        fi
+
+        if path.ends_with(".ghul") then
+            return true
+        fi
+
+        return is_executable(path) /\ starts_with_shebang(path)
+    si
+
+    // Opens an exclusive advisory lock on `lock_path`, blocking until it is
+    // free. The lock is held for as long as the returned stream stays open;
+    // closing it (including via process exit) releases it immediately, so
+    // a crashed holder can never leave a stale lock behind the way a
+    // lock-file-existence check would.
+    acquire_lock(lock_path: string, waiting_message: string?) -> IO.FileStream is
+        Directory.create_directory(Path.get_directory_name(lock_path) ?? ".")
+
+        let announced mut = false
+
+        do
+            try
+                return File.open(lock_path, FileMode.OPEN_OR_CREATE, FileAccess.READ_WRITE, FileShare.NONE)
+            catch e: IO.IOException
+                if !announced then
+                    if let message: string = waiting_message then
+                        Std.error.write_line(message)
+                    fi
+
+                    announced = true
+                fi
+
+                System.Threading.Thread.sleep(100)
+            yrt
+        od
+    si
+
+    install_compiler(tools_dir: string, version: string?, show_output: bool) -> bool is
+        Directory.create_directory(tools_dir)
 
         let start_info = System.Diagnostics.ProcessStartInfo()
         start_info.file_name = "dotnet"
         start_info.use_shell_execute = false
-        // dotnet's own install chatter (and, on a fresh machine, its
-        // first-time-experience banner) goes to stdout - redirect it so it
-        // never lands on ours, which is reserved for the run script's own
-        // output.
-        start_info.redirect_standard_output = true
         start_info.argument_list.add("tool")
-        start_info.argument_list.add("install")
+
+        if installed_compiler_version(tools_dir)? then
+            start_info.argument_list.add("update")
+        else
+            start_info.argument_list.add("install")
+        fi
+
         start_info.argument_list.add("--tool-path")
         start_info.argument_list.add(tools_dir)
+
+        if let v: string = version then
+            start_info.argument_list.add("--version")
+            start_info.argument_list.add(v)
+        fi
+
         start_info.argument_list.add("ghul.compiler")
 
+        // For a script run, dotnet's own install chatter (and, on a fresh
+        // machine, its first-time-experience banner) is captured and only
+        // surfaced on failure, so it never contends with the run script's
+        // own stdout. An explicit `install-compiler` has nothing else
+        // writing to the console, so it is left to stream straight through.
+        if !show_output then
+            start_info.redirect_standard_output = true
+            start_info.redirect_standard_error = true
+        fi
+
         if let process: System.Diagnostics.Process = System.Diagnostics.Process.start(start_info) then
-            let output = process.standard_output.read_to_end()
+            if !show_output then
+                let stdout_task = process.standard_output.read_to_end_async()
+                let stderr_task = process.standard_error.read_to_end_async()
+
+                process.wait_for_exit()
+
+                if process.exit_code == 0 then
+                    return true
+                fi
+
+                Std.error.write(stdout_task.result)
+                Std.error.write(stderr_task.result)
+
+                return false
+            fi
 
             process.wait_for_exit()
 
-            if process.exit_code == 0 then
-                return true
-            fi
-
-            Std.error.write(output)
+            return process.exit_code == 0
         fi
 
         Std.error.write_line("ghul: failed to install ghul.compiler")
         return false
     si
 
-    compile_script(compiler_shim: string, script_path: string, output: string, run_dir: string, tools_dir: string, compiler_version: string) -> bool is
+    // Double-checked: a cheap unlocked look first (the overwhelmingly
+    // common case is "already installed and matches"), then the same
+    // check again once the lock is held, since another process may have
+    // finished installing while we were waiting for it.
+    ensure_compiler_installed(tools_dir: string, version: string?, show_output: bool) -> string? is
+        if let current: string = installed_compiler_version(tools_dir) then
+            if !version? \/ current =~ version then
+                return current
+            fi
+        fi
+
+        Directory.create_directory(tools_dir)
+
+        let lock_stream = acquire_lock(
+            "{tools_dir}/.install.lock",
+            "ghul: waiting for another ghul process to finish installing the compiler...")
+
+        try
+            if let current: string = installed_compiler_version(tools_dir) then
+                if !version? \/ current =~ version then
+                    return current
+                fi
+            fi
+
+            if !install_compiler(tools_dir, version, show_output) then
+                return null
+            fi
+
+            return installed_compiler_version(tools_dir)
+        finally
+            lock_stream.close()
+        yrt
+    si
+
+    compile_script_into(compiler_shim: string, script_path: string, run_dir: string, tools_dir: string, compiler_version: string) -> bool is
         Directory.create_directory(run_dir)
+
+        let output = "{run_dir}/run.exe"
 
         let start_info = System.Diagnostics.ProcessStartInfo()
         start_info.file_name = compiler_shim
@@ -118,6 +258,58 @@ namespace Ghul.Cli is
         return false
     si
 
+    // Compiles into a fresh, uniquely-named scratch directory and only
+    // then renames it onto `run_dir`. Directory.move is a single rename on
+    // the same filesystem, so a concurrent reader's `File.exists(output)`
+    // check never observes a half-written entry, and a crash mid-compile
+    // never leaves one behind either.
+    //
+    // Guarded by a per-cache-entry lock so two processes compiling the
+    // same script under the same compiler version serialise on the work
+    // rather than both compiling it, but correctness does not depend on
+    // the lock: whichever rename loses (because the other process's
+    // rename already landed) just discards its now-redundant scratch copy.
+    ensure_compiled(compiler_shim: string, script_path: string, run_dir: string, tools_dir: string, compiler_version: string) -> bool is
+        let output = "{run_dir}/run.exe"
+
+        if File.exists(output) then
+            return true
+        fi
+
+        Directory.create_directory(cache_root())
+
+        let lock_path = "{cache_root()}/.locks/{Path.get_file_name(run_dir)}.lock"
+        let lock_stream = acquire_lock(lock_path, null)
+
+        try
+            if File.exists(output) then
+                return true
+            fi
+
+            let scratch_dir = "{run_dir}.tmp-{System.Environment.process_id}-{System.Guid.new_guid().to_string("N")}"
+
+            if !compile_script_into(compiler_shim, script_path, scratch_dir, tools_dir, compiler_version) then
+                if Directory.exists(scratch_dir) then
+                    Directory.delete(scratch_dir, true)
+                fi
+
+                return false
+            fi
+
+            try
+                Directory.move(scratch_dir, run_dir)
+            catch e: IO.IOException
+                // Another process finished first and already holds run_dir;
+                // its copy is complete, ours is now redundant.
+                Directory.delete(scratch_dir, true)
+            yrt
+
+            return File.exists(output)
+        finally
+            lock_stream.close()
+        yrt
+    si
+
     run_script(output: string, script_args: Collections.List[string]) -> int is
         let start_info = System.Diagnostics.ProcessStartInfo()
         start_info.file_name = "dotnet"
@@ -137,44 +329,124 @@ namespace Ghul.Cli is
         return 1
     si
 
-    entry(args: string[]) -> int is
-        if args.count < 1 then
-            Std.error.write_line("usage: ghul <script.ghul> [args...]")
+    print_usage() is
+        Std.error.write_line("usage: ghul <script> [args...]")
+        Std.error.write_line("       ghul run <script> [args...]")
+        Std.error.write_line("       ghul compile <script.ghul>")
+        Std.error.write_line("       ghul install-compiler [version]")
+    si
+
+    cmd_install_compiler(rest: Collections.List[string]) -> int is
+        let version: string? = if rest.count > 0 then rest[0] else null fi
+        let tools_dir = tools_directory()
+
+        if let current: string = installed_compiler_version(tools_dir) then
+            if !version? \/ current =~ version then
+                Std.error.write_line("ghul: ghul.compiler {current} is already installed")
+                return 0
+            fi
+        fi
+
+        Std.error.write_line("ghul: installing ghul.compiler{if version? then " {version}" else "" fi}...")
+
+        if let installed: string = ensure_compiler_installed(tools_dir, version, true) then
+            Std.error.write_line("ghul: ghul.compiler {installed} is installed")
+            return 0
+        fi
+
+        Std.error.write_line("ghul: failed to install ghul.compiler")
+        return 1
+    si
+
+    cmd_compile(rest: Collections.List[string]) -> int is
+        if rest.count < 1 then
+            Std.error.write_line("usage: ghul compile <script.ghul>")
             return 1
         fi
 
-        let script_path = args[0]
+        let script_path = rest[0]
 
         if !File.exists(script_path) then
             Std.error.write_line("ghul: no such file: {script_path}")
             return 1
         fi
 
-        let script_args = args[1..<0]
-
         let tools_dir = tools_directory()
-        let compiler_shim = "{tools_dir}/ghul-compiler"
 
-        if !File.exists(compiler_shim) then
-            if !install_compiler(tools_dir) then
+        if let compiler_version: string = ensure_compiler_installed(tools_dir, null, false) then
+            let compiler_shim = "{tools_dir}/ghul-compiler"
+            let run_dir = cache_entry_dir(script_path, compiler_version)
+
+            if !ensure_compiled(compiler_shim, script_path, run_dir, tools_dir, compiler_version) then
                 return 1
             fi
+
+            Std.out.write_line("{run_dir}/run.exe")
+            return 0
         fi
 
-        if let compiler_version: string = installed_compiler_version(tools_dir) then
-            let run_dir = cache_entry_dir(script_path, compiler_version)
-            let output = "{run_dir}/run.exe"
+        Std.error.write_line("ghul: could not install ghul.compiler")
+        return 1
+    si
 
-            if !File.exists(output) then
-                if !compile_script(compiler_shim, script_path, output, run_dir, tools_dir, compiler_version) then
-                    return 1
-                fi
+    cmd_run(rest: Collections.List[string], force: bool) -> int is
+        if rest.count < 1 then
+            print_usage()
+            return 1
+        fi
+
+        let script_path = rest[0]
+        let script_args = rest[1..<0]
+
+        if !File.exists(script_path) then
+            Std.error.write_line("ghul: no such file: {script_path}")
+            return 1
+        fi
+
+        if !force /\ !is_runnable_by_default(script_path) then
+            Std.error.write_line(
+                "ghul: refusing to run {script_path}: not a .ghul file and not an executable script starting with '#!' - use 'ghul run {script_path}' to force it")
+            return 1
+        fi
+
+        let tools_dir = tools_directory()
+
+        if let compiler_version: string = ensure_compiler_installed(tools_dir, null, false) then
+            let compiler_shim = "{tools_dir}/ghul-compiler"
+            let run_dir = cache_entry_dir(script_path, compiler_version)
+
+            if !ensure_compiled(compiler_shim, script_path, run_dir, tools_dir, compiler_version) then
+                return 1
             fi
 
-            return run_script(output, script_args)
+            return run_script("{run_dir}/run.exe", script_args)
         fi
 
         Std.error.write_line("ghul: could not determine the installed ghul.compiler version")
         return 1
+    si
+
+    entry(args: string[]) -> int is
+        if args.count < 1 then
+            print_usage()
+            return 1
+        fi
+
+        let verb = args[0]
+        let rest = args[1..<0]
+
+        if verb =~ "install-compiler" then
+            return cmd_install_compiler(rest)
+        fi
+
+        if verb =~ "compile" then
+            return cmd_compile(rest)
+        fi
+
+        if verb =~ "run" then
+            return cmd_run(rest, true)
+        fi
+
+        return cmd_run(args[0..<0], false)
     si
 si
