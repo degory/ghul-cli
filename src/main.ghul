@@ -7,6 +7,8 @@ namespace Ghul.Cli is
     use IO.FileAccess
     use IO.FileShare
     use IO.UnixFileMode
+    use Ghul.Pipes.map
+    use Ghul.Pipes.first
 
     home_directory() -> string is
         let home = System.Environment.get_environment_variable("HOME")
@@ -28,16 +30,18 @@ namespace Ghul.Cli is
         return "{home_directory()}/.cache/ghul-cli/scripts"
     si
 
-    // Keyed on the script's own content plus the compiler version that will
+    // Keyed on the source's own bytes plus the compiler version that will
     // build it, so a compiler update invalidates every cached script rather
     // than serving a binary built by a version that no longer matches.
-    cache_entry_dir(script_path: string, compiler_version: string) -> string is
-        let bytes = File.read_all_bytes(script_path)
+    cache_entry_dir_for_bytes(bytes: ubyte[], compiler_version: string) -> string is
         let digest = System.Security.Cryptography.SHA256.hash_data(bytes)
         let hex = System.Convert.to_hex_string(digest).to_lower()
 
         return "{cache_root()}/{hex}-{compiler_version}"
     si
+
+    cache_entry_dir(script_path: string, compiler_version: string) -> string =>
+        cache_entry_dir_for_bytes(File.read_all_bytes(script_path), compiler_version)
 
     installed_compiler_version(tools_dir: string) -> string? is
         let store_dir = "{tools_dir}/.store/ghul.compiler"
@@ -54,6 +58,12 @@ namespace Ghul.Cli is
 
         return Path.get_file_name(versions[0])
     si
+
+    // The conventional stdin marker: a lone `-` names standard input rather
+    // than a file, matching every other CLI that reads a script this way. A
+    // real file named `-` is reached by qualifying the path (`./-`), the
+    // same escape every other tool that follows this convention needs too.
+    is_stdin_marker(script_ref: string) -> bool => script_ref =~ "-"
 
     is_readable(path: string) -> bool is
         try
@@ -258,6 +268,18 @@ namespace Ghul.Cli is
         return false
     si
 
+    // Writes `bytes` (a script read from stdin) into a `.ghul` file inside
+    // `scratch_dir` so it has a real path to hand the compiler.
+    materialize_bytes(bytes: ubyte[], scratch_dir: string) -> string is
+        Directory.create_directory(scratch_dir)
+
+        let path = "{scratch_dir}/source.ghul"
+
+        File.write_all_bytes(path, bytes)
+
+        return path
+    si
+
     // Compiles into a fresh, uniquely-named scratch directory and only
     // then renames it onto `run_dir`. Directory.move is a single rename on
     // the same filesystem, so a concurrent reader's `File.exists(output)`
@@ -269,10 +291,19 @@ namespace Ghul.Cli is
     // rather than both compiling it, but correctness does not depend on
     // the lock: whichever rename loses (because the other process's
     // rename already landed) just discards its now-redundant scratch copy.
-    ensure_compiled(compiler_shim: string, script_path: string, run_dir: string, tools_dir: string, compiler_version: string) -> bool is
+    //
+    // `materialize` is handed the scratch directory and returns the actual
+    // `.ghul` file to compile - either the caller's own persistent path
+    // (ignoring the scratch directory), or a file freshly written into it
+    // (for a script read from stdin, which has no path of its own).
+    //
+    // `force` skips the "already compiled" fast path and, once a fresh
+    // compile has succeeded, discards whatever is already at `run_dir`
+    // before the rename - the explicit `--no-cache` escape hatch.
+    ensure_compiled(compiler_shim: string, materialize: (string) -> string, run_dir: string, tools_dir: string, compiler_version: string, force: bool) -> bool is
         let output = "{run_dir}/run.exe"
 
-        if File.exists(output) then
+        if !force /\ File.exists(output) then
             return true
         fi
 
@@ -282,11 +313,12 @@ namespace Ghul.Cli is
         let lock_stream = acquire_lock(lock_path, null)
 
         try
-            if File.exists(output) then
+            if !force /\ File.exists(output) then
                 return true
             fi
 
             let scratch_dir = "{run_dir}.tmp-{System.Environment.process_id}-{System.Guid.new_guid().to_string("N")}"
+            let script_path = materialize(scratch_dir)
 
             if !compile_script_into(compiler_shim, script_path, scratch_dir, tools_dir, compiler_version) then
                 if Directory.exists(scratch_dir) then
@@ -294,6 +326,10 @@ namespace Ghul.Cli is
                 fi
 
                 return false
+            fi
+
+            if force /\ Directory.exists(run_dir) then
+                Directory.delete(run_dir, true)
             fi
 
             try
@@ -329,11 +365,65 @@ namespace Ghul.Cli is
         return 1
     si
 
+    read_all_stdin_bytes() -> ubyte[] is
+        let stdin = Std.open_standard_input()
+        let buffer = IO.MemoryStream()
+
+        stdin.copy_to(buffer)
+
+        return buffer.to_array()
+    si
+
+    // Resolves a script reference - a real path, or the `-` stdin marker -
+    // into the bytes that key its cache entry and a `materialize` function
+    // that produces a real `.ghul` file to compile. Callers must already
+    // have confirmed the reference exists (or is the stdin marker).
+    //
+    // ghul.compiler's own argument parser only recognises a source file by
+    // its `.ghul` extension, so a script reached without one - the stdin
+    // marker, or an extensionless executable with a `#!` line - has its
+    // content copied into a `.ghul`-suffixed file before compiling, same as
+    // stdin. A path that already ends in `.ghul` is handed to the compiler
+    // unchanged.
+    resolve_source(script_ref: string) -> (materialize: (string) -> string, key_bytes: ubyte[]) is
+        if is_stdin_marker(script_ref) then
+            let bytes = read_all_stdin_bytes()
+
+            return (materialize = scratch_dir => materialize_bytes(bytes, scratch_dir), key_bytes = bytes)
+        fi
+
+        let bytes = File.read_all_bytes(script_ref)
+
+        if script_ref.ends_with(".ghul") then
+            return (materialize = (_: string) => script_ref, key_bytes = bytes)
+        fi
+
+        return (materialize = scratch_dir => materialize_bytes(bytes, scratch_dir), key_bytes = bytes)
+    si
+
+    cli_version() -> string is
+        let assembly_version =
+            System.Reflection.Assembly
+                .get_executing_assembly()
+                .get_custom_attributes(typeof System.Reflection.AssemblyInformationalVersionAttribute, false)
+                    |> map(va => cast System.Reflection.AssemblyInformationalVersionAttribute?(va)!)
+                    |> first()
+
+        if assembly_version? then
+            return assembly_version.informational_version
+        fi
+
+        return "0.0.0-unknown"
+    si
+
     print_usage() is
-        Std.error.write_line("usage: ghul <script> [args...]")
-        Std.error.write_line("       ghul run <script> [args...]")
-        Std.error.write_line("       ghul compile <script.ghul>")
+        Std.error.write_line("usage: ghul [--no-cache] [--] <script> [args...]")
+        Std.error.write_line("       ghul run [--no-cache] <script> [args...]")
+        Std.error.write_line("       ghul compile [--no-cache] <script.ghul>")
         Std.error.write_line("       ghul install-compiler [version]")
+        Std.error.write_line("       ghul cache clear")
+        Std.error.write_line("       ghul version")
+        Std.error.write_line("       a `-` in place of <script> reads the source from stdin")
     si
 
     cmd_install_compiler(rest: Collections.List[string]) -> int is
@@ -358,26 +448,57 @@ namespace Ghul.Cli is
         return 1
     si
 
-    cmd_compile(rest: Collections.List[string]) -> int is
+    cmd_cache(rest: Collections.List[string]) -> int is
+        if rest.count < 1 \/ rest[0] !~ "clear" then
+            Std.error.write_line("usage: ghul cache clear")
+            return 1
+        fi
+
+        let root = cache_root()
+
+        if Directory.exists(root) then
+            Directory.delete(root, true)
+        fi
+
+        Std.error.write_line("ghul: cache cleared ({root})")
+        return 0
+    si
+
+    cmd_version() -> int is
+        Std.out.write_line("ghul {cli_version()}")
+
+        let tools_dir = tools_directory()
+
+        if let compiler_version: string = installed_compiler_version(tools_dir) then
+            Std.out.write_line("ghul.compiler {compiler_version}")
+        else
+            Std.out.write_line("ghul.compiler not installed")
+        fi
+
+        return 0
+    si
+
+    cmd_compile(rest: Collections.List[string], no_cache: bool) -> int is
         if rest.count < 1 then
-            Std.error.write_line("usage: ghul compile <script.ghul>")
+            Std.error.write_line("usage: ghul compile [--no-cache] <script.ghul>")
             return 1
         fi
 
-        let script_path = rest[0]
+        let script_ref = rest[0]
 
-        if !File.exists(script_path) then
-            Std.error.write_line("ghul: no such file: {script_path}")
+        if !is_stdin_marker(script_ref) /\ !File.exists(script_ref) then
+            Std.error.write_line("ghul: no such file: {script_ref}")
             return 1
         fi
 
+        let source = resolve_source(script_ref)
         let tools_dir = tools_directory()
 
         if let compiler_version: string = ensure_compiler_installed(tools_dir, null, false) then
             let compiler_shim = "{tools_dir}/ghul-compiler"
-            let run_dir = cache_entry_dir(script_path, compiler_version)
+            let run_dir = cache_entry_dir_for_bytes(source.key_bytes, compiler_version)
 
-            if !ensure_compiled(compiler_shim, script_path, run_dir, tools_dir, compiler_version) then
+            if !ensure_compiled(compiler_shim, source.materialize, run_dir, tools_dir, compiler_version, no_cache) then
                 return 1
             fi
 
@@ -389,33 +510,34 @@ namespace Ghul.Cli is
         return 1
     si
 
-    cmd_run(rest: Collections.List[string], force: bool) -> int is
+    cmd_run(rest: Collections.List[string], force: bool, no_cache: bool) -> int is
         if rest.count < 1 then
             print_usage()
             return 1
         fi
 
-        let script_path = rest[0]
+        let script_ref = rest[0]
         let script_args = rest[1..<0]
 
-        if !File.exists(script_path) then
-            Std.error.write_line("ghul: no such file: {script_path}")
+        if !is_stdin_marker(script_ref) /\ !File.exists(script_ref) then
+            Std.error.write_line("ghul: no such file: {script_ref}")
             return 1
         fi
 
-        if !force /\ !is_runnable_by_default(script_path) then
+        if !force /\ !is_stdin_marker(script_ref) /\ !is_runnable_by_default(script_ref) then
             Std.error.write_line(
-                "ghul: refusing to run {script_path}: not a .ghul file and not an executable script starting with '#!' - use 'ghul run {script_path}' to force it")
+                "ghul: refusing to run {script_ref}: not a .ghul file and not an executable script starting with '#!' - use 'ghul run {script_ref}' to force it")
             return 1
         fi
 
+        let source = resolve_source(script_ref)
         let tools_dir = tools_directory()
 
         if let compiler_version: string = ensure_compiler_installed(tools_dir, null, false) then
             let compiler_shim = "{tools_dir}/ghul-compiler"
-            let run_dir = cache_entry_dir(script_path, compiler_version)
+            let run_dir = cache_entry_dir_for_bytes(source.key_bytes, compiler_version)
 
-            if !ensure_compiled(compiler_shim, script_path, run_dir, tools_dir, compiler_version) then
+            if !ensure_compiled(compiler_shim, source.materialize, run_dir, tools_dir, compiler_version, no_cache) then
                 return 1
             fi
 
@@ -426,27 +548,69 @@ namespace Ghul.Cli is
         return 1
     si
 
+    // `--no-cache` is documented (and accepted) in two positions: before
+    // everything, or immediately after the `run`/`compile` verb. Strips it
+    // from the front of `list` if present, returning what's left alongside
+    // whether it was found.
+    strip_no_cache(list: Collections.List[string]) -> (items: Collections.List[string], no_cache: bool) is
+        if list.count > 0 /\ list[0] =~ "--no-cache" then
+            return (items = list[1..<0], no_cache = true)
+        fi
+
+        return (items = list, no_cache = false)
+    si
+
     entry(args: string[]) -> int is
         if args.count < 1 then
             print_usage()
             return 1
         fi
 
-        let verb = args[0]
-        let rest = args[1..<0]
+        let leading = strip_no_cache(args[0..<0])
+        let items mut = leading.items
+        let no_cache mut = leading.no_cache
+
+        if items.count < 1 then
+            print_usage()
+            return 1
+        fi
+
+        // `--` ends verb parsing, the same convention every other CLI uses,
+        // so a script literally named `run`, `compile`, `cache` or
+        // `install-compiler` can still be reached by the default verb.
+        if items[0] =~ "--" then
+            let after_dashdash = strip_no_cache(items[1..<0])
+
+            return cmd_run(after_dashdash.items, false, no_cache \/ after_dashdash.no_cache)
+        fi
+
+        let verb = items[0]
+        let rest = items[1..<0]
 
         if verb =~ "install-compiler" then
             return cmd_install_compiler(rest)
         fi
 
         if verb =~ "compile" then
-            return cmd_compile(rest)
+            let after_verb = strip_no_cache(rest)
+
+            return cmd_compile(after_verb.items, no_cache \/ after_verb.no_cache)
         fi
 
         if verb =~ "run" then
-            return cmd_run(rest, true)
+            let after_verb = strip_no_cache(rest)
+
+            return cmd_run(after_verb.items, true, no_cache \/ after_verb.no_cache)
         fi
 
-        return cmd_run(args[0..<0], false)
+        if verb =~ "cache" then
+            return cmd_cache(rest)
+        fi
+
+        if verb =~ "version" \/ verb =~ "--version" then
+            return cmd_version()
+        fi
+
+        return cmd_run(items, false, no_cache)
     si
 si
