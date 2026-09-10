@@ -26,10 +26,12 @@ ghul greet.ghul world
 ## Commands
 
 ```sh
-ghul <script> [args...]           # run, if it looks runnable (see below)
-ghul run <script> [args...]       # run unconditionally
-ghul compile <script.ghul>        # compile and print the path to the result
-ghul install-compiler [version]   # install (or update) ghul.compiler
+ghul [--no-cache] [--] <script> [args...]   # run, if it looks runnable (see below)
+ghul run [--no-cache] <script> [args...]    # run unconditionally
+ghul compile [--no-cache] <script.ghul>     # compile and print the path to the result
+ghul install-compiler [version]             # install (or update) ghul.compiler
+ghul cache clear                            # empty the compiled-script cache
+ghul version                                # print ghul's and ghul.compiler's versions
 ```
 
 With no verb, `ghul` only runs a file that looks like a script: one whose
@@ -37,7 +39,9 @@ name ends in `.ghul`, or one that is executable and starts with `#!` — the
 same file a shell would already agree to run directly. Anything else is
 refused, naming `ghul run` as the way to force it. `ghul run` runs the given
 file regardless, which is also what a `#!/usr/bin/env ghul` shebang line
-invokes.
+invokes. A file that happens to be named `run`, `compile`, `cache` or
+`install-compiler` is reached with `ghul -- <name>`, the same `--`
+convention every other CLI uses to end option/verb parsing.
 
 `ghul compile` compiles the script (installing the compiler first if
 needed) and prints the path to the compiled binary on stdout, with nothing
@@ -48,6 +52,20 @@ to capture with `$(...)`. It never runs the result.
 tool directory ahead of time, optionally pinned to a given version, so the
 first real script run doesn't pay for it. Given no version it installs (or
 updates to) the latest; given one already installed, it's a no-op.
+
+A `-` in place of `<script>` reads the source from standard input instead
+of a file, for both running and compiling:
+
+```sh
+echo 'entry() is IO.Std.write_line("hi"); si' | ghul -
+curl -fsSL https://example.com/greet.ghul | ghul -
+```
+
+`--no-cache`, given before the script (or before the verb, for `run` and
+`compile`), forces a fresh compile even if a matching cache entry already
+exists — useful if a cached result ever looks wrong and a rebuild is wanted
+without reaching for `ghul cache clear` first. `ghul cache clear` empties
+the whole compiled-script cache outright.
 
 ## Installing
 

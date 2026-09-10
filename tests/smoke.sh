@@ -54,16 +54,31 @@ if dotnet "$cli" "$scratch/does-not-exist.ghul" 2>/dev/null; then
     exit 1
 fi
 
+# Deliberately distinct content from every other script in this file: a
+# copy of already-compiled content would let a cache hit paper over a
+# broken compile path for the extensionless file itself, which is exactly
+# how a prior version of this feature shipped broken - ghul.compiler's own
+# argument parser only recognises a `.ghul` path, so an unrecognised
+# extensionless argument was silently ignored and failed with "no entry
+# point declared", but that never showed up here because this test reused
+# $script's content and so always hit an already-compiled cache entry.
 echo "smoke: extensionless executable script with a shebang runs by default..." >&2
 noext="$scratch/greet-shebang"
-cp "$script" "$noext"
+cat > "$noext" <<'GHUL'
+#!/usr/bin/env ghul
+
+entry(args: string[]) is
+    IO.Std.write_line("shebang, {if args.count > 0 then args[0] else "world" fi}");
+si
+GHUL
 chmod +x "$noext"
 out="$(dotnet "$cli" "$noext" no-extension)"
-check "$out" "hello, no-extension" "extensionless shebang script output"
+check "$out" "shebang, no-extension" "extensionless shebang script output"
 
 echo "smoke: extensionless non-executable file is refused without 'run'..." >&2
 plain="$scratch/greet-plain"
-cp "$script" "$plain"
+cp "$noext" "$plain"
+chmod -x "$plain"
 if dotnet "$cli" "$plain" 2>/dev/null; then
     echo "smoke: expected a non-zero exit for a non-executable, extensionless file" >&2
     exit 1
@@ -71,7 +86,7 @@ fi
 
 echo "smoke: 'ghul run' forces the same file to run..." >&2
 out="$(dotnet "$cli" run "$plain" forced)"
-check "$out" "hello, forced" "'ghul run' output"
+check "$out" "shebang, forced" "'ghul run' output"
 
 echo "smoke: 'ghul compile' produces a cached binary and prints only its path..." >&2
 compile_script="$scratch/compile-me.ghul"
@@ -94,6 +109,70 @@ if [[ "$out" != *"already installed"* ]]; then
     echo "smoke: expected 'ghul install-compiler' to report the compiler already installed, got: $out" >&2
     exit 1
 fi
+
+echo "smoke: 'ghul version' reports both versions on stdout..." >&2
+out="$(dotnet "$cli" version)"
+if [[ "$out" != ghul\ * ]] || [[ "$out" != *ghul.compiler* ]]; then
+    echo "smoke: expected 'ghul version' to report a ghul version and a ghul.compiler version, got: $out" >&2
+    exit 1
+fi
+
+echo "smoke: a lone '-' runs a script read from stdin..." >&2
+out="$(echo 'entry() is IO.Std.write_line("from stdin"); si' | dotnet "$cli" -)"
+check "$out" "from stdin" "stdin script output"
+
+echo "smoke: 'ghul compile -' compiles stdin and prints only its path..." >&2
+compiled_from_stdin="$(echo 'entry() is IO.Std.write_line("compiled from stdin"); si' | dotnet "$cli" compile -)"
+if [[ ! -f "$compiled_from_stdin" ]]; then
+    echo "smoke: 'ghul compile -' printed '$compiled_from_stdin', which is not a file" >&2
+    exit 1
+fi
+out="$(dotnet "$compiled_from_stdin")"
+check "$out" "compiled from stdin" "output of the binary 'ghul compile -' produced"
+
+echo "smoke: '--' lets a file literally named 'run' be run by default..." >&2
+literal_run="$scratch/run"
+cat > "$literal_run" <<'GHUL'
+#!/usr/bin/env ghul
+
+entry() is
+    IO.Std.write_line("literally named run");
+si
+GHUL
+chmod +x "$literal_run"
+out="$(cd "$scratch" && dotnet "$cli" -- run)"
+check "$out" "literally named run" "'ghul -- run' output"
+
+echo "smoke: '--no-cache' recompiles instead of serving a stale-looking entry..." >&2
+no_cache_script="$scratch/no-cache-me.ghul"
+cat > "$no_cache_script" <<'GHUL'
+entry() is
+    IO.Std.write_line("first version");
+si
+GHUL
+out="$(dotnet "$cli" "$no_cache_script")"
+check "$out" "first version" "first --no-cache run output"
+cat > "$no_cache_script" <<'GHUL'
+entry() is
+    IO.Std.write_line("second version");
+si
+GHUL
+out="$(dotnet "$cli" --no-cache "$no_cache_script")"
+check "$out" "second version" "second --no-cache run output"
+
+echo "smoke: 'ghul cache clear' empties the script cache..." >&2
+cache_root="$HOME/.cache/ghul-cli/scripts"
+if [[ ! -d "$cache_root" ]]; then
+    echo "smoke: expected a populated cache at $cache_root before clearing" >&2
+    exit 1
+fi
+dotnet "$cli" cache clear >&2
+if [[ -d "$cache_root" ]]; then
+    echo "smoke: expected $cache_root to be gone after 'ghul cache clear'" >&2
+    exit 1
+fi
+out="$(dotnet "$cli" "$script" world)"
+check "$out" "hello, world" "run after 'ghul cache clear'"
 
 echo "smoke: concurrent runs of a brand-new script all succeed..." >&2
 concurrent_script="$scratch/concurrent.ghul"

@@ -16,21 +16,38 @@ Not loaded by local Claude Code; only the cloud reviewer reads this.
 options and does not try to resolve any references the compiler wouldn't
 already discover on its own.
 
-Four commands: `ghul <script> [args...]` runs the script if it looks
+Six commands: `ghul <script> [args...]` runs the script if it looks
 runnable (ends in `.ghul`, or is executable and starts with `#!`) and
 otherwise refuses, naming `ghul run` as the way to force it; `ghul run
 <script> [args...]` runs it unconditionally; `ghul compile <script.ghul>`
 compiles it and prints the resulting binary's path on stdout, without
 running it; `ghul install-compiler [version]` installs or updates
-`ghul.compiler` ahead of time. Running (or compiling) a script: ensures
-`ghul.compiler` is installed into a private tool directory it manages
-(`~/.local/share/ghul-cli/tools`), compiles the script if a cached build
-for that exact script content and compiler version doesn't already exist
-under `~/.cache/ghul-cli/scripts`, and then, unless the command was
-`compile`, runs the compiled result, passing through any remaining
-command-line arguments. Both the install and the compile-into-a-cache-entry
-steps are guarded by a file lock, so concurrent invocations of `ghul`
-serialise on the same work rather than one clobbering another's result.
+`ghul.compiler` ahead of time; `ghul cache clear` deletes the whole
+compiled-script cache; `ghul version` prints `ghul`'s own version and the
+installed `ghul.compiler` version. A `-` in place of `<script>` reads the
+source from stdin instead, for both `run` and `compile`. A leading
+`--no-cache` forces a fresh compile regardless of what's already cached. A
+leading `--` ends verb parsing, so a file literally named `run`, `compile`,
+`cache` or `install-compiler` is still reachable as a script (`ghul --
+run`).
+
+Running (or compiling) a script: ensures `ghul.compiler` is installed into
+a private tool directory it manages (`~/.local/share/ghul-cli/tools`),
+compiles the script if a cached build for that exact script content and
+compiler version doesn't already exist under `~/.cache/ghul-cli/scripts`,
+and then, unless the command was `compile`, runs the compiled result,
+passing through any remaining command-line arguments. Both the install and
+the compile-into-a-cache-entry steps are guarded by a file lock, so
+concurrent invocations of `ghul` serialise on the same work rather than one
+clobbering another's result. A script reached without a `.ghul` extension —
+the stdin marker, or an executable file with a `#!` line — has its content
+copied into a `.ghul`-suffixed file before being handed to the compiler,
+since the compiler's own argument parser only recognises that extension; a
+change here that skips this step for some new source kind will compile
+successfully in testing whenever the test's content happens to already be
+cached under a `.ghul`-named twin, and only fail on genuinely fresh
+content — see the `resolve_source__materializes_a_dot_ghul_file_for_an_extensionless_script`
+unit test.
 
 ## What to watch for here
 
@@ -69,10 +86,10 @@ serialise on the same work rather than one clobbering another's result.
 ## Versioning
 
 Major means a change to the command's observable behaviour that a caller
-could depend on: the meaning of an existing verb, the exit code contract
-(the compiled script's own exit code is returned unchanged from `run` and
-the default verb), removing the auto-install/auto-cache behaviour, or
-narrowing which files the default verb accepts. Minor means additions —
-new verbs, new flags, new pragma support once that lands, widening what the
-default verb accepts, anything else that doesn't change what already
-works.
+could depend on: the meaning of an existing verb or flag, the exit code
+contract (the compiled script's own exit code is returned unchanged from
+`run` and the default verb), removing the auto-install/auto-cache
+behaviour, or narrowing which files the default verb accepts. Minor means
+additions — new verbs, new flags, new pragma support once that lands,
+widening what the default verb accepts, anything else that doesn't change
+what already works.

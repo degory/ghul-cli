@@ -113,5 +113,61 @@ namespace Ghul.Cli.Tests is
 
             assert !Ghul.Cli.is_runnable_by_default(path);
         si
+
+        @Test()
+        is_stdin_marker__accepts_a_lone_dash() is
+            assert Ghul.Cli.is_stdin_marker("-");
+        si
+
+        @Test()
+        is_stdin_marker__rejects_an_ordinary_path() is
+            assert !Ghul.Cli.is_stdin_marker("./-");
+            assert !Ghul.Cli.is_stdin_marker("script.ghul");
+        si
+
+        // Regression for a bug in the extensionless-script feature itself:
+        // ghul.compiler's own argument parser only recognises a `.ghul`
+        // path, so handing it the original extensionless file silently did
+        // nothing - "ignoring unrecognized argument" - and failed with "no
+        // entry point declared". Caught only because a later manual test
+        // used content that had never been compiled before; the smoke test
+        // that exercised this path used identical content to an
+        // already-compiled `.ghul` file, so a cache hit masked it.
+        @Test()
+        resolve_source__materializes_a_dot_ghul_file_for_an_extensionless_script() is
+            _with_temp_script("#!/usr/bin/env ghul\nentry() is si", path is
+                let source = Ghul.Cli.resolve_source(path);
+                let scratch_dir = IO.Path.combine(IO.Path.get_temp_path(), System.Guid.new_guid().to_string());
+
+                try
+                    let materialized = source.materialize(scratch_dir);
+
+                    assert materialized.ends_with(".ghul") else "extensionless scripts must be materialized under a .ghul name";
+                    assert IO.File.exists(materialized);
+                finally
+                    if IO.Directory.exists(scratch_dir) then
+                        IO.Directory.delete(scratch_dir, true);
+                    fi
+                yrt
+            si);
+        si
+
+        @Test()
+        resolve_source__leaves_a_dot_ghul_path_unchanged() is
+            _with_temp_script("entry() is si", path is
+                let ghul_path = "{path}.ghul";
+
+                IO.File.copy(path, ghul_path, true);
+
+                try
+                    let source = Ghul.Cli.resolve_source(ghul_path);
+                    let materialized = source.materialize("/nonexistent-scratch-dir-never-used");
+
+                    assert materialized =~ ghul_path;
+                finally
+                    IO.File.delete(ghul_path);
+                yrt
+            si);
+        si
     si
 si
