@@ -13,9 +13,9 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
 - `src/main.ghul` — the whole tool. Strips a leading `--no-cache`, then
   dispatches on the next argument: `--` skips straight to the default
   (unforced) run so a file literally named `run`/`compile`/`cache`/
-  `install-compiler` can still be reached; otherwise a verb (`run`,
-  `compile`, `install-compiler`, `cache`, `version`) or, with none of
-  those, the argument is treated as a script to run only if it looks
+  `install-compiler`/`version` can still be reached; otherwise a verb
+  (`run`, `compile`, `install-compiler`, `cache`, `version`) or, with none
+  of those, the argument is treated as a script to run only if it looks
   runnable — ends in `.ghul`, or is executable and starts with `#!` —
   refusing anything else unless `run` is given explicitly. `resolve_source`
   turns a script reference (a real path, or the `-` stdin marker) into the

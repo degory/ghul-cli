@@ -39,9 +39,9 @@ name ends in `.ghul`, or one that is executable and starts with `#!` — the
 same file a shell would already agree to run directly. Anything else is
 refused, naming `ghul run` as the way to force it. `ghul run` runs the given
 file regardless, which is also what a `#!/usr/bin/env ghul` shebang line
-invokes. A file that happens to be named `run`, `compile`, `cache` or
-`install-compiler` is reached with `ghul -- <name>`, the same `--`
-convention every other CLI uses to end option/verb parsing.
+invokes. A file that happens to be named `run`, `compile`, `cache`,
+`install-compiler` or `version` is reached with `ghul -- <name>`, the same
+`--` convention every other CLI uses to end option/verb parsing.
 
 `ghul compile` compiles the script (installing the compiler first if
 needed) and prints the path to the compiled binary on stdout, with nothing

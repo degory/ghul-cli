@@ -28,8 +28,8 @@ installed `ghul.compiler` version. A `-` in place of `<script>` reads the
 source from stdin instead, for both `run` and `compile`. A leading
 `--no-cache` forces a fresh compile regardless of what's already cached. A
 leading `--` ends verb parsing, so a file literally named `run`, `compile`,
-`cache` or `install-compiler` is still reachable as a script (`ghul --
-run`).
+`cache`, `install-compiler` or `version` is still reachable as a script
+(`ghul -- run`).
 
 Running (or compiling) a script: ensures `ghul.compiler` is installed into
 a private tool directory it manages (`~/.local/share/ghul-cli/tools`),

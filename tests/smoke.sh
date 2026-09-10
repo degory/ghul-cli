@@ -143,6 +143,19 @@ chmod +x "$literal_run"
 out="$(cd "$scratch" && dotnet "$cli" -- run)"
 check "$out" "literally named run" "'ghul -- run' output"
 
+echo "smoke: '--' also lets a file literally named 'version' be run by default..." >&2
+literal_version="$scratch/version"
+cat > "$literal_version" <<'GHUL'
+#!/usr/bin/env ghul
+
+entry() is
+    IO.Std.write_line("literally named version");
+si
+GHUL
+chmod +x "$literal_version"
+out="$(cd "$scratch" && dotnet "$cli" -- version)"
+check "$out" "literally named version" "'ghul -- version' output"
+
 echo "smoke: '--no-cache' recompiles instead of serving a stale-looking entry..." >&2
 no_cache_script="$scratch/no-cache-me.ghul"
 cat > "$no_cache_script" <<'GHUL'
