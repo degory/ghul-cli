@@ -57,5 +57,61 @@ namespace Ghul.Cli.Tests is
 
             assert !Ghul.Cli.installed_compiler_version(tools_dir)?;
         si
+
+        _make_executable(path: string) is
+            IO.File.set_unix_file_mode(
+                path,
+                cast IO.UnixFileMode(
+                    cast int(IO.UnixFileMode.USER_READ) |
+                    cast int(IO.UnixFileMode.USER_WRITE) |
+                    cast int(IO.UnixFileMode.USER_EXECUTE)));
+        si
+
+        @Test()
+        is_runnable_by_default__accepts_a_dot_ghul_file_that_is_not_executable() is
+            _with_temp_script("entry() is si", path is
+                let ghul_path = "{path}.ghul";
+
+                IO.File.copy(path, ghul_path, true);
+
+                try
+                    assert Ghul.Cli.is_runnable_by_default(ghul_path);
+                finally
+                    IO.File.delete(ghul_path);
+                yrt
+            si);
+        si
+
+        @Test()
+        is_runnable_by_default__accepts_an_executable_file_starting_with_a_shebang() is
+            _with_temp_script("#!/usr/bin/env ghul\nentry() is si", path is
+                _make_executable(path);
+
+                assert Ghul.Cli.is_runnable_by_default(path);
+            si);
+        si
+
+        @Test()
+        is_runnable_by_default__rejects_a_non_executable_file_with_no_dot_ghul_extension() is
+            _with_temp_script("#!/usr/bin/env ghul\nentry() is si", path is
+                assert !Ghul.Cli.is_runnable_by_default(path);
+            si);
+        si
+
+        @Test()
+        is_runnable_by_default__rejects_an_executable_file_with_no_shebang() is
+            _with_temp_script("entry() is si", path is
+                _make_executable(path);
+
+                assert !Ghul.Cli.is_runnable_by_default(path);
+            si);
+        si
+
+        @Test()
+        is_runnable_by_default__rejects_a_missing_file() is
+            let path = IO.Path.combine(IO.Path.get_temp_path(), System.Guid.new_guid().to_string());
+
+            assert !Ghul.Cli.is_runnable_by_default(path);
+        si
     si
 si
