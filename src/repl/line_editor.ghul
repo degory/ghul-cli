@@ -255,12 +255,12 @@ namespace Ghul.Cli.Repl is
         _redraw(prompt: string, buffer: LINE_BUFFER) is
             let text = buffer.text
 
-            Std.write("\r{prompt}{text}[K")
+            Std.write("\r{prompt}{text}\u001B[K")
 
             let back = text.length - buffer.cursor
 
             if back > 0 then
-                Std.write("[{back}D")
+                Std.write("\u001B[{back}D")
             fi
         si
     si
