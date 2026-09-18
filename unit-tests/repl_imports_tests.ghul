@@ -1,0 +1,229 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+
+    use Ghul.Repl.CELL_REPLY
+    use Ghul.Repl.CELL_REQUEST
+    use Ghul.Repl.LOADED_CELL
+    use Ghul.Repl.SESSION
+    use Ghul.Repl.USE_DIRECTIVES
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    @TestClass()
+    class REPL_IMPORTS_TESTS is
+        init() is si
+
+        _accept(session: SESSION, source: string, names: Collections.List[string]) -> CELL_REQUEST is
+            let request = session.prepare(source)
+
+            session.accept(request, CELL_REPLY(LIST[string](), LOADED_CELL(names, null)));
+
+            return request
+        si
+
+        _reject(session: SESSION, source: string) is
+            let request = session.prepare(source)
+
+            session.accept(request, CELL_REPLY(LIST[string](["cell1.ghul: 1,1..1,2: error: no"]), null));
+        si
+
+        _nothing() -> Collections.List[string] => LIST[string]()
+
+        @Test()
+        prelude__begins_with_use_default() is
+            assert SESSION().prelude() =~ "use default\n";
+        si
+
+        @Test()
+        prelude__leaves_out_use_default_when_asked_to() is
+            assert SESSION(false).prelude() =~ "";
+        si
+
+        @Test()
+        prelude__puts_use_default_before_the_generated_imports() is
+            let session = SESSION()
+
+            _accept(session, "let x = 1\n", LIST[string](["x"]));
+
+            assert session.prelude() =~ "use default\nuse cell1.x\n";
+        si
+
+        // Written by the user, `use default` is theirs, so it is not
+        // written a second time above it.
+        @Test()
+        prepare__leaves_use_default_to_a_cell_that_writes_it() is
+            let request = SESSION().prepare("use default\nwrite_line(1)\n")
+
+            assert request.source =~ "use default\nwrite_line(1)\n";
+            assert request.prelude_line_count == 0;
+        si
+
+        @Test()
+        accept__carries_a_cells_imports_to_later_cells() is
+            let session = SESSION(false)
+
+            _accept(session, "use IO.Std.write_line\nwrite_line(1)\n", _nothing());
+
+            assert session.prelude() =~ "use IO.Std.write_line\n";
+        si
+
+        // A cell of nothing but imports is an ordinary cell, and its
+        // imports are carried like any other's.
+        @Test()
+        accept__carries_the_imports_of_a_cell_that_is_only_imports() is
+            let session = SESSION(false)
+
+            _accept(session, "use IO.Path.combine\nuse Collections.*\n", _nothing());
+
+            assert session.prelude() =~ "use IO.Path.combine\nuse Collections.*\n";
+        si
+
+        @Test()
+        accept__carries_nothing_from_a_cell_that_failed() is
+            let session = SESSION(false)
+
+            _reject(session, "use IO.Path.combine\n");
+
+            assert session.prelude() =~ "";
+        si
+
+        @Test()
+        accept__carries_an_import_once_however_often_it_is_written() is
+            let session = SESSION(false)
+
+            _accept(session, "use IO.Std.write_line\n", _nothing());
+            _accept(session, "use  IO.Std.write_line \n", _nothing());
+
+            assert session.prelude() =~ "use IO.Std.write_line\n";
+        si
+
+        // The cell's own line is the one compiled, so its diagnostics
+        // point where the user wrote it and the two are not a duplicate.
+        @Test()
+        prepare__leaves_out_an_import_the_cell_writes_again() is
+            let session = SESSION(false)
+
+            _accept(session, "use IO.Std.write_line\n", _nothing());
+
+            let request = session.prepare("use IO.Std.write_line\nwrite_line(2)\n")
+
+            assert request.source =~ "use IO.Std.write_line\nwrite_line(2)\n";
+            assert request.prelude_line_count == 0;
+        si
+
+        // Two imports of one name are a duplicate even when they name
+        // different things, so the cell's own import displaces the
+        // generated one.
+        @Test()
+        prepare__leaves_out_an_import_of_a_name_the_cell_imports_itself() is
+            let session = SESSION(false)
+
+            _accept(session, "combine(a: string, b: string) -> string => a\n", LIST[string](["combine"]));
+
+            let request = session.prepare("use IO.Path.combine\ncombine(\"a\", \"b\")\n")
+
+            assert request.prelude_line_count == 0;
+        si
+
+        @Test()
+        accept__lets_a_later_definition_replace_a_carried_import() is
+            let session = SESSION(false)
+
+            _accept(session, "use IO.Path.combine\n", _nothing());
+            _accept(session, "combine(a: string, b: string) -> string => a\n", LIST[string](["combine"]));
+
+            assert session.prelude() =~ "use cell2.combine\n";
+        si
+
+        @Test()
+        accept__lets_a_later_import_replace_a_definition() is
+            let session = SESSION(false)
+
+            _accept(session, "combine(a: string, b: string) -> string => a\n", LIST[string](["combine"]));
+            _accept(session, "use IO.Path.combine\n", _nothing());
+
+            assert session.prelude() =~ "use IO.Path.combine\n";
+        si
+
+        // A reset is a new session, which starts with nothing carried.
+        @Test()
+        a_new_session__carries_no_imports() is
+            let session = SESSION()
+
+            _accept(session, "use IO.Path.combine\n", _nothing());
+
+            assert SESSION().prelude() =~ "use default\n";
+        si
+
+        // The line count moves with the prelude, so a diagnostic in a
+        // cell that left an import out still lands on the user's line.
+        @Test()
+        accept__moves_diagnostics_back_by_this_cells_own_prelude() is
+            let session = SESSION(false)
+
+            _accept(session, "use IO.Path.combine\n", _nothing());
+            _accept(session, "let x = 1\n", LIST[string](["x"]));
+
+            let request = session.prepare("write_line(y)\n")
+
+            assert request.prelude_line_count == 2;
+
+            let outcome =
+                session.accept(
+                    request,
+                    CELL_REPLY(LIST[string](["cell3.ghul: 3,12..3,13: error: symbol not found: y"]), null))
+
+            assert outcome.diagnostics[0] =~ "cell3.ghul: 1,12..1,13: error: symbol not found: y";
+        si
+    si
+
+    @TestClass()
+    class USE_DIRECTIVES_TESTS is
+        init() is si
+
+        @Test()
+        leading__finds_the_imports_a_cell_opens_with() is
+            let found = USE_DIRECTIVES.leading("use A.b\n\n// note\nuse C.*\nlet x = 1\nuse D.e\n")
+
+            assert found.count == 2;
+            assert found[0] =~ "use A.b";
+            assert found[1] =~ "use C.*";
+        si
+
+        @Test()
+        leading__splits_imports_written_on_one_line() is
+            let found = USE_DIRECTIVES.leading("use A.b; use C.d; write_line(1)\nuse E.f\n")
+
+            assert found.count == 2;
+            assert found[1] =~ "use C.d";
+        si
+
+        @Test()
+        leading__does_not_take_a_name_that_starts_with_use() is
+            assert USE_DIRECTIVES.leading("user_count = 1\n").count == 0;
+        si
+
+        @Test()
+        normalise__collapses_whitespace() is
+            assert USE_DIRECTIVES.normalise("use   IO.Std.write_line ") =~ "use IO.Std.write_line";
+        si
+
+        @Test()
+        bound_name__is_the_last_segment() is
+            assert USE_DIRECTIVES.bound_name("use IO.Std.write_line") =~ "write_line";
+        si
+
+        @Test()
+        bound_name__is_the_alias_for_an_alias() is
+            assert USE_DIRECTIVES.bound_name("use Console = IO.Std") =~ "Console";
+            assert USE_DIRECTIVES.bound_name("use Pair[A, B] = (first: A, second: B)") =~ "Pair";
+        si
+
+        @Test()
+        bound_name__is_null_for_an_import_of_many_names() is
+            assert !USE_DIRECTIVES.bound_name("use Collections.*")?;
+            assert !USE_DIRECTIVES.bound_name("use default")?;
+        si
+    si
+si

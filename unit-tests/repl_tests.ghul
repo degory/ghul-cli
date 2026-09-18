@@ -32,12 +32,12 @@ namespace Ghul.Cli.Tests is
 
         @Test()
         prelude__is_empty_for_the_first_cell() is
-            assert SESSION().prelude() =~ "";
+            assert SESSION(false).prelude() =~ "";
         si
 
         @Test()
         prepare__names_each_cell_after_its_position_in_the_session() is
-            let session = SESSION()
+            let session = SESSION(false)
 
             assert session.prepare("let x = 1\n").name =~ "cell1";
 
@@ -48,7 +48,7 @@ namespace Ghul.Cli.Tests is
 
         @Test()
         prelude__imports_every_name_an_accepted_cell_exported() is
-            let session = SESSION()
+            let session = SESSION(false)
 
             _accept(session, "let x = 1\n", LIST[string](["x", "inc"]));
 
@@ -59,7 +59,7 @@ namespace Ghul.Cli.Tests is
         // take effect for every later cell.
         @Test()
         prelude__names_the_newest_cell_that_defined_each_name() is
-            let session = SESSION()
+            let session = SESSION(false)
 
             _accept(session, "let x = 1\n", LIST[string](["x", "inc"]));
             _accept(session, "let x = 2\n", LIST[string](["x"]));
@@ -69,7 +69,7 @@ namespace Ghul.Cli.Tests is
 
         @Test()
         prepare__prepends_the_prelude_to_what_the_user_wrote() is
-            let session = SESSION()
+            let session = SESSION(false)
 
             _accept(session, "let x = 1\n", LIST[string](["x"]));
 
@@ -80,7 +80,7 @@ namespace Ghul.Cli.Tests is
         // the user wrote rather than the ones the session generated.
         @Test()
         prepare__counts_the_prelude_lines_it_generated() is
-            let session = SESSION()
+            let session = SESSION(false)
 
             assert session.prepare("let x = 1\n").prelude_line_count == 0;
 
@@ -91,7 +91,7 @@ namespace Ghul.Cli.Tests is
 
         @Test()
         prepare__names_the_earlier_cells_a_submission_references() is
-            let session = SESSION()
+            let session = SESSION(false)
 
             _accept(session, "let x = 1\n", LIST[string](["x"]));
             _accept(session, "let y = 2\n", LIST[string](["y"]));
@@ -107,7 +107,7 @@ namespace Ghul.Cli.Tests is
         // exports nothing and nothing later can import from it.
         @Test()
         accept__leaves_no_trace_of_a_cell_that_failed_to_compile() is
-            let session = SESSION()
+            let session = SESSION(false)
             let request = session.prepare("let x = 1\n")
 
             let outcome =
@@ -123,7 +123,7 @@ namespace Ghul.Cli.Tests is
 
         @Test()
         accept__keeps_a_cell_that_compiled() is
-            let session = SESSION()
+            let session = SESSION(false)
             let request = session.prepare("let x = 1\n")
 
             let outcome = session.accept(request, _compiled(LIST[string](["x"])))
@@ -143,7 +143,7 @@ namespace Ghul.Cli.Tests is
         // generated prelude comes back off them here.
         @Test()
         accept__moves_the_diagnostics_back_past_the_prelude() is
-            let session = SESSION()
+            let session = SESSION(false)
 
             _accept(session, "let x = 1\n", LIST[string](["x", "inc"]));
 
@@ -199,19 +199,49 @@ namespace Ghul.Cli.Tests is
     class REPL_SUBMISSION_END_TESTS is
         init() is si
 
+        _asking(is_unfinished: bool) -> SUBMISSION_END => SUBMISSION_END(text => is_unfinished)
+
         @Test()
-        is_complete__is_true_for_a_blank_line_after_something() is
-            assert SUBMISSION_END.is_complete(LIST[string](["let x = 1"]), "");
+        is_complete__is_true_for_a_line_the_compiler_calls_finished() is
+            assert _asking(false).is_complete(LIST[string](), "let x = 1");
         si
 
         @Test()
-        is_complete__is_false_for_a_blank_line_with_nothing_typed() is
-            assert !SUBMISSION_END.is_complete(LIST[string](), "");
+        is_complete__is_false_for_a_line_the_compiler_calls_unfinished() is
+            assert !_asking(true).is_complete(LIST[string](), "if x then");
+        si
+
+        // What is asked about is everything typed so far, the latest
+        // line included, as one text.
+        @Test()
+        is_complete__asks_about_every_line_typed_so_far() is
+            let asked = LIST[string]()
+            let end = SUBMISSION_END(text => (asked.add(text); false))
+
+            end.is_complete(LIST[string](["let y = x +"]), "    1");
+
+            assert asked.count == 1;
+            assert asked[0] =~ "let y = x +\n    1\n";
         si
 
         @Test()
-        is_complete__is_false_for_a_line_with_content() is
-            assert !SUBMISSION_END.is_complete(LIST[string](["let x = 1"]), "let y = 2");
+        is_complete__is_false_for_a_blank_line() is
+            assert !_asking(false).is_complete(LIST[string](["if x then"]), "");
+        si
+
+        @Test()
+        is_forced__is_true_for_a_blank_line_after_something() is
+            assert _asking(true).is_forced(LIST[string](["if x then"]), "");
+        si
+
+        @Test()
+        is_forced__is_false_for_a_blank_line_with_nothing_typed() is
+            assert !_asking(true).is_forced(LIST[string](), "");
+        si
+
+        @Test()
+        is_forced__is_false_for_a_line_with_content() is
+            assert !_asking(true).is_forced(LIST[string](["if x then"]), "fi");
         si
     si
 si

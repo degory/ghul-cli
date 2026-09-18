@@ -11,36 +11,55 @@ namespace Ghul.Cli.Repl is
         is_success: bool => assembly_path?
     si
 
-    // Compiles each cell by spawning the compiler, the way the rest of
-    // this tool does. About a second a cell, nearly all of it process
-    // start-up and building the metadata context over the reference
-    // pack, which is why a resident backend is what the latency target
-    // eventually needs.
-    class SPAWN_BACKEND(_compiler_shim: string, _session_directory: string, _runtime_assembly: string?) is
+    // How a session compiles its cells. Closing a backend lets go of
+    // whatever it holds, a compiler process in particular; the session
+    // does it when it ends, however it ends.
+    trait CompileBackend open is
+        compile(request: CELL_REQUEST) -> COMPILE_RESULT;
+        close();
+    si
+
+    // Where a session keeps its cells. Every backend writes a cell to the
+    // same place, so that one backend can take over from another part way
+    // through a session and still find the cells before it.
+    class SESSION_FILES(directory: string, _runtime_assembly: string?) is
         // The file a cell of the given name is written to. The compiler
         // records a reference under the referenced file's own name, so a
         // later cell's generated import only resolves while the assembly
         // and the submission share one name.
         assembly_path(name: string) -> string =>
-            Path.join([_session_directory, "{name}.dll"])
+            Path.join([directory, "{name}.dll"])
 
-        compile(request: CELL_REQUEST) -> COMPILE_RESULT is
-            Directory.create_directory(_session_directory)
+        // Made on first use, with the ghūl runtime copied in: a cell's
+        // assembly references the runtime, and the process that loads it
+        // has to be able to find it. Its own copy is whatever version this
+        // tool was built against, not the version the cells were compiled
+        // against.
+        prepare() is
+            Directory.create_directory(directory)
 
-            // A cell's assembly references the ghūl runtime, and the
-            // host process that loads it has to be able to find it: its
-            // own copy is whatever version this tool was built against,
-            // which is not the version the cells were compiled against.
             if let runtime = _runtime_assembly /\ File.exists(runtime) then
-                let beside_cells = Path.join([_session_directory, Path.get_file_name(runtime)!])
+                let beside_cells = Path.join([directory, Path.get_file_name(runtime)!])
 
                 if !File.exists(beside_cells) then
                     File.copy(runtime, beside_cells, false)
                 fi
             fi
+        si
+    si
 
-            let source_path = Path.join([_session_directory, "{request.name}.ghul"])
-            let output_path = assembly_path(request.name)
+    // Compiles each cell by spawning the compiler, the way the rest of
+    // this tool does. About a second a cell, nearly all of it process
+    // start-up and building the metadata context over the reference
+    // pack.
+    class SPAWN_BACKEND(_compiler_shim: string, _files: SESSION_FILES): CompileBackend is
+        close() is si
+
+        compile(request: CELL_REQUEST) -> COMPILE_RESULT is
+            _files.prepare()
+
+            let source_path = Path.join([_files.directory, "{request.name}.ghul"])
+            let output_path = _files.assembly_path(request.name)
 
             File.write_all_text(source_path, request.source)
 
@@ -50,7 +69,7 @@ namespace Ghul.Cli.Repl is
             start_info.use_shell_execute = false
             start_info.redirect_standard_output = true
             start_info.redirect_standard_error = true
-            start_info.working_directory = _session_directory
+            start_info.working_directory = _files.directory
 
             start_info.argument_list.add("--library")
 
@@ -65,12 +84,14 @@ namespace Ghul.Cli.Repl is
             // without the framework's.
             for reference in request.references do
                 start_info.argument_list.add("--reference")
-                start_info.argument_list.add(assembly_path(reference))
+                start_info.argument_list.add(_files.assembly_path(reference))
             od
 
             start_info.argument_list.add("-o")
             start_info.argument_list.add(output_path)
-            start_info.argument_list.add(source_path)
+            // Named relative to the session directory, so diagnostics name
+            // the cell rather than where the session happens to keep it.
+            start_info.argument_list.add("{request.name}.ghul")
 
             let diagnostics = LIST[string]()
 

@@ -576,11 +576,12 @@ namespace Ghul.Cli is
         return Path.join([Path.get_temp_path(), "{REPL_SESSION_PREFIX}{unique}"])
     si
 
-    // The oldest compiler the session can be built on: `--reference`,
-    // which lets a cell see the cells before it without naming the
-    // framework's assemblies too, and `--submission`, which names the
-    // cell's namespace and answers with the value it ended on.
-    MINIMUM_REPL_COMPILER: string => "59.3.0"
+    // The oldest compiler the session can be built on: `--submission`,
+    // which names the cell's namespace and answers with the value it
+    // ended on, `--check-complete`, which says whether what has been
+    // typed is finished, and `--compile-server`, which keeps one compiler
+    // running for the session.
+    MINIMUM_REPL_COMPILER: string => "59.6.0"
 
     // Whether what is installed is old enough to be missing something
     // the session needs. A version that does not parse is left alone:
@@ -600,7 +601,37 @@ namespace Ghul.Cli is
         return installed < minimum
     si
 
-    cmd_repl() -> int is
+    // What `ghul repl` was asked for.
+    class REPL_OPTIONS(want_server: bool, want_default_use: bool) is
+        // Null when an argument is not one the session takes.
+        parse(args: Collections.List[string]) -> REPL_OPTIONS? static is
+            let want_server mut = true
+            let want_default_use mut = true
+
+            for argument in args do
+                case argument
+                when "--no-server" then
+                    want_server = false
+                when "--no-default-use" then
+                    want_default_use = false
+                else
+                    return null
+                esac
+            od
+
+            return REPL_OPTIONS(want_server, want_default_use)
+        si
+    si
+
+    cmd_repl(args: Collections.List[string]) -> int is
+        let options = REPL_OPTIONS.parse(args)
+
+        if !options? then
+            Std.error.write_line("usage: ghul repl [--no-server] [--no-default-use]")
+
+            return 1
+        fi
+
         let tools_dir = tools_directory()
 
         if let installed: string = installed_compiler_version(tools_dir) /\ is_too_old_for_repl(installed) then
@@ -614,22 +645,77 @@ namespace Ghul.Cli is
 
         if let compiler_version: string = ensure_compiler_installed(tools_dir, null, false) then
             let compiler_shim = "{tools_dir}/ghul-compiler"
-            let directory = session_directory()
 
             let runtime_assembly =
                 "{tools_dir}/.store/ghul.compiler/{compiler_version}/ghul.compiler/{compiler_version}/tools/net10.0/any/ghul-runtime.dll"
 
+            let checks = session_directory()
+
+            let make_session = () -> Repl.REPL_SESSION is
+                // A directory for each session, since a reset starts the
+                // cell numbering again and a new cell must not replace
+                // one an earlier session's compiler still holds.
+                let directory = session_directory()
+                let files = Repl.SESSION_FILES(directory, runtime_assembly)
+                let spawn = Repl.SPAWN_BACKEND(compiler_shim, files)
+
+                let backend: Repl.CompileBackend =
+                    if options.want_server then
+                        Repl.SERVER_BACKEND(
+                            start_compile_server(compiler_shim, files),
+                            spawn,
+                            files,
+                            (line: string) -> void => Std.error.write_line(line))
+                    else
+                        spawn
+                    fi
+
+                return Repl.REPL_SESSION(backend, directory, options.want_default_use)
+            si
+
+            let check = Repl.COMPLETENESS_CHECK(compiler_shim, checks)
+
             let terminal =
                 Repl.TERMINAL(
-                    () -> Repl.REPL_SESSION =>
-                        Repl.REPL_SESSION(
-                            Repl.SPAWN_BACKEND(compiler_shim, directory, runtime_assembly),
-                            directory))
+                    make_session,
+                    Repl.SUBMISSION_END(text => check.is_unfinished(text)),
+                    options.want_default_use)
 
-            return terminal.run()
+            return run_closing_on_signal(terminal)
         fi
 
         return 1
+    si
+
+    // The compile server also ends by itself once this process has gone
+    // and its input closes; closing it on a signal makes that immediate
+    // rather than whenever it next reads.
+    run_closing_on_signal(terminal: Repl.TERMINAL) -> int is
+        let on_signal = (context: System.Runtime.InteropServices.PosixSignalContext) -> void => terminal.close()
+
+        let use interrupt = System.Runtime.InteropServices.PosixSignalRegistration.create(
+            System.Runtime.InteropServices.PosixSignal.SIGINT, on_signal)
+
+        let use terminate = System.Runtime.InteropServices.PosixSignalRegistration.create(
+            System.Runtime.InteropServices.PosixSignal.SIGTERM, on_signal)
+
+        let use hang_up = System.Runtime.InteropServices.PosixSignalRegistration.create(
+            System.Runtime.InteropServices.PosixSignal.SIGHUP, on_signal)
+
+        return terminal.run()
+    si
+
+    // Started straight away, so it warms up while the first cell is being
+    // typed. Null when it cannot be started at all, which the backend
+    // reports once and then compiles without it.
+    start_compile_server(compiler_shim: string, files: Repl.SESSION_FILES) -> Repl.ServerConnection? is
+        try
+            files.prepare()
+
+            return Repl.SERVER_PROCESS(compiler_shim, files.directory)
+        catch e: System.Exception
+            return null
+        yrt
     si
 
     entry(args: string[]) -> int is
@@ -680,7 +766,7 @@ namespace Ghul.Cli is
         fi
 
         if verb =~ "repl" then
-            return cmd_repl()
+            return cmd_repl(rest)
         fi
 
         if verb =~ "version" \/ verb =~ "--version" then

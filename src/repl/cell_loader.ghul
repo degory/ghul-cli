@@ -50,15 +50,15 @@ namespace Ghul.Cli.Repl is
         si
     si
 
-    // The terminal's way of driving a session: compile by spawning the
-    // compiler, load what it wrote from disk, hand it to the session,
-    // and run it once it has been accepted.
-    class REPL_SESSION(_backend: SPAWN_BACKEND, _probe_directory: string?) is
+    // The terminal's way of driving a session: compile through the
+    // backend, load what it wrote from disk, hand it to the session, and
+    // run it once it has been accepted.
+    class REPL_SESSION(_backend: CompileBackend, _probe_directory: string?, _want_default_use: bool) is
         _session: SESSION
         _context: SESSION_LOAD_CONTEXT
 
         init(..) is
-            _session = SESSION()
+            _session = SESSION(_want_default_use)
             _context = SESSION_LOAD_CONTEXT(_probe_directory)
         si
 
@@ -82,6 +82,11 @@ namespace Ghul.Cli.Repl is
             let run = CELL_ENTRY.run(loaded)
 
             return SUBMIT_RESULT(true, outcome.diagnostics, run.value, run.error)
+        si
+
+        // Ends the session's compiler, if it keeps one running.
+        close() is
+            _backend.close()
         si
     si
 si

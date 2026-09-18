@@ -3,16 +3,31 @@ namespace Ghul.Cli.Repl is
     use Ghul.Repl.CELL_DISPLAY
     use IO.Std
 
-    // Whether the lines typed so far are a submission. A blank line ends
-    // one, which is a stand-in: answering it properly means asking the
-    // compiler whether the text is complete or merely unfinished, which
-    // is a mode it does not have yet. Kept in one place so that when it
-    // does, only this changes.
-    class SUBMISSION_END is
-        is_complete(lines: Collections.List[string], latest: string) -> bool static =>
+    // Whether the lines typed so far are a submission, asked of the
+    // compiler each time a line is entered. Text it calls unfinished - an
+    // open block, an open bracket, an operator with nothing after it -
+    // waits for another line; anything else is submitted, including text
+    // that can never be finished, so its errors are reported straight
+    // away rather than after a blank line. A blank line submits whatever
+    // there is regardless.
+    class SUBMISSION_END(_is_unfinished: (string) -> bool) is
+        // Whether a blank line was entered after something was typed,
+        // which submits what is there without asking.
+        is_forced(lines: Collections.List[string], latest: string) -> bool =>
             latest.trim().length == 0 /\ !_is_blank(lines)
 
-        _is_blank(lines: Collections.List[string]) -> bool static is
+        // Whether the lines with the latest one added make a submission.
+        is_complete(lines: Collections.List[string], latest: string) -> bool is
+            if latest.trim().length == 0 then
+                return false
+            fi
+
+            let text = "{lines |> Ghul.Pipes.cat([latest]) |> Ghul.Pipes.join("\n")}\n"
+
+            return !_is_unfinished(text)
+        si
+
+        _is_blank(lines: Collections.List[string]) -> bool is
             for line in lines do
                 if line.trim().length > 0 then
                     return false
@@ -23,21 +38,65 @@ namespace Ghul.Cli.Repl is
         si
     si
 
+    // `ghul-compiler --check-complete`, which answers `complete`,
+    // `incomplete` or `invalid` for a file. Anything it cannot answer -
+    // the compiler not starting, an answer it does not recognise - counts
+    // as finished, so the submission goes to the compiler and whatever is
+    // wrong is reported from there.
+    class COMPLETENESS_CHECK(_compiler_shim: string, _directory: string) is
+        is_unfinished(text: string) -> bool is
+            try
+                IO.Directory.create_directory(_directory)
+
+                let path = IO.Path.join([_directory, "check.ghul"])
+
+                IO.File.write_all_text(path, text)
+
+                let start_info = System.Diagnostics.ProcessStartInfo()
+
+                start_info.file_name = _compiler_shim
+                start_info.use_shell_execute = false
+                start_info.redirect_standard_output = true
+                start_info.redirect_standard_error = true
+                start_info.working_directory = _directory
+                start_info.argument_list.add("--check-complete")
+                start_info.argument_list.add(path)
+
+                if let process = System.Diagnostics.Process.start(start_info) then
+                    let out_task = process.standard_output.read_to_end_async()
+                    let err_task = process.standard_error.read_to_end_async()
+
+                    process.wait_for_exit()
+
+                    let _ = err_task.result
+
+                    return out_task.result.trim() =~ "incomplete"
+                fi
+            catch e: System.Exception
+            yrt
+
+            return false
+        si
+    si
+
     // The terminal front end: read a submission, hand it to the session,
     // report what happened. Everything it knows about a cell it learns
     // from SESSION, so a notebook or the playground can take its place
     // without any of this.
-    class TERMINAL(_make_session: () -> REPL_SESSION) is
+    class TERMINAL(_make_session: () -> REPL_SESSION, _submission_end: SUBMISSION_END, _want_default_use: bool) is
         _display: CELL_DISPLAY
+        _current: REPL_SESSION?
 
         init(..) is
             _display = CELL_DISPLAY()
         si
 
         run() -> int is
-            Std.write_line("ghūl repl. :help for commands, a blank line to submit.")
+            Std.write_line("ghūl repl. :help for commands.")
 
             let session mut = _make_session()
+
+            _current = session
             let lines = LIST[string]()
 
             loop: do
@@ -56,7 +115,9 @@ namespace Ghul.Cli.Repl is
                     when ":quit", ":q" then
                         break loop
                     when ":reset" then
+                        session.close()
                         session = _make_session()
+                        _current = session
 
                         Std.write_line("session reset")
                     when ":help" then
@@ -68,7 +129,13 @@ namespace Ghul.Cli.Repl is
                     continue
                 fi
 
-                if !SUBMISSION_END.is_complete(lines, line) then
+                if lines.count == 0 /\ line.trim().length == 0 then
+                    continue
+                fi
+
+                if _submission_end.is_complete(lines, line) then
+                    lines.add(line)
+                elif !_submission_end.is_forced(lines, line) then
                     lines.add(line)
 
                     continue
@@ -81,7 +148,15 @@ namespace Ghul.Cli.Repl is
                 _report(session.submit(source))
             od
 
+            session.close()
+
             return 0
+        si
+
+        // For a signal that ends the process: closes the session in use
+        // now, whatever the loop is doing.
+        close() is
+            _current?.close()
         si
 
         _report(result: SUBMIT_RESULT) is
@@ -109,8 +184,13 @@ namespace Ghul.Cli.Repl is
             Std.write_line(":reset   start a new session, forgetting every cell")
             Std.write_line(":quit    leave")
             Std.write_line("")
-            Std.write_line("a blank line submits what you have typed")
+            Std.write_line("a line that finishes what you have typed submits it; one that leaves")
+            Std.write_line("something open waits for more, and a blank line submits regardless")
             Std.write_line("what you end on is shown, unless you end on a statement")
+
+            if _want_default_use then
+                Std.write_line("the compiler's default imports (use default) are in force in every cell")
+            fi
         si
     si
 si
