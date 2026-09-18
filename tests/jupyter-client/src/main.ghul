@@ -167,9 +167,7 @@ namespace Ghul.Jupyter.Tests is
     _abandon(client: CLIENT) -> int is
         Std.write_line("abandoning the kernel:")
 
-        client.send("kernel_info_request", JSON.EMPTY_OBJECT)
-
-        if !client.reply()? then
+        if !client.wait_until_subscribed()? then
             Std.error.write_line("the kernel never answered, so there is nothing to abandon")
 
             return 1
@@ -197,11 +195,12 @@ namespace Ghul.Jupyter.Tests is
     _drive(client: CLIENT) -> int is
         Std.write_line("kernel_info:")
 
-        client.send("kernel_info_request", JSON.EMPTY_OBJECT)
+        // Asks until the subscription is live, which is also what proves
+        // the kernel brackets a request with status messages: without
+        // them this never returns.
+        let info = client.wait_until_subscribed()
 
-        let info = client.reply()
-
-        client.check(info?, "the kernel answers kernel_info_request")
+        client.check(info?, "the kernel answers kernel_info_request and publishes its status")
 
         if let reply = info then
             client.check(reply.msg_type =~ "kernel_info_reply", "the answer is a kernel_info_reply")
@@ -253,7 +252,7 @@ namespace Ghul.Jupyter.Tests is
 
         Std.write_line("shutdown:")
 
-        client.send("shutdown_request", "{{\"restart\": false}}")
+        let sent_shutdown = client.send("shutdown_request", "{{\"restart\": false}}")
 
         let shutdown = client.reply()
 
@@ -297,16 +296,16 @@ namespace Ghul.Jupyter.Tests is
                 (name = "stop_on_error", value = "false")
             ]))
 
-        client.send("execute_request", content)
+        let sent = client.send("execute_request", content)
 
-        let published = client.published_until_idle()
+        let published = client.published_until_idle(sent)
         let reply = client.reply()
 
         return EXECUTION(published, if let answer = reply then answer.content else JSON.EMPTY_OBJECT fi)
     si
 
     _is_complete(client: CLIENT, code: string, want: string) is
-        client.send(
+        let sent = client.send(
             "is_complete_request",
             JSON.object(LIST[(name: string, value: string)]([(name = "code", value = JSON.quote(code))])))
 
