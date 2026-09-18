@@ -76,7 +76,13 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
   `SESSION_LOAD_CONTEXT` resolves the cells' own ghūl runtime, which is
   not the one this tool was built against; `HOSTED_SESSION` is the three
   steps in order, running an accepted cell after it has joined the
-  session, and writes nothing to the console. `COMPLETENESS_CHECK` runs
+  session, and writes nothing to the console. `ANALYSIS_SESSION`
+  answers completion, hover and diagnostics for text not yet submitted from one
+  `ghul-compiler --analyse` per session, started on first use: the text is
+  analysed as `input.ghul` after the prelude it would be compiled with,
+  positions move past the prelude and back, and each accepted cell reaches
+  the analyser through the `add_references` request before its next
+  question. `COMPLETENESS_CHECK` runs
   `ghul-compiler --check-complete` (a spawn per call, a few hundred
   milliseconds) and answers complete, incomplete or invalid.
 - `src/repl/` — the terminal front end. `SUBMISSION_END` submits on any

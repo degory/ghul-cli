@@ -227,6 +227,30 @@ namespace Ghul.Repl is
             return SUBMIT_OUTCOME(false, diagnostics, null)
         si
 
+        // A diagnostic about a request's text that was analysed rather
+        // than compiled, as the user is shown it: `path` is the file the
+        // text was given under, and a location there is mapped past this
+        // request's prelude and named by its label, as one in an earlier
+        // cell is by that cell's. Null for a diagnostic about the
+        // generated prelude, which the user did not write.
+        for_request(request: CELL_REQUEST, path: string, diagnostic: CELL_DIAGNOSTIC) -> CELL_DIAGNOSTIC? is
+            let file = IO.Path.get_file_name_without_extension(path) ?? path
+
+            if let location = diagnostic.location then
+                if (IO.Path.get_file_name_without_extension(location.path) ?? "") =~ file /\
+                    location.start_line <= request.prelude_line_count
+                then
+                    return null
+                fi
+            fi
+
+            let spans = Collections.MAP[string, CELL_SPAN](_spans)
+
+            spans[file] = CELL_SPAN(request.index, request.prelude_line_count)
+
+            return DIAGNOSTIC_LINES.for_display(diagnostic, spans)
+        si
+
         _carry_imports(source: string) is
             for directive in USE_DIRECTIVES.leading(source) do
                 if let name = USE_DIRECTIVES.bound_name(directive) then

@@ -1,0 +1,495 @@
+namespace Ghul.Repl.Host is
+    use Collections.LIST
+    use Ghul.Repl.CELL_DIAGNOSTIC
+    use Ghul.Repl.CELL_REQUEST
+    use Ghul.Repl.SESSION
+    use System.Text.Json.JsonDocument
+    use System.Text.Json.JsonElement
+    use System.Text.Json.JsonValueKind
+
+    // A compiler in analysis mode, spoken to one line of JSON each way. A
+    // reply that does not come in time is null, after which the analyser
+    // is no use any more.
+    trait AnalyserConnection open is
+        // What the analyser says it can do, from the frame it opens with,
+        // or null when it does not say.
+        capabilities(timeout_ms: int) -> Collections.List[string]?;
+
+        // Sends one request and returns the first reply of the given kind,
+        // passing over any others the analyser writes before it.
+        exchange(line: string, kind: string, timeout_ms: int) -> string?;
+
+        close();
+    si
+
+    // `ghul-compiler --analyse`, started for one session. It analyses the
+    // text being typed as the submission it would be compiled as, and is
+    // kept for as long as the session: an idle analyser does not exit on
+    // its own.
+    class ANALYSER_PROCESS: AnalyserConnection is
+        _process: System.Diagnostics.Process
+        _next: Tasks.TASK[string?]?
+
+        init(compiler_shim: string, directory: string) is
+            let start_info = System.Diagnostics.ProcessStartInfo()
+
+            start_info.file_name = compiler_shim
+            start_info.argument_list.add("--analyse")
+            start_info.argument_list.add("--submission")
+            start_info.argument_list.add(ANALYSIS_SESSION.INPUT_NAME)
+            start_info.argument_list.add("--analysis-idle-timeout")
+            start_info.argument_list.add("0")
+            start_info.use_shell_execute = false
+            start_info.redirect_standard_input = true
+            start_info.redirect_standard_output = true
+            start_info.redirect_standard_error = true
+            start_info.working_directory = directory
+
+            let process = System.Diagnostics.Process.start(start_info)
+
+            if !process? then
+                throw System.Exception("the analyser did not start")
+            fi
+
+            _process = process
+
+            _process.begin_error_read_line()
+        si
+
+        capabilities(timeout_ms: int) -> Collections.List[string]? is
+            let deadline = System.Environment.tick_count64 + cast long(timeout_ms)
+
+            while let line = _read(deadline) do
+                if ANALYSER_FRAMES.kind_of(line) =~ "listen" then
+                    return ANALYSER_FRAMES.texts_of(line, "capabilities")
+                fi
+            od
+
+            return null
+        si
+
+        exchange(line: string, kind: string, timeout_ms: int) -> string? is
+            try
+                _process.standard_input.write(line)
+                _process.standard_input.write("\n")
+                _process.standard_input.flush()
+            catch e: IO.IOException
+                return null
+            yrt
+
+            let deadline = System.Environment.tick_count64 + cast long(timeout_ms)
+
+            while let reply = _read(deadline) do
+                if ANALYSER_FRAMES.kind_of(reply) =~ kind then
+                    return reply
+                fi
+            od
+
+            return null
+        si
+
+        // A read left unanswered by one deadline is kept for the next, so a
+        // late line is not lost.
+        _read(deadline: long) -> string? is
+            let next = _next ?? _process.standard_output.read_line_async()
+
+            _next = next
+
+            let remaining = deadline - System.Environment.tick_count64
+
+            try
+                if remaining > 0L /\ next.wait(cast int(remaining)) then
+                    _next = null
+
+                    return next.result
+                fi
+            catch e: System.AggregateException
+                _next = null
+            yrt
+
+            return null
+        si
+
+        close() is
+            try
+                if !_process.has_exited then
+                    _process.kill(true)
+                    _process.wait_for_exit(5000)
+                fi
+            catch e: System.Exception
+            yrt
+
+            _process.dispose()
+        si
+    si
+
+    // What completion offers at a position.
+    class ANALYSIS_COMPLETION(name: string, kind_label: string?, description: string);
+
+    // Completion, hover and diagnostics for text being typed into a
+    // session, in terms of that text: the text is analysed after the
+    // prelude it would be compiled with, positions are moved past the
+    // prelude going in and back coming out, and whatever the prelude
+    // itself contributes is left out.
+    //
+    // The analyser is started on first use. Each cell the session accepts
+    // is added to its references before it is next asked anything, so
+    // what the cell defined is visible to the text being typed. An
+    // installed compiler that cannot add references, or an analyser that
+    // stops answering, leaves the analysis unavailable for the rest of the
+    // session, which says so once; compiling and running carry on.
+    class ANALYSIS_SESSION(
+        _start: () -> AnalyserConnection?,
+        _session: SESSION,
+        _say: (string) -> void
+    ) is
+        _connection: AnalyserConnection?
+        _is_unavailable: bool
+        _pending: LIST[string]
+
+        init(..) is
+            _pending = LIST[string]()
+        si
+
+        // The name the text is analysed under. It is no cell's, so it
+        // never collides with an earlier cell's namespace.
+        INPUT_NAME: string static => "input"
+        INPUT_PATH: string static => "input.ghul"
+
+        STARTUP_TIMEOUT_MS: int static => 60000
+        REPLY_TIMEOUT_MS: int static => 60000
+
+        is_available: bool => !_is_unavailable
+
+        // An accepted cell's assembly, to be visible to what is typed next.
+        add(assembly_path: string) is
+            _pending.add(assembly_path)
+        si
+
+        // The text's diagnostics, as the user is shown them.
+        diagnostics(text: string) -> Collections.List[string]? is
+            let request = _session.prepare(text)
+            let frame = _edit(request)
+
+            if !frame? then
+                return null
+            fi
+
+            let result = LIST[string]()
+
+            for diagnostic in ANALYSER_FRAMES.diagnostics(frame, INPUT_PATH) do
+                if let shown = _session.for_request(request, INPUT_PATH, diagnostic) then
+                    result.add(shown.render())
+                fi
+            od
+
+            return result
+        si
+
+        // What could be written at a line and column of the text, from 1:
+        // the names that start with whatever part of a name the position
+        // follows.
+        complete(text: string, line: int, column: int) -> Collections.List[ANALYSIS_COMPLETION]? is
+            let request = _session.prepare(text)
+
+            if !_edit(request)? then
+                return null
+            fi
+
+            let reply = _ask(_position_request("complete", request, line, column, true), "completion")
+
+            if !reply? then
+                return null
+            fi
+
+            let prefix = name_before(text, line, column)
+            let result = LIST[ANALYSIS_COMPLETION]()
+
+            for item in ANALYSER_FRAMES.items(reply) do
+                if !is_machinery(item.name) /\ item.name.starts_with(prefix, System.StringComparison.ORDINAL) then
+                    result.add(item)
+                fi
+            od
+
+            return result
+        si
+
+        // The part of a name that ends at a line and column of some text,
+        // both from 1: what completion is completing.
+        name_before(text: string, line: int, column: int) -> string static is
+            let lines = text.split(['\n'])
+
+            if line < 1 \/ line > lines.count then
+                return ""
+            fi
+
+            let row = lines[line - 1]
+            let end = System.Math.min(System.Math.max(column - 1, 0), row.length)
+            let start mut = end
+
+            while start > 0 /\ (char.is_letter_or_digit(row[start - 1]) \/ row[start - 1] == '_') do
+                start = start - 1
+            od
+
+            return row.substring(start, end - start)
+        si
+
+        // What is at a line and column of the text, from 1, or null where
+        // there is nothing.
+        hover(text: string, line: int, column: int) -> string? is
+            let request = _session.prepare(text)
+
+            if !_edit(request)? then
+                return null
+            fi
+
+            let reply = _ask(_position_request("hover", request, line, column, false), "hover")
+
+            if !reply? then
+                return null
+            fi
+
+            let signature = ANALYSER_FRAMES.text_of(reply, "signature")
+
+            return if signature? /\ signature.length > 0 then signature else null fi
+        si
+
+        close() is
+            _connection?.close()
+            _connection = null
+        si
+
+        // Names the session's own arrangement puts in scope rather than
+        // anything the user wrote: each cell's namespace, the namespace the
+        // text is analysed in, and the entry its statements are wrapped in.
+        is_machinery(name: string) -> bool static is
+            if name =~ INPUT_NAME \/ name =~ "entry" \/ name =~ "_entry" then
+                return true
+            fi
+
+            let stem = Ghul.Repl.CELL_NAME_STEM
+            let index: int mut
+
+            return name.starts_with(stem) /\ int.try_parse(name.substring(stem.length), index ref)
+        si
+
+        _edit(request: CELL_REQUEST) -> string? is
+            if !_ready()? then
+                return null
+            fi
+
+            return _ask(_edit_request(request.source), "diagnostics")
+        si
+
+        _ask(line: string, kind: string) -> string? is
+            let connection = _connection
+
+            if !connection? then
+                return null
+            fi
+
+            let reply = connection.exchange(line, kind, REPLY_TIMEOUT_MS)
+
+            if !reply? then
+                _give_up("the analyser stopped answering")
+            fi
+
+            return reply
+        si
+
+        _ready() -> AnalyserConnection? is
+            if _is_unavailable then
+                return null
+            fi
+
+            if !_connection? then
+                let started = _start()
+
+                if !started? then
+                    _give_up("the analyser did not start")
+
+                    return null
+                fi
+
+                _connection = started
+
+                let capabilities = started.capabilities(STARTUP_TIMEOUT_MS)
+
+                if !capabilities? then
+                    _give_up("the analyser did not start")
+
+                    return null
+                fi
+
+                if !(capabilities |> Ghul.Pipes.any(c => c =~ "add-references")) then
+                    _give_up("the installed compiler cannot show a session's earlier cells to its analyser")
+
+                    return null
+                fi
+            fi
+
+            if _pending.count > 0 then
+                let reply = _ask(_add_references_request(_pending), "add_references")
+
+                if !reply? then
+                    return null
+                fi
+
+                _pending.clear()
+
+                if let message = ANALYSER_FRAMES.text_of(reply, "message") then
+                    _give_up("the analyser could not take an earlier cell: {message}")
+
+                    return null
+                fi
+            fi
+
+            return _connection
+        si
+
+        _give_up(reason: string) is
+            if !_is_unavailable then
+                _say("ghul: {reason}; completion and hover are off for this session")
+            fi
+
+            _is_unavailable = true
+
+            close()
+        si
+
+        _edit_request(source: string) -> string =>
+            ANALYSER_FRAMES.write(json is
+                json.write_string("command", "edit")
+                json.write_start_array("files")
+                json.write_start_object()
+                json.write_string("path", INPUT_PATH)
+                json.write_string("source", source)
+                json.write_end_object()
+                json.write_end_array()
+            si)
+
+        _position_request(command: string, request: CELL_REQUEST, line: int, column: int, is_complete: bool) -> string =>
+            ANALYSER_FRAMES.write(json is
+                json.write_string("command", command)
+                json.write_string("path", INPUT_PATH)
+                json.write_number("line", line + request.prelude_line_count)
+                json.write_number("column", column)
+
+                if is_complete then
+                    json.write_boolean("is_member_trigger", false)
+                fi
+            si)
+
+        _add_references_request(paths: Collections.List[string]) -> string =>
+            ANALYSER_FRAMES.write(json is
+                json.write_string("command", "add_references")
+                json.write_start_array("paths")
+
+                for path in paths do
+                    json.write_string_value(path)
+                od
+
+                json.write_end_array()
+            si)
+    si
+
+    // Reading and writing the analyser's frames.
+    class ANALYSER_FRAMES is
+        write(body: (System.Text.Json.Utf8JsonWriter) -> void) -> string static is
+            let buffer = IO.MemoryStream()
+            let json = System.Text.Json.Utf8JsonWriter(buffer, _)
+
+            json.write_start_object()
+            body(json)
+            json.write_end_object()
+            json.flush()
+            json.dispose()
+
+            System.Text.Encoding.utf8.get_string(buffer.to_array())
+        si
+
+        kind_of(line: string) -> string? static => text_of(line, "kind")
+
+        text_of(line: string, name: string) -> string? static is
+            try
+                let root = JsonDocument.parse(line, _).root_element
+                let value: JsonElement mut
+
+                if root.try_get_property(name, value ref) /\ value.value_kind == JsonValueKind.STRING then
+                    return value.get_string()
+                fi
+            catch e: System.Text.Json.JsonException
+            yrt
+
+            return null
+        si
+
+        texts_of(line: string, name: string) -> Collections.List[string]? static is
+            try
+                let root = JsonDocument.parse(line, _).root_element
+                let value: JsonElement mut
+
+                if root.try_get_property(name, value ref) /\ value.value_kind == JsonValueKind.ARRAY then
+                    let result = LIST[string]()
+
+                    for element in value.enumerate_array() do
+                        result.add(element.get_string() ?? "")
+                    od
+
+                    return result
+                fi
+            catch e: System.Text.Json.JsonException
+            yrt
+
+            return null
+        si
+
+        diagnostics(line: string, file: string) -> Collections.List[CELL_DIAGNOSTIC] static is
+            let result = LIST[CELL_DIAGNOSTIC]()
+
+            try
+                let root = JsonDocument.parse(line, _).root_element
+                let value: JsonElement mut
+
+                if root.try_get_property("diagnostics", value ref) /\ value.value_kind == JsonValueKind.ARRAY then
+                    for element in value.enumerate_array() do
+                        result.add(COMPILE_SERVER_REPLY.diagnostic_from(element, file))
+                    od
+                fi
+            catch e: System.Exception
+            yrt
+
+            return result
+        si
+
+        items(line: string) -> Collections.List[ANALYSIS_COMPLETION] static is
+            let result = LIST[ANALYSIS_COMPLETION]()
+
+            try
+                let root = JsonDocument.parse(line, _).root_element
+                let value: JsonElement mut
+
+                if root.try_get_property("items", value ref) /\ value.value_kind == JsonValueKind.ARRAY then
+                    for element in value.enumerate_array() do
+                        let label: JsonElement mut
+
+                        let kind_label =
+                            if element.try_get_property("kind_label", label ref) /\ label.value_kind == JsonValueKind.STRING
+                            then label.get_string()
+                            else null
+                            fi
+
+                        result.add(
+                            ANALYSIS_COMPLETION(
+                                element.get_property("name").get_string() ?? "",
+                                kind_label,
+                                element.get_property("description").get_string() ?? ""))
+                    od
+                fi
+            catch e: System.Exception
+            yrt
+
+            return result
+        si
+    si
+si

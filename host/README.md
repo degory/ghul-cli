@@ -43,6 +43,16 @@ ready it answers in a few milliseconds; until then, or without one,
 `COMPLETENESS_CHECK` runs `ghul-compiler --check-complete`, a separate
 process each time and a few hundred milliseconds.
 
+`HOSTED_SESSION.complete(text, line, column)`, `hover(text, line, column)`
+and `diagnostics(text)` answer for text not yet submitted, in terms of that
+text: lines and columns from 1, diagnostics naming the cell the text would
+become by its label, and nothing from the imports the session writes in
+front of it. They start `ghul-compiler --analyse` the first time one is
+asked, hand it each accepted cell's assembly, and close it with the
+session. An installed compiler older than 59.9.0 cannot take the cells, so
+they answer null and the session says once that they are off; everything
+else carries on.
+
 The parts `HOST_SESSIONS.start` assembles - `SPAWN_BACKEND`,
 `SERVER_BACKEND`, `SERVER_PROCESS`, `SESSION_FILES`,
 `SESSION_LOAD_CONTEXT` and `HOSTED_SESSION` - are public, and

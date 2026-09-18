@@ -346,7 +346,7 @@ namespace Ghul.Repl.Host is
                     diagnostics.value_kind == JsonValueKind.ARRAY
                 then
                     for diagnostic in diagnostics.enumerate_array() do
-                        parsed.add(_diagnostic(diagnostic, file))
+                        parsed.add(diagnostic_from(diagnostic, file))
                     od
                 fi
 
@@ -359,7 +359,7 @@ namespace Ghul.Repl.Host is
         // The wire's severities, named as a batch compile names them. A
         // related location on the diagnostic's own position has no
         // location of its own, as a batch compile writes it.
-        _diagnostic(diagnostic: JsonElement, file: string) -> CELL_DIAGNOSTIC static is
+        diagnostic_from(diagnostic: JsonElement, file: string) -> CELL_DIAGNOSTIC static is
             let severity =
                 case diagnostic.get_property("severity").get_int32()
                 when 0, 1 then "error"
