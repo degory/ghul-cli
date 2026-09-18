@@ -64,14 +64,24 @@ namespace Ghul.Jupyter.Tests is
                 content)
         si
 
-        send(msg_type: string, content: string) is
-            _shell.send(request(msg_type, content))
+        // Answers the id the request went out under, so what comes back
+        // on iopub can be told apart from another request's: a front end
+        // correlates by parent message id, and without that the status
+        // of an earlier request ends the wait for a later one.
+        send(msg_type: string, content: string) -> string is
+            let message = request(msg_type, content)
+
+            _shell.send(message)
+
+            return message.msg_id
         si
 
         // The next reply on shell, or nothing if the kernel says nothing
         // for long enough that it is not going to.
-        reply() -> MESSAGE? is
-            let deadline = System.DateTime.utc_now.add_seconds(60.0)
+        reply() -> MESSAGE? => reply_within(System.TimeSpan.from_seconds(60.0))
+
+        reply_within(budget: System.TimeSpan) -> MESSAGE? is
+            let deadline = System.DateTime.utc_now.add(budget)
 
             while System.DateTime.utc_now < deadline do
                 if let message = _shell.try_receive(System.TimeSpan.from_milliseconds(200L)) then
@@ -82,8 +92,9 @@ namespace Ghul.Jupyter.Tests is
             return null
         si
 
-        // Everything published while a cell ran, up to its idle status.
-        published_until_idle() -> Collections.List[MESSAGE] is
+        // Everything published while one request ran, up to its own idle
+        // status. Anything published for another request is skipped.
+        published_until_idle(msg_id: string) -> Collections.List[MESSAGE] is
             let seen = LIST[MESSAGE]()
             let deadline = System.DateTime.utc_now.add_seconds(60.0)
 
@@ -100,6 +111,10 @@ namespace Ghul.Jupyter.Tests is
                 fi
 
                 if let message = CHANNEL.decode(frames, _signer) then
+                    if JSON.string_member(message.parent_header, "msg_id") !~ msg_id then
+                        continue
+                    fi
+
                     seen.add(message)
 
                     if message.msg_type =~ "status" /\
@@ -111,6 +126,53 @@ namespace Ghul.Jupyter.Tests is
             od
 
             return seen
+        si
+
+        // A PUB socket drops what it publishes to a subscriber that has
+        // not finished connecting, so a client that starts asking before
+        // its subscription is live silently loses the first results. A
+        // real front end settles this by waiting for the kernel's status
+        // on iopub; this does the same, asking again until one arrives,
+        // since the kernel only publishes when asked.
+        wait_until_subscribed() -> MESSAGE? is
+            let deadline = System.DateTime.utc_now.add_seconds(60.0)
+
+            let reply: MESSAGE? mut = null
+
+            while System.DateTime.utc_now < deadline do
+                let sent = send("kernel_info_request", JSON.EMPTY_OBJECT)
+
+                let answer = reply_within(System.TimeSpan.from_seconds(2.0))
+
+                if answer? /\ !reply? then
+                    reply = answer
+                fi
+
+                if _saw_status(System.TimeSpan.from_seconds(1.0)) then
+                    return reply
+                fi
+            od
+
+            return null
+        si
+
+        _saw_status(timeout: System.TimeSpan) -> bool is
+            let frames = Collections.LIST[ubyte[]]()
+
+            if !NetMQ.ReceivingSocketExtensions.try_receive_multipart_bytes(
+                _iopub,
+                timeout,
+                frames ref,
+                8)
+            then
+                return false
+            fi
+
+            if let message = CHANNEL.decode(frames, _signer) then
+                return message.msg_type =~ "status"
+            fi
+
+            return false
         si
 
         close() is

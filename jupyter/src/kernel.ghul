@@ -14,7 +14,8 @@ namespace Ghul.Jupyter is
         _connection: CONNECTION,
         _session: HOSTED_SESSION,
         _completeness: COMPLETENESS_CHECK,
-        _version: string
+        _version: string,
+        _compiler_complaint: string?
     ) is
         _messages: MESSAGES
         _display: CELL_DISPLAY
@@ -60,8 +61,11 @@ namespace Ghul.Jupyter is
 
             parent_watch.start()
 
-            // A front end waits for this before it will send anything:
-            // until the kernel says it is idle, it is still starting.
+            // What a front end waits for before it will send anything.
+            // `starting` says the kernel is up at all, and the `idle`
+            // after it is what a session that is waiting to become idle
+            // is waiting for.
+            _publish(null, "status", CONTENT.status("starting"))
             _publish(null, "status", CONTENT.status("idle"))
 
             // Control first on every turn: it carries shutdown and
@@ -101,6 +105,22 @@ namespace Ghul.Jupyter is
                 return
             fi
 
+            // Every request is bracketed by a busy and an idle on iopub,
+            // each carrying the request as its parent. A front end reads
+            // those to know the kernel is alive and has finished: one
+            // that waits for the idle after kernel_info - which is what
+            // a notebook does before it will send anything else - waits
+            // for ever without them.
+            _publish(request, "status", CONTENT.status("busy"))
+
+            try
+                _dispatch(channel, request)
+            finally
+                _publish(request, "status", CONTENT.status("idle"))
+            yrt
+        si
+
+        _dispatch(channel: CHANNEL, request: MESSAGE) is
             case request.msg_type
             when "kernel_info_request" then
                 channel.send(_messages.reply(request, "kernel_info_reply", CONTENT.kernel_info(_version)))
@@ -116,6 +136,14 @@ namespace Ghul.Jupyter is
                         CONTENT.no_completions("", _int_member(request.content, "cursor_pos"))))
             when "inspect_request" then
                 channel.send(_messages.reply(request, "inspect_reply", CONTENT.nothing_found()))
+            when "comm_info_request" then
+                channel.send(_messages.reply(request, "comm_info_reply", CONTENT.no_comms()))
+            when "history_request" then
+                channel.send(_messages.reply(request, "history_reply", CONTENT.no_history()))
+            when "comm_open", "comm_msg", "comm_close" then
+                // Nothing opens a comm with this kernel, and the
+                // protocol says an unrecognised comm is dropped rather
+                // than answered.
             when "shutdown_request" then
                 let restart = JSON.bool_member(request.content, "restart", false)
 
@@ -137,9 +165,27 @@ namespace Ghul.Jupyter is
         _execute(channel: CHANNEL, request: MESSAGE) is
             let code = JSON.string_member(request.content, "code") ?? ""
             let silent = JSON.bool_member(request.content, "silent", false)
-            let store_history = JSON.bool_member(request.content, "store_history", true)
 
-            _publish(request, "status", CONTENT.status("busy"))
+            // A compiler too old for the session reports the generated
+            // prelude as the user's syntax errors, so the cell says what
+            // is actually wrong instead of compiling.
+            if let complaint = _compiler_complaint then
+                if !silent then
+                    _publish(
+                        request,
+                        "error",
+                        CONTENT.error("CompilerTooOld", complaint, LIST[string]([complaint])))
+                fi
+
+                channel.send(
+                    _messages.reply(
+                        request,
+                        "execute_reply",
+                        CONTENT.execute_reply_error(_execution_count, "CompilerTooOld", complaint)))
+
+                return
+            fi
+            let store_history = JSON.bool_member(request.content, "store_history", true)
 
             if !silent /\ store_history then
                 _execution_count = _execution_count + 1
@@ -184,8 +230,6 @@ namespace Ghul.Jupyter is
                         "execute_reply",
                         CONTENT.execute_reply_error(_execution_count, name, value)))
 
-                _publish(request, "status", CONTENT.status("idle"))
-
                 return
             fi
 
@@ -209,8 +253,6 @@ namespace Ghul.Jupyter is
                         "execute_reply",
                         CONTENT.execute_reply_error(_execution_count, "Exception", error)))
 
-                _publish(request, "status", CONTENT.status("idle"))
-
                 return
             fi
 
@@ -221,7 +263,6 @@ namespace Ghul.Jupyter is
             channel.send(
                 _messages.reply(request, "execute_reply", CONTENT.execute_reply_ok(_execution_count)))
 
-            _publish(request, "status", CONTENT.status("idle"))
         si
 
         _is_complete(channel: CHANNEL, request: MESSAGE) is

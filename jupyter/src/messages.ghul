@@ -183,6 +183,28 @@ namespace Ghul.Jupyter is
             return JSON.object(members)
         si
 
+        // A front end asks what comm channels are open during connect.
+        // This kernel opens none, and an empty answer is the answer.
+        no_comms() -> string static is
+            let members = LIST[(name: string, value: string)]()
+
+            members.add((name = "status", value = JSON.quote("ok")))
+            members.add((name = "comms", value = JSON.EMPTY_OBJECT))
+
+            return JSON.object(members)
+        si
+
+        // History is asked for during connect too. Nothing is kept
+        // across a session, so the list is empty rather than absent.
+        no_history() -> string static is
+            let members = LIST[(name: string, value: string)]()
+
+            members.add((name = "status", value = JSON.quote("ok")))
+            members.add((name = "history", value = "[]"))
+
+            return JSON.object(members)
+        si
+
         shutdown(restart: bool) -> string static is
             let members = LIST[(name: string, value: string)]()
 

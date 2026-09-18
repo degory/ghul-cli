@@ -31,6 +31,45 @@ namespace Ghul.Jupyter is
             return null
         si
 
+        // What the compiler answers when asked for its version, which
+        // is the first line it prints when given no arguments at all.
+        // Null where it cannot be run or says nothing recognisable: an
+        // answer that is not a version is not one to refuse to start
+        // over.
+        version() -> string? is
+            try
+                let start_info = System.Diagnostics.ProcessStartInfo()
+
+                start_info.file_name = shim
+                start_info.use_shell_execute = false
+                start_info.redirect_standard_output = true
+                start_info.redirect_standard_error = true
+
+                if let process = System.Diagnostics.Process.start(start_info) then
+                    let out_task = process.standard_output.read_to_end_async()
+                    let err_task = process.standard_error.read_to_end_async()
+
+                    process.wait_for_exit()
+
+                    for line in "{out_task.result}{err_task.result}".split(['\n']) do
+                        let words = line.trim().split([' '])
+
+                        for word in words do
+                            let parsed: System.Version? mut
+
+                            if System.Version.try_parse(word.trim(), parsed ref) /\ parsed? then
+                                return word.trim()
+                            fi
+                        od
+                    od
+                fi
+            catch e: System.Exception
+                return null
+            yrt
+
+            return null
+        si
+
         _home() -> string static =>
             System.Environment.get_folder_path(System.Environment_SpecialFolder.USER_PROFILE)
 

@@ -44,6 +44,14 @@ namespace Ghul.Jupyter is
         _watch() is
             let parent = _named_parent()
 
+            // A kernel started detached - from a subshell, or by a
+            // launcher that forks and exits - has init for a parent from
+            // the moment it starts, and that says nothing about whether
+            // anyone is still listening. Only a parent that *becomes*
+            // init is an orphaning, so what it started as is what the
+            // comparison is against.
+            let started_orphaned = !parent? /\ _was_reparented()
+
             while _is_watching do
                 System.Threading.Thread.sleep(1000)
 
@@ -57,7 +65,7 @@ namespace Ghul.Jupyter is
 
                         return
                     fi
-                elif _was_reparented() then
+                elif !started_orphaned /\ _was_reparented() then
                     _stop("whatever started it has gone")
 
                     return
