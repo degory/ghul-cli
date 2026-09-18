@@ -1,4 +1,4 @@
-namespace Ghul.Cli.Repl is
+namespace Ghul.Repl.Host is
     use Ghul.Repl.CELL_EXPORTS
     use Ghul.Repl.CELL_REPLY
     use Ghul.Repl.CELL_ENTRY
@@ -50,10 +50,12 @@ namespace Ghul.Cli.Repl is
         si
     si
 
-    // The terminal's way of driving a session: compile through the
-    // backend, load what it wrote from disk, hand it to the session, and
-    // run it once it has been accepted.
-    class REPL_SESSION(_backend: CompileBackend, _probe_directory: string?, _want_default_use: bool) is
+    // A session hosted in this process: each submission compiled through
+    // the backend, loaded from where it was written, handed to the
+    // session, and run once it has been accepted. It writes nothing to the
+    // console itself; what a cell writes goes wherever the console points
+    // while it runs.
+    class HOSTED_SESSION(_backend: CompileBackend, _probe_directory: string?, _want_default_use: bool) is
         _session: SESSION
         _context: SESSION_LOAD_CONTEXT
 
@@ -87,6 +89,51 @@ namespace Ghul.Cli.Repl is
         // Ends the session's compiler, if it keeps one running.
         close() is
             _backend.close()
+        si
+    si
+
+    // Starting a session in one call: a directory of its own, a compile
+    // server started straight away so that it warms up before the first
+    // cell, and starting the compiler for each cell if the server fails.
+    // What the host is told about that goes to `say`.
+    class HOST_SESSIONS is
+        start(
+            compiler_shim: string,
+            runtime_assembly: string?,
+            want_server: bool,
+            want_default_use: bool,
+            say: (string) -> void
+        ) -> HOSTED_SESSION static is
+            let directory = new_session_directory()
+            let files = SESSION_FILES(directory, runtime_assembly)
+            let spawn = SPAWN_BACKEND(compiler_shim, files)
+
+            let backend: CompileBackend =
+                if want_server then
+                    SERVER_BACKEND(_start_server(compiler_shim, files), spawn, files, say)
+                else
+                    spawn
+                fi
+
+            return HOSTED_SESSION(backend, directory, want_default_use)
+        si
+
+        // A fresh directory under the temporary directory, for one
+        // session's cells, or for anything else a host wants kept apart
+        // from them.
+        new_session_directory() -> string static =>
+            IO.Path.join([IO.Path.get_temp_path(), "{REPL_SESSION_PREFIX}{System.Guid.new_guid().to_string("N")}"])
+
+        // Null when it cannot be started at all, which the backend
+        // reports once and then compiles without it.
+        _start_server(compiler_shim: string, files: SESSION_FILES) -> ServerConnection? static is
+            try
+                files.prepare()
+
+                return SERVER_PROCESS(compiler_shim, files.directory)
+            catch e: System.Exception
+                return null
+            yrt
         si
     si
 si

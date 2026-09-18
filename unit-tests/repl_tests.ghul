@@ -2,6 +2,7 @@ namespace Ghul.Cli.Tests is
     use Collections.LIST
 
     use Ghul.Cli.Repl.SUBMISSION_END
+    use Ghul.Repl.Host.Completeness
 
     use Ghul.Repl.CELL_REPLY
     use Ghul.Repl.CELL_REQUEST
@@ -199,7 +200,8 @@ namespace Ghul.Cli.Tests is
     class REPL_SUBMISSION_END_TESTS is
         init() is si
 
-        _asking(is_unfinished: bool) -> SUBMISSION_END => SUBMISSION_END(text => is_unfinished)
+        _asking(is_unfinished: bool) -> SUBMISSION_END =>
+            SUBMISSION_END(text => if is_unfinished then Completeness.INCOMPLETE else Completeness.COMPLETE fi)
 
         @Test()
         is_complete__is_true_for_a_line_the_compiler_calls_finished() is
@@ -216,12 +218,19 @@ namespace Ghul.Cli.Tests is
         @Test()
         is_complete__asks_about_every_line_typed_so_far() is
             let asked = LIST[string]()
-            let end = SUBMISSION_END(text => (asked.add(text); false))
+            let end = SUBMISSION_END(text => (asked.add(text); Completeness.COMPLETE))
 
             end.is_complete(LIST[string](["let y = x +"]), "    1");
 
             assert asked.count == 1;
             assert asked[0] =~ "let y = x +\n    1\n";
+        si
+
+        // Text that can never be finished is submitted for its errors
+        // rather than waiting for more.
+        @Test()
+        is_complete__is_true_for_invalid_text() is
+            assert SUBMISSION_END(text => Completeness.INVALID).is_complete(LIST[string](), "let = )");
         si
 
         @Test()

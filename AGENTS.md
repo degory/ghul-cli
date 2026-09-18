@@ -65,18 +65,21 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
   Where a host does write a cell out it
   names the assembly `<request.name>.dll`, since the compiler records a
   reference under the referenced file's own name.
-- `src/repl/` — the terminal front end and the way this tool hosts a
-  session. `SERVER_BACKEND` compiles on one `ghul-compiler
-  --compile-server` started with the session, falling back to
+- `host/` — the `ghul.repl.host` package: hosting a session in this
+  process with an installed compiler, shared with the Jupyter kernel.
+  `HOST_SESSIONS.start` assembles one. `SERVER_BACKEND` compiles on one
+  `ghul-compiler --compile-server` started with the session, falling back to
   `SPAWN_BACKEND` (the compiler per cell, about a second each) for good
   when the server fails, and for one cell when it reports an error in
   the generated prelude, which is never the user's (ghul#2773);
   `SESSION_LOAD_CONTEXT` resolves the cells' own ghūl runtime, which is
-  not the one this tool was built against; `REPL_SESSION` is the three
+  not the one this tool was built against; `HOSTED_SESSION` is the three
   steps in order, running an accepted cell after it has joined the
-  session. `SUBMISSION_END` asks `COMPLETENESS_CHECK`
-  (`ghul-compiler --check-complete`, a spawn per Enter) whether the text
-  is finished; a blank line forces submission. The session needs
+  session, and writes nothing to the console. `COMPLETENESS_CHECK` runs
+  `ghul-compiler --check-complete` (a spawn per call) and answers complete,
+  incomplete or invalid.
+- `src/repl/` — the terminal front end. `SUBMISSION_END` submits on any
+  answer but incomplete; a blank line forces submission. The session needs
   `ghul.compiler` `MINIMUM_REPL_COMPILER` or newer, for `--submission`,
   `--check-complete` and `--compile-server`, and refuses to start on
   an older one rather than failing a cell at a time.
