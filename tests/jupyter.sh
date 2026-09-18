@@ -173,13 +173,26 @@ if [[ ! -f "$spec" ]]; then
     exit 1
 fi
 
-for want in '"ghul-jupyter"' '"kernel"' '"{connection_file}"' '"language":"ghul"' '"interrupt_mode":"message"'; do
+for want in '"kernel"' '"{connection_file}"' '"language":"ghul"' '"interrupt_mode":"message"'; do
     if ! grep -qF -- "$want" "$spec"; then
         echo "jupyter: the kernelspec is missing $want" >&2
         cat "$spec" >&2
         exit 1
     fi
 done
+
+# A front end started from a desktop launcher has neither the shell's PATH
+# nor its DOTNET_ROOT, so the kernelspec has to name everything it needs:
+# the command by absolute path, and an environment to run it in.
+if ! grep -qF -- "\"argv\":[\"/" "$spec"; then
+    echo "jupyter: the kernelspec does not name its command by absolute path" >&2
+    cat "$spec" >&2
+    exit 1
+fi
+
+echo "jupyter: driving the kernel from its kernelspec, with no inherited environment..." >&2
+
+dotnet "$scratch/client/jupyter-client.dll" "$spec" "$scratch/from-spec"
 
 dotnet "$scratch/kernel/ghul.jupyter.dll" uninstall >/dev/null
 

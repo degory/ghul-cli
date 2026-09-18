@@ -16,7 +16,17 @@ and prints where it put it, under `JUPYTER_DATA_DIR` when that is set and
 removes it. `ghul-jupyter kernel <connection-file>` is what a front end
 then runs; it is not meant to be typed.
 
-Then, in VS Code with the
+The kernelspec names the tool by its absolute path, since VS Code does not
+look a bare command name up on `PATH`, and carries an `env`
+putting the .NET installation and the tools directory on `PATH` - and
+setting `DOTNET_ROOT` when .NET is not installed in a default location -
+so a front end started from a desktop launcher, without the shell's
+environment, can still start it. Both are taken from the process that ran
+`install`, so run it again after moving either.
+
+Then reload the VS Code window (**Developer: Reload Window**): the Jupyter
+extension looks for kernelspecs when it starts and does not notice a new
+one until then. In VS Code with the
 [Jupyter extension](https://marketplace.visualstudio.com/items?itemName=ms-toolsai.jupyter)
 installed: open or create a `.ipynb` file, click the kernel picker at the
 top right, choose **Jupyter Kernel...**, and pick **ghūl**. Cells are
