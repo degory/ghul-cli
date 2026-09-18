@@ -109,7 +109,7 @@ namespace Ghul.Cli.Repl is
             Std.write_line(":quit    leave")
             Std.write_line("")
             Std.write_line("a blank line submits what you have typed")
-            Std.write_line("write_line to see a value: a cell's last expression is not printed yet")
+            Std.write_line("what you end on is shown, unless you end on a statement")
         si
     si
 si
