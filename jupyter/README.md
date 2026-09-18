@@ -16,7 +16,8 @@ and prints where it put it, under `JUPYTER_DATA_DIR` when that is set and
 removes it. `ghul-jupyter kernel <connection-file>` is what a front end
 then runs; it is not meant to be typed.
 
-The kernelspec names the tool by its absolute path, and carries an `env`
+The kernelspec names the tool by its absolute path, since VS Code does not
+look a bare command name up on `PATH`, and carries an `env`
 putting the .NET installation and the tools directory on `PATH` - and
 setting `DOTNET_ROOT` when .NET is not installed in a default location -
 so a front end started from a desktop launcher, without the shell's
