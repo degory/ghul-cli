@@ -40,10 +40,25 @@ namespace Ghul.Jupyter is
             _stdin = CHANNEL(NetMQ.Sockets.RouterSocket("@{_connection.stdin_address}"), _signer)
         si
 
+        // Asked to stop from another thread: the loop notices on its
+        // next turn and leaves by the ordinary path, which is what
+        // closes the session.
+        stop(reason: string?) is
+            if let said = reason then
+                IO.Std.error.write_line("ghul-jupyter: stopping: {said}")
+            fi
+
+            _is_running = false
+        si
+
         run() -> int is
             let heartbeat = HEARTBEAT(_connection.heartbeat_address)
 
             heartbeat.start()
+
+            let parent_watch = PARENT_WATCH(reason -> void => stop(reason))
+
+            parent_watch.start()
 
             // A front end waits for this before it will send anything:
             // until the kernel says it is idle, it is still starting.
@@ -63,6 +78,7 @@ namespace Ghul.Jupyter is
             od
 
             heartbeat.stop()
+            parent_watch.stop()
 
             _shell.socket.dispose()
             _control.socket.dispose()

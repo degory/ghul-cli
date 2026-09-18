@@ -80,10 +80,36 @@ namespace Ghul.Jupyter is
                 COMPLETENESS_CHECK(compiler.shim, HOST_SESSIONS.new_session_directory()),
                 version())
 
+        // The session holds a compile server, which has to go when the
+        // kernel does however the kernel is asked to leave: a
+        // shutdown_request, a front end that died and took the parent
+        // watch's answer with it, or a signal.
+        let closed = CLOSE_ONCE(() -> void => session.close())
+
+        let on_signal =
+            (context: System.Runtime.InteropServices.PosixSignalContext) -> void is
+                closed.close()
+
+                kernel.stop(null)
+            si
+
+        let interrupt =
+            System.Runtime.InteropServices.PosixSignalRegistration.create(
+                System.Runtime.InteropServices.PosixSignal.SIGINT,
+                on_signal)
+
+        let terminate =
+            System.Runtime.InteropServices.PosixSignalRegistration.create(
+                System.Runtime.InteropServices.PosixSignal.SIGTERM,
+                on_signal)
+
         try
             return kernel.run()
         finally
-            session.close()
+            closed.close()
+
+            interrupt.dispose()
+            terminate.dispose()
         yrt
     si
 

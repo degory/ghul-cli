@@ -91,14 +91,23 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
   the four JSON parts), `MESSAGES` and `CONTENT` what it sends, `JSON` the
   little of System.Text.Json it needs, `STREAM_WRITER` what a cell's
   console output goes to while it runs, `HEARTBEAT` the echo thread, and
-  `KERNELSPEC` the `install`/`uninstall` verbs. Cells are hosted through
+  `KERNELSPEC` the `install`/`uninstall` verbs. `PARENT_WATCH` is what
+  keeps a kernel from outliving the front end that started it -
+  `JPY_PARENT_PID` where Jupyter sets it, a parent that has become init
+  otherwise - and `CLOSE_ONCE` settles which of the signal handler and
+  the ordinary path out closes the session, since a kernel that is not
+  closed leaves its compile server running. Cells are hosted through
   `ghul.repl.host`, and the compiler is found by `COMPILER_LOCATION` -
   `GHUL_COMPILER`, then the copy `ghul.cli` installs, then the path.
 - `tests/jupyter-client/` — a front end, enough of one to drive the kernel
   over ZeroMQ from `tests/jupyter.sh`: kernel_info, cells that chain, a
   cell that does not compile, one that throws, one that writes,
-  is_complete and shutdown. It is a program rather than a unit test
-  because it needs a kernel process and a compiler.
+  is_complete and shutdown, then a second run that leaves a kernel with
+  no front end and checks it goes, and takes its compile server with it.
+  It is a program rather than a unit test because it needs a kernel
+  process and a compiler. It records the kernel's pid where the script
+  can kill it, since a client killed before its own cleanup runs would
+  otherwise leave one behind.
 - `unit-tests/` — MSTest project covering the pure path/cache-key/
   runnable-by-default/stdin-marker/source-resolution logic.
 - `tests/smoke.sh` — end-to-end test: builds the tool, points it at a real

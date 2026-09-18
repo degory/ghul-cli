@@ -1,0 +1,130 @@
+namespace Ghul.Jupyter is
+    // Closing something once, however many ways the process is asked to
+    // stop. A signal handler and the ordinary path out both reach for
+    // it, from different threads and sometimes at the same moment, so
+    // which of them closes is settled atomically rather than by a read
+    // followed by a write.
+    class CLOSE_ONCE(_close: () -> void) is
+        _state: int field
+
+        close() is
+            if System.Threading.Interlocked.exchange(_state ref, 1) != 0 then
+                return
+            fi
+
+            _close()
+        si
+    si
+
+    // A kernel outliving its front end is a process nobody will ever
+    // speak to again, holding a compile server of its own. Jupyter
+    // names the front end's process in `JPY_PARENT_PID` for exactly
+    // this, and where it does not, a parent that has become init says
+    // the same thing: whoever started this kernel is gone.
+    class PARENT_WATCH(_stop: (string) -> void) is
+        _thread: System.Threading.Thread?
+        _is_watching: bool
+
+        start() is
+            _is_watching = true
+
+            let thread = System.Threading.Thread(System.Threading.ThreadStart(() -> void => _watch()))
+
+            thread.is_background = true
+
+            thread.start()
+
+            _thread = thread
+        si
+
+        stop() is
+            _is_watching = false
+        si
+
+        _watch() is
+            let parent = _named_parent()
+
+            while _is_watching do
+                System.Threading.Thread.sleep(1000)
+
+                if !_is_watching then
+                    return
+                fi
+
+                if let pid = parent then
+                    if !_is_alive(pid) then
+                        _stop("the front end ({pid}) it was started by has gone")
+
+                        return
+                    fi
+                elif _was_reparented() then
+                    _stop("whatever started it has gone")
+
+                    return
+                fi
+            od
+        si
+
+        // What Jupyter said started this kernel, where it said anything.
+        _named_parent() -> int? static is
+            if let named = System.Environment.get_environment_variable("JPY_PARENT_PID") then
+                let pid: int mut
+
+                if int.try_parse(named.trim(), pid ref) /\ pid > 0 then
+                    return pid
+                fi
+            fi
+
+            return null
+        si
+
+        _is_alive(pid: int) -> bool static is
+            try
+                return !System.Diagnostics.Process.get_process_by_id(pid).has_exited
+            catch e: System.ArgumentException
+                // No process of that id: it has gone.
+                return false
+            catch e: System.InvalidOperationException
+                return false
+            yrt
+        si
+
+        // A process whose parent is init was orphaned by whoever started
+        // it. Read from the kernel's own status file, so it costs a read
+        // of a few bytes a second and answers nothing at all on a system
+        // without one.
+        _was_reparented() -> bool static is
+            try
+                let status = "/proc/self/stat"
+
+                if !IO.File.exists(status) then
+                    return false
+                fi
+
+                let text = IO.File.read_all_text(status)
+
+                // The fourth field is the parent's id, and the second is
+                // the executable's name in brackets, which can hold
+                // spaces - so the split starts after the last bracket.
+                let after_name = text.last_index_of(')')
+
+                if after_name < 0 then
+                    return false
+                fi
+
+                let fields = text[(after_name + 1)..text.length].split([' '])
+                let parents = fields |> Ghul.Pipes.filter(f => f.trim().length > 0) |> Ghul.Pipes.collect_list()
+
+                if parents.count < 2 then
+                    return false
+                fi
+
+                let parent: int mut
+
+                return int.try_parse(parents[1], parent ref) /\ parent <= 1
+            catch e: System.Exception
+                return false
+            yrt
+        si
+    si
+si
