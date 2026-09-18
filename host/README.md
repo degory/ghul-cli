@@ -50,4 +50,6 @@ The parts `HOST_SESSIONS.start` assembles - `SPAWN_BACKEND`,
 `ServerConnection` can be implemented elsewhere, for a host that wants them
 put together differently.
 
-The session needs `ghul.compiler` 59.8.0 or newer.
+The session compiles its cells with `ghul.compiler` 59.8.0 or newer. A host
+that builds its own `CompileBackend` needs 59.8.2 or newer to build it, for
+the default `check` to be inherited across the assembly boundary.
