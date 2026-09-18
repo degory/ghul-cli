@@ -75,10 +75,18 @@ namespace Ghul.Cli.Repl is
             let diagnostics = LIST[string]()
 
             if let process = System.Diagnostics.Process.start(start_info) then
-                let out = process.standard_output.read_to_end()
-                let err = process.standard_error.read_to_end()
+                // Both streams are read at once, as everything else here
+                // that redirects a child's output does: reading one to
+                // the end first deadlocks as soon as the other fills its
+                // pipe buffer, which a cell with a long diagnostic dump
+                // does.
+                let out_task = process.standard_output.read_to_end_async()
+                let err_task = process.standard_error.read_to_end_async()
 
                 process.wait_for_exit()
+
+                let out = out_task.result
+                let err = err_task.result
 
                 for line in "{err}{out}".split(['\n']) do
                     let trimmed = line.trim()
