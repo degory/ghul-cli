@@ -120,12 +120,12 @@ leaves.
 
 The session keeps one compiler running for its whole length, started
 before the first prompt so that it warms up while you type. The first
-submission takes about a second; after that a submission takes a fifth of
-a second or so from Enter to its answer, most of it spent working out
-whether the line finishes a submission, which is asked each time Enter is
-pressed. `ghul repl --no-server` starts the compiler afresh for each
-submission instead, well over a second each, and the session does the same by itself, saying so once, if the
-running compiler fails or stops answering.
+submission takes most of a second; after that a submission takes a few tens
+of milliseconds from Enter to its answer, including working out whether the
+line finishes a submission. `ghul repl --no-server` starts the compiler
+afresh for each submission instead, about a second each, and the session
+does the same by itself, saying so once, if the running compiler fails or
+stops answering.
 
 Each submission is compiled as its own small library and loaded into the
 session, so two things are true of this version:
@@ -137,7 +137,7 @@ session, so two things are true of this version:
 
 Each of those is this version of the REPL rather than something about the
 language, and each is lifted by a later one. The session needs
-`ghul.compiler` 59.6.0 or newer, and says so if an older one is installed.
+`ghul.compiler` 59.8.0 or newer, and says so if an older one is installed.
 
 The session itself - the accepted cells, the import prelude each new
 submission needs, and what a compiled cell exports - is published

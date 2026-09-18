@@ -37,15 +37,17 @@ back with its report in `run_error` and its definitions kept. What a cell
 itself writes goes wherever the console points while it runs, so a host
 that wants it redirects the console around `submit`.
 
-`COMPLETENESS_CHECK.check(text)` answers whether typed text is complete,
-incomplete, or invalid however much is added, by running
-`ghul-compiler --check-complete`. It is a separate process each time, a
-few hundred milliseconds.
+`HOSTED_SESSION.check(text)` answers whether typed text is complete,
+incomplete, or invalid however much is added. Once the compile server is
+ready it answers in a few milliseconds; until then, or without one,
+`COMPLETENESS_CHECK` runs `ghul-compiler --check-complete`, a separate
+process each time and a few hundred milliseconds.
 
 The parts `HOST_SESSIONS.start` assembles - `SPAWN_BACKEND`,
 `SERVER_BACKEND`, `SERVER_PROCESS`, `SESSION_FILES`,
 `SESSION_LOAD_CONTEXT` and `HOSTED_SESSION` - are public, and
-`CompileBackend` and `ServerConnection` can be implemented elsewhere, for a
+`CompileBackend` (whose `check` may answer null) and `ServerConnection`
+can be implemented elsewhere, for a
 host that wants them put together differently.
 
-The session needs `ghul.compiler` 59.6.0 or newer.
+The session needs `ghul.compiler` 59.8.0 or newer.
