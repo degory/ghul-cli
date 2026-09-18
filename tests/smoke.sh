@@ -392,4 +392,117 @@ if ! grep -q "no_such_name" "$scratch/repl-bad.err"; then
     exit 1
 fi
 
+# The compile server is the default, so every session above went through
+# it; none of them should have had to fall back.
+for err in "$scratch/repl.err" "$scratch/repl-values.err" "$scratch/repl-extend.err" "$scratch/repl-bad.err"; do
+    if grep -q "instead" "$err"; then
+        echo "smoke: a session fell back from the compile server:" >&2
+        cat "$err" >&2
+        exit 1
+    fi
+done
+
+echo "smoke: 'ghul repl --no-server' starts the compiler for each cell..." >&2
+repl_spawn_out="$(dotnet "$cli" repl --no-server < "$repl_in" 2>"$scratch/repl-spawn.err")" || {
+    echo "smoke: ghul repl --no-server exited non-zero:" >&2
+    cat "$scratch/repl-spawn.err" >&2
+    exit 1
+}
+if [[ "$repl_spawn_out" != *"now a string 101 7 2"* ]]; then
+    echo "smoke: expected the spawn backend to give the same answers, got:" >&2
+    echo "$repl_spawn_out" >&2
+    cat "$scratch/repl-spawn.err" >&2
+    exit 1
+fi
+
+echo "smoke: an import typed on its own line stays in force..." >&2
+repl_use_in="$scratch/repl-use-in.txt"
+cat > "$repl_use_in" <<'REPL'
+use IO.Path.combine
+combine("a", "b")
+:quit
+REPL
+repl_use_out="$(dotnet "$cli" repl < "$repl_use_in" 2>"$scratch/repl-use.err")" || true
+if [[ "$repl_use_out" != *"a/b"* ]]; then
+    echo "smoke: expected an import from one cell to reach the next, got:" >&2
+    echo "$repl_use_out" >&2
+    cat "$scratch/repl-use.err" >&2
+    exit 1
+fi
+
+echo "smoke: 'ghul repl --no-default-use' leaves the default imports out..." >&2
+repl_bare_in="$scratch/repl-bare-in.txt"
+cat > "$repl_bare_in" <<'REPL'
+write_line("unimported")
+use IO.Std.write_line
+write_line("imported")
+:quit
+REPL
+repl_bare_out="$(dotnet "$cli" repl --no-default-use < "$repl_bare_in" 2>"$scratch/repl-bare.err")" || true
+if [[ "$repl_bare_out" == *"unimported"* || "$repl_bare_out" != *"imported"* ]]; then
+    echo "smoke: expected write_line only once it was imported, got:" >&2
+    echo "$repl_bare_out" >&2
+    cat "$scratch/repl-bare.err" >&2
+    exit 1
+fi
+
+echo "smoke: ':reset' forgets what earlier cells defined..." >&2
+repl_reset_in="$scratch/repl-reset-in.txt"
+cat > "$repl_reset_in" <<'REPL'
+let secret = 5
+:reset
+let after = 6
+secret
+after
+:quit
+REPL
+repl_reset_out="$(dotnet "$cli" repl < "$repl_reset_in" 2>"$scratch/repl-reset.err")" || true
+if [[ "$repl_reset_out" != *"6"* || "$repl_reset_out" == *"5"* ]]; then
+    echo "smoke: expected only the cell after the reset to be known, got:" >&2
+    echo "$repl_reset_out" >&2
+    exit 1
+fi
+if ! grep -q "secret" "$scratch/repl-reset.err"; then
+    echo "smoke: expected the name from before the reset to be reported unknown, stderr was:" >&2
+    cat "$scratch/repl-reset.err" >&2
+    exit 1
+fi
+
+compile_servers() {
+    pgrep -af -- "--compile-server" | grep -F "$HOME/" || true
+}
+
+if [[ -n "$(compile_servers)" ]]; then
+    echo "smoke: a compile server outlived its session:" >&2
+    compile_servers >&2
+    exit 1
+fi
+
+echo "smoke: a signal ends the session and its compile server..." >&2
+repl_fifo="$scratch/repl-fifo"
+mkfifo "$repl_fifo"
+dotnet "$cli" repl < "$repl_fifo" > /dev/null 2>&1 &
+repl_pid=$!
+exec 3> "$repl_fifo"
+for _ in $(seq 60); do
+    [[ -n "$(compile_servers)" ]] && break
+    sleep 0.5
+done
+if [[ -z "$(compile_servers)" ]]; then
+    echo "smoke: the session never started its compile server" >&2
+    exit 1
+fi
+kill -TERM "$repl_pid"
+wait "$repl_pid" || true
+exec 3>&-
+for _ in $(seq 20); do
+    [[ -z "$(compile_servers)" ]] && break
+    sleep 0.25
+done
+if [[ -n "$(compile_servers)" ]]; then
+    echo "smoke: a compile server outlived a session ended by a signal:" >&2
+    compile_servers >&2
+    exit 1
+fi
+
 echo "smoke: all checks passed" >&2

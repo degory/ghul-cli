@@ -44,8 +44,14 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
 - `repl/` — the `ghul.repl` package: the session core, published so that
   the browser playground and a notebook kernel build on the same one.
   `SESSION` holds the accepted cells and generates each submission's
-  import prelude (one `use` per visible name, naming the cell that last
-  defined it). It compiles nothing, loads nothing, runs nothing and names
+  import prelude: `use default` unless made with `SESSION(false)`, one
+  `use` per visible name naming the cell that last defined it, and the
+  `use` directives earlier cells opened with, found by `USE_DIRECTIVES`
+  from the text. It keeps one import per bound name, newest winning,
+  since two imports of one name are a duplicate even when they name
+  different things, and leaves out any the cell writes itself so the
+  user's own line is the one compiled; `prelude_line_count` is per cell
+  as a result. It compiles nothing, loads nothing, runs nothing and names
   no file: a host calls `prepare(source)` for the request, compiles that
   however it likes, and calls `accept(request, reply)` with what came
   back. `CELL_EXPORTS.read` takes an assembly the host has already
@@ -57,14 +63,19 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
   names the assembly `<request.name>.dll`, since the compiler records a
   reference under the referenced file's own name.
 - `src/repl/` — the terminal front end and the way this tool hosts a
-  session. `SPAWN_BACKEND` runs the compiler per cell, about a second
-  each; `SESSION_LOAD_CONTEXT` resolves the cells' own ghūl runtime,
-  which is not the one this tool was built against; `REPL_SESSION` is the
-  three steps in order, running an accepted cell after it has joined the
-  session. `SUBMISSION_END` is the blank-line rule, in one place
-  because a real completeness answer needs a compiler mode this tool does
-  not use yet. The session needs `ghul.compiler` `MINIMUM_REPL_COMPILER`
-  or newer, for `--reference` and `--submission`, and refuses to start on
+  session. `SERVER_BACKEND` compiles on one `ghul-compiler
+  --compile-server` started with the session, falling back to
+  `SPAWN_BACKEND` (the compiler per cell, about a second each) for good
+  when the server fails, and for one cell when it reports an error in
+  the generated prelude, which is never the user's (ghul#2773);
+  `SESSION_LOAD_CONTEXT` resolves the cells' own ghūl runtime, which is
+  not the one this tool was built against; `REPL_SESSION` is the three
+  steps in order, running an accepted cell after it has joined the
+  session. `SUBMISSION_END` asks `COMPLETENESS_CHECK`
+  (`ghul-compiler --check-complete`, a spawn per Enter) whether the text
+  is finished; a blank line forces submission. The session needs
+  `ghul.compiler` `MINIMUM_REPL_COMPILER` or newer, for `--submission`,
+  `--check-complete` and `--compile-server`, and refuses to start on
   an older one rather than failing a cell at a time.
 - `unit-tests/` — MSTest project covering the pure path/cache-key/
   runnable-by-default/stdin-marker/source-resolution logic.

@@ -48,11 +48,34 @@ namespace Ghul.Repl is
     // does to them. It compiles nothing, loads nothing, runs nothing and
     // names no file, so a terminal, a notebook kernel and a browser page
     // each drive the same object over whatever compiles for them.
+    //
+    // Every cell is compiled after a prelude of imports: `use default`,
+    // unless the session was made without it; one `use` per name an
+    // earlier cell defined, naming the cell that last defined it; and the
+    // `use` directives earlier cells opened with, so an import typed once
+    // stays in force the way a definition does.
     class SESSION is
         _cells: LIST[CELL]
+        _want_default_use: bool
+
+        // One import per name, newest first: a later cell's definition
+        // replaces an earlier import of the same name, and a later import
+        // replaces an earlier definition, since two imports binding one
+        // name are a duplicate even when they name different things.
+        _bindings: Collections.MAP[string, string]
+
+        // Imports that bring in a set of names rather than one.
+        _wildcards: LIST[string]
 
         init() is
+            self.init(true)
+        si
+
+        init(want_default_use: bool) is
             _cells = LIST[CELL]()
+            _want_default_use = want_default_use
+            _bindings = Collections.MAP[string, string]()
+            _wildcards = LIST[string]()
         si
 
         cells: Collections.List[CELL] => _cells
@@ -72,17 +95,46 @@ namespace Ghul.Repl is
             return result
         si
 
-        // One `use` per visible name, naming the cell that last defined
-        // it. A name the submission declares itself needs no exclusion:
-        // a declaration in the cell already beats an import.
-        prelude() -> string is
-            let lines = LIST[string]()
+        // The prelude for a cell that writes no imports of its own.
+        prelude() -> string => prelude_for("")
 
-            for entry in visible_names() do
-                lines.add("use {entry.value.name}.{entry.key}")
+        // The prelude for the given cell. An import the cell writes
+        // itself is left out of it, and so is any other import binding
+        // the same name, so the cell's own line is the one compiled and
+        // its diagnostics point where the user wrote it. A name the cell
+        // declares needs no exclusion: a declaration beats an import.
+        prelude_for(source: string) -> string is
+            let own = LIST[string](USE_DIRECTIVES.leading(source))
+            let own_names = Collections.SET[string]()
+
+            for directive in own do
+                if let name = USE_DIRECTIVES.bound_name(directive) then
+                    own_names.add(name)
+                fi
             od
 
-            lines.sort()
+            let lines = LIST[string]()
+
+            if _want_default_use /\ !own.contains("use default") then
+                lines.add("use default")
+            fi
+
+            let bound = LIST[string]()
+
+            for entry in _bindings do
+                if !own_names.contains(entry.key) /\ !own.contains(entry.value) then
+                    bound.add(entry.value)
+                fi
+            od
+
+            bound.sort()
+            lines.add_range(bound)
+
+            for directive in _wildcards do
+                if !own.contains(directive) /\ !lines.contains(directive) then
+                    lines.add(directive)
+                fi
+            od
 
             if lines.count == 0 then
                 return ""
@@ -96,7 +148,7 @@ namespace Ghul.Repl is
         // nothing is recorded until the reply comes back.
         prepare(source: string) -> CELL_REQUEST is
             let index = _cells.count + 1
-            let prelude_text = prelude()
+            let prelude_text = prelude_for(source)
             let prelude_line_count = if prelude_text.length == 0 then 0 else prelude_text.split(['\n']).count - 1 fi
 
             let references = LIST[string]()
@@ -114,10 +166,10 @@ namespace Ghul.Repl is
         si
 
         // Take the answer to a request. A cell that compiled joins the
-        // session and its names are visible to every later one; one that
-        // did not leaves the session exactly as it was. The diagnostics
-        // come back with the generated prelude subtracted, so their line
-        // numbers are the user's own again.
+        // session, and its names and its own imports are visible to
+        // every later one; one that did not leaves the session exactly as
+        // it was. The diagnostics come back with the generated prelude
+        // subtracted, so their line numbers are the user's own again.
         accept(request: CELL_REQUEST, reply: CELL_REPLY) -> SUBMIT_OUTCOME is
             let diagnostics = LIST[string]()
 
@@ -130,11 +182,30 @@ namespace Ghul.Repl is
 
                 _cells.add(cell)
 
+                _carry_imports(_user_text(request))
+
+                for name in loaded.exports do
+                    _bindings[name] = "use {cell.name}.{name}"
+                od
+
                 return SUBMIT_OUTCOME(true, diagnostics, cell)
             fi
 
             return SUBMIT_OUTCOME(false, diagnostics, null)
         si
+
+        _carry_imports(source: string) is
+            for directive in USE_DIRECTIVES.leading(source) do
+                if let name = USE_DIRECTIVES.bound_name(directive) then
+                    _bindings[name] = directive
+                elif !_wildcards.contains(directive) /\ !(_want_default_use /\ directive =~ "use default") then
+                    _wildcards.add(directive)
+                fi
+            od
+        si
+
+        _user_text(request: CELL_REQUEST) -> string =>
+            request.source.split(['\n']) |> Ghul.Pipes.skip(request.prelude_line_count) |> Ghul.Pipes.join("\n")
     si
 
     // What a cell's namespace is called, and the stem of any file a host

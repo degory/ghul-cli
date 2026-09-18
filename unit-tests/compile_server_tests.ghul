@@ -1,0 +1,321 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+
+    use Ghul.Cli.REPL_OPTIONS
+    use Ghul.Cli.Repl.COMPILE_RESULT
+    use Ghul.Cli.Repl.COMPILE_SERVER_REPLY
+    use Ghul.Cli.Repl.CompileBackend
+    use Ghul.Cli.Repl.SERVER_BACKEND
+    use Ghul.Cli.Repl.ServerConnection
+    use Ghul.Cli.Repl.SESSION_FILES
+
+    use Ghul.Repl.CELL_REQUEST
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    // Answers with whatever it was given, in order, and records what it
+    // was sent. A null answer is a server that did not reply in time.
+    class FAKE_SERVER(_ready: string?, _replies: Collections.List[string?]): ServerConnection is
+        sent: LIST[string]
+        is_closed: bool public
+        _next: int
+
+        init(..) is
+            sent = LIST[string]()
+        si
+
+        await_ready(timeout_ms: int) -> string? => _ready
+
+        exchange(line: string, timeout_ms: int) -> string? is
+            sent.add(line)
+
+            if _next >= _replies.count then
+                return null
+            fi
+
+            let reply = _replies[_next]
+
+            _next = _next + 1
+
+            return reply
+        si
+
+        close() is
+            is_closed = true
+        si
+    si
+
+    class FAKE_BACKEND: CompileBackend is
+        compiled: LIST[string]
+        is_closed: bool public
+
+        init() is
+            compiled = LIST[string]()
+        si
+
+        compile(request: CELL_REQUEST) -> COMPILE_RESULT is
+            compiled.add(request.name)
+
+            return COMPILE_RESULT("spawned", LIST[string]())
+        si
+
+        close() is
+            is_closed = true
+        si
+    si
+
+    @TestClass()
+    class SERVER_BACKEND_TESTS is
+        init() is si
+
+        _ready: string => "{{\"ready\":true,\"status\":0,\"diagnostics\":[]}}"
+
+        _no_reply() -> LIST[string?] is
+            let replies = LIST[string?]()
+
+            replies.add(null)
+
+            return replies
+        si
+
+        _files() -> SESSION_FILES =>
+            SESSION_FILES(IO.Path.join([IO.Path.get_temp_path(), "ghul-cli-tests-{System.Guid.new_guid().to_string("N")}"]), null)
+
+        _request(index: int) -> CELL_REQUEST =>
+            CELL_REQUEST(index, "cell{index}", "let x = 1\n", 0, LIST[string]())
+
+        _backend(server: ServerConnection?, fallback: CompileBackend, said: LIST[string]) -> SERVER_BACKEND =>
+            SERVER_BACKEND(server, fallback, _files(), line => said.add(line))
+
+        @Test()
+        compile__compiles_on_the_server_once_it_is_ready() is
+            let server = FAKE_SERVER(_ready, LIST[string?](["{{\"status\":0,\"diagnostics\":[]}}"]))
+            let fallback = FAKE_BACKEND()
+            let said = LIST[string]()
+
+            let result = _backend(server, fallback, said).compile(_request(1))
+
+            assert result.assembly_path?;
+            assert result.assembly_path!.ends_with("cell1.dll");
+            assert fallback.compiled.count == 0;
+            assert said.count == 0;
+            assert server.sent.count == 1;
+        si
+
+        // The request names the cell, carries its text, and names each
+        // earlier cell by where its assembly is.
+        @Test()
+        compile__sends_the_cell_and_its_references() is
+            let server = FAKE_SERVER(_ready, LIST[string?](["{{\"status\":0,\"diagnostics\":[]}}"]))
+            let backend = _backend(server, FAKE_BACKEND(), LIST[string]())
+
+            backend.compile(CELL_REQUEST(2, "cell2", "x\n", 0, LIST[string](["cell1"])));
+
+            let request = System.Text.Json.JsonDocument.parse(server.sent[0], _).root_element
+
+            assert request.get_property("name").get_string() =~ "cell2";
+            assert request.get_property("text").get_string() =~ "x\n";
+            assert request.get_property("output").get_string()!.ends_with("cell2.dll");
+            assert request.get_property("references")[0].get_string()!.ends_with("cell1.dll");
+        si
+
+        // Source the compiler rejects is the cell's problem, not the
+        // server's, so the server keeps the session.
+        @Test()
+        compile__reports_a_cell_with_errors_as_the_cells() is
+            let server =
+                FAKE_SERVER(
+                    _ready,
+                    LIST[string?]([
+                        "{{\"status\":1,\"diagnostics\":[{{\"start_line\":1,\"start_column\":9,\"end_line\":1,\"end_column\":16,\"severity\":1,\"message\":\"symbol not found: y\",\"code\":\"\"}}]}}",
+                        "{{\"status\":0,\"diagnostics\":[]}}"
+                    ]))
+
+            let fallback = FAKE_BACKEND()
+            let backend = _backend(server, fallback, LIST[string]())
+
+            let result = backend.compile(_request(1))
+
+            assert !result.assembly_path?;
+            assert result.diagnostics[0] =~ "cell1.ghul: 1,9..1,16: error: symbol not found: y";
+
+            backend.compile(_request(2));
+
+            assert fallback.compiled.count == 0;
+            assert server.sent.count == 2;
+        si
+
+        // An error in the generated lines is not the user's, so that one
+        // cell is compiled afresh; the server keeps the session.
+        @Test()
+        compile__compiles_afresh_a_cell_whose_error_is_in_the_prelude() is
+            let server =
+                FAKE_SERVER(
+                    _ready,
+                    LIST[string?]([
+                        "{{\"status\":1,\"diagnostics\":[{{\"start_line\":2,\"start_column\":5,\"end_line\":2,\"end_column\":17,\"severity\":1,\"message\":\"used identifier cell2.CIRCLE is not defined\",\"code\":\"\"}}]}}",
+                        "{{\"status\":0,\"diagnostics\":[]}}"
+                    ]))
+
+            let fallback = FAKE_BACKEND()
+            let said = LIST[string]()
+            let backend = _backend(server, fallback, said)
+
+            assert backend.compile(CELL_REQUEST(3, "cell3", "use default\nuse cell2.CIRCLE\nCIRCLE()\n", 2, LIST[string]())).assembly_path =~ "spawned";
+
+            backend.compile(_request(4));
+
+            assert fallback.compiled.count == 1;
+            assert server.sent.count == 2;
+            assert said.count == 0;
+        si
+
+        @Test()
+        compile__treats_an_internal_error_as_the_cells() is
+            let server =
+                FAKE_SERVER(
+                    _ready,
+                    LIST[string?](["{{\"status\":2,\"message\":\"internal error\",\"diagnostics\":[]}}"]))
+
+            let fallback = FAKE_BACKEND()
+            let said = LIST[string]()
+
+            let result = _backend(server, fallback, said).compile(_request(1))
+
+            assert !result.assembly_path?;
+            assert fallback.compiled.count == 0;
+            assert said.count == 0;
+        si
+
+        @Test()
+        compile__falls_back_when_the_server_does_not_start() is
+            let fallback = FAKE_BACKEND()
+            let said = LIST[string]()
+            let backend = _backend(null, fallback, said)
+
+            assert backend.compile(_request(1)).assembly_path =~ "spawned";
+            assert fallback.compiled.count == 1;
+            assert said.count == 1;
+        si
+
+        @Test()
+        compile__falls_back_when_the_server_never_says_it_is_ready() is
+            let server = FAKE_SERVER(null, LIST[string?]())
+            let fallback = FAKE_BACKEND()
+            let said = LIST[string]()
+
+            _backend(server, fallback, said).compile(_request(1));
+
+            assert fallback.compiled.count == 1;
+            assert server.is_closed;
+            assert said.count == 1;
+        si
+
+        // Once it has given up on the server it says so once and asks it
+        // nothing more.
+        @Test()
+        compile__falls_back_for_good_when_the_server_stops_answering() is
+            let server = FAKE_SERVER(_ready, _no_reply())
+            let fallback = FAKE_BACKEND()
+            let said = LIST[string]()
+            let backend = _backend(server, fallback, said)
+
+            backend.compile(_request(1));
+            backend.compile(_request(2));
+
+            assert fallback.compiled.count == 2;
+            assert server.sent.count == 1;
+            assert server.is_closed;
+            assert said.count == 1;
+            assert !backend.is_serving;
+        si
+
+        @Test()
+        compile__falls_back_when_the_server_refuses_a_request() is
+            let server =
+                FAKE_SERVER(
+                    _ready,
+                    LIST[string?](["{{\"status\":2,\"message\":\"reference not found: x\",\"diagnostics\":[]}}"]))
+
+            let fallback = FAKE_BACKEND()
+            let said = LIST[string]()
+
+            _backend(server, fallback, said).compile(_request(1));
+
+            assert fallback.compiled.count == 1;
+            assert said[0].contains("reference not found: x");
+        si
+
+        @Test()
+        compile__falls_back_when_the_reply_is_not_one() is
+            let server = FAKE_SERVER(_ready, LIST[string?](["not json"]))
+            let fallback = FAKE_BACKEND()
+
+            _backend(server, fallback, LIST[string]()).compile(_request(1));
+
+            assert fallback.compiled.count == 1;
+        si
+
+        @Test()
+        close__closes_the_server_and_the_fallback() is
+            let server = FAKE_SERVER(_ready, LIST[string?]())
+            let fallback = FAKE_BACKEND()
+
+            _backend(server, fallback, LIST[string]()).close();
+
+            assert server.is_closed;
+            assert fallback.is_closed;
+        si
+    si
+
+    @TestClass()
+    class COMPILE_SERVER_REPLY_TESTS is
+        init() is si
+
+        @Test()
+        parse__writes_a_warning_as_a_batch_compile_does() is
+            let reply =
+                COMPILE_SERVER_REPLY.parse(
+                    "{{\"status\":0,\"diagnostics\":[{{\"start_line\":2,\"start_column\":5,\"end_line\":2,\"end_column\":8,\"severity\":2,\"message\":\"non-snake_case name 'Bad'\",\"code\":\"non-snake-case-name\"}}]}}",
+                    "cell3.ghul")
+
+            assert reply?;
+            assert reply.diagnostics[0] =~ "cell3.ghul: 2,5..2,8: warn: [non-snake-case-name] non-snake_case name 'Bad'";
+        si
+
+        @Test()
+        parse__is_null_for_a_line_that_is_not_a_reply() is
+            assert !COMPILE_SERVER_REPLY.parse("{{\"ready\":true}}", "cell1.ghul")?;
+            assert !COMPILE_SERVER_REPLY.parse("nonsense", "cell1.ghul")?;
+        si
+    si
+
+    @TestClass()
+    class REPL_OPTIONS_TESTS is
+        init() is si
+
+        @Test()
+        parse__defaults_to_the_server_and_the_default_imports() is
+            let options = REPL_OPTIONS.parse(LIST[string]())
+
+            assert options?;
+            assert options.want_server;
+            assert options.want_default_use;
+        si
+
+        @Test()
+        parse__takes_both_flags() is
+            let options = REPL_OPTIONS.parse(LIST[string](["--no-server", "--no-default-use"]))
+
+            assert options?;
+            assert !options.want_server;
+            assert !options.want_default_use;
+        si
+
+        @Test()
+        parse__is_null_for_an_argument_it_does_not_take() is
+            assert !REPL_OPTIONS.parse(LIST[string](["--fast"]))?;
+        si
+    si
+si

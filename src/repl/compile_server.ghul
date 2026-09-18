@@ -1,0 +1,326 @@
+namespace Ghul.Cli.Repl is
+    use Collections.LIST
+    use Ghul.Repl.CELL_REQUEST
+    use System.Text.Json.JsonDocument
+    use System.Text.Json.JsonElement
+    use System.Text.Json.JsonValueKind
+
+    // A compiler kept running for the length of a session, spoken to one
+    // line of JSON each way. A line that does not come back in time is
+    // null, and so is a line that cannot be sent: either way the server is
+    // no use any more, and the backend stops asking it.
+    trait ServerConnection open is
+        // The server's first line, which says it is ready.
+        await_ready(timeout_ms: int) -> string?;
+
+        exchange(line: string, timeout_ms: int) -> string?;
+
+        close();
+    si
+
+    // `ghul-compiler --compile-server`, started as soon as the session is,
+    // so that it warms up while the first line is being typed.
+    //
+    // Nothing has to be done for the process to go when this tool does:
+    // the server reads its requests from this tool, and ends when that
+    // stream ends, which is what happens when the process holding the
+    // other end exits for any reason. close() is for the times the session
+    // ends and the tool does not.
+    class SERVER_PROCESS: ServerConnection is
+        _process: System.Diagnostics.Process
+        _ready: Tasks.TASK[string?]
+
+        init(compiler_shim: string, directory: string) is
+            let start_info = System.Diagnostics.ProcessStartInfo()
+
+            start_info.file_name = compiler_shim
+            start_info.argument_list.add("--compile-server")
+            start_info.use_shell_execute = false
+            start_info.redirect_standard_input = true
+            start_info.redirect_standard_output = true
+            start_info.redirect_standard_error = true
+            start_info.working_directory = directory
+
+            let process = System.Diagnostics.Process.start(start_info)
+
+            if !process? then
+                throw System.Exception("the compile server did not start")
+            fi
+
+            _process = process
+
+            // Read and thrown away, so a server writing to standard error
+            // cannot fill the pipe and stall.
+            _process.begin_error_read_line()
+
+            _ready = _process.standard_output.read_line_async()
+        si
+
+        await_ready(timeout_ms: int) -> string? => _wait(_ready, timeout_ms)
+
+        exchange(line: string, timeout_ms: int) -> string? is
+            try
+                _process.standard_input.write(line)
+                _process.standard_input.write("\n")
+                _process.standard_input.flush()
+            catch e: IO.IOException
+                return null
+            yrt
+
+            return _wait(_process.standard_output.read_line_async(), timeout_ms)
+        si
+
+        _wait(line: Tasks.TASK[string?], timeout_ms: int) -> string? is
+            try
+                if line.wait(timeout_ms) then
+                    return line.result
+                fi
+            catch e: System.AggregateException
+            yrt
+
+            return null
+        si
+
+        close() is
+            try
+                if !_process.has_exited then
+                    _process.kill(true)
+                    _process.wait_for_exit(5000)
+                fi
+            catch e: System.Exception
+            yrt
+
+            _process.dispose()
+        si
+    si
+
+    // Compiles each cell on a server kept for the session. The first cell
+    // after the server is ready takes most of a second and every one after
+    // it a few tens of milliseconds, where starting the compiler for each
+    // one takes a second every time.
+    //
+    // Should the server fail to start, stop answering, or refuse a request
+    // for a reason of its own, the session says so once and carries on by
+    // starting the compiler for each cell. A cell the compiler cannot
+    // compile is not the server failing, and is reported as the cell's.
+    class SERVER_BACKEND(
+        _connection: ServerConnection?,
+        _fallback: CompileBackend,
+        _files: SESSION_FILES,
+        _say: (string) -> void
+    ): CompileBackend is
+        _server: ServerConnection?
+        _is_ready: bool
+        _is_unannounced: bool
+
+        init(..) is
+            _server = _connection
+
+            // Said at the first cell rather than here, so it appears after
+            // the banner rather than before it.
+            _is_unannounced = !_connection?
+        si
+
+        // How long the server has to say it is ready, and to answer a
+        // request. Both are far longer than either takes, so that only a
+        // server that has stopped reaches them.
+        READY_TIMEOUT_MS: int static => 60000
+        REPLY_TIMEOUT_MS: int static => 120000
+
+        // Whether cells are still going to the server.
+        is_serving: bool => _server?
+
+        compile(request: CELL_REQUEST) -> COMPILE_RESULT is
+            if _is_unannounced then
+                _is_unannounced = false
+
+                _say("ghul: the compile server did not start; starting the compiler for each cell instead")
+            fi
+
+            if let server = _server then
+                if let result = _through(server, request) then
+                    return result
+                fi
+            fi
+
+            return _fallback.compile(request)
+        si
+
+        close() is
+            _server?.close()
+            _server = null
+
+            _fallback.close()
+        si
+
+        _through(server: ServerConnection, request: CELL_REQUEST) -> COMPILE_RESULT? is
+            if !_is_ready then
+                let first = server.await_ready(READY_TIMEOUT_MS)
+
+                if !first? \/ !_says_ready(first) then
+                    return _give_up(server, "the compile server did not start")
+                fi
+
+                _is_ready = true
+            fi
+
+            _files.prepare()
+
+            let answer = server.exchange(_request_line(request), REPLY_TIMEOUT_MS)
+
+            if !answer? then
+                return _give_up(server, "the compile server stopped answering")
+            fi
+
+            let reply = COMPILE_SERVER_REPLY.parse(answer, "{request.name}.ghul")
+
+            if !reply? then
+                return _give_up(server, "the compile server sent something that is not a reply")
+            fi
+
+            case reply.status
+            when 0 then
+                return COMPILE_RESULT(_files.assembly_path(request.name), reply.diagnostics)
+            when 1 then
+                // An error in the lines the session generated is never the
+                // user's. It is what a compile server does when it cannot
+                // import a type from an earlier cell that a compiler started
+                // afresh can, so the cell is compiled that way instead.
+                if reply.error_lines |> Ghul.Pipes.any(line => line <= request.prelude_line_count) then
+                    return null
+                fi
+
+                return COMPILE_RESULT(null, reply.diagnostics)
+            else
+                // The compiler failing on this cell's source, which
+                // starting it afresh would do too.
+                if reply.message =~ "internal error" then
+                    return COMPILE_RESULT(null, reply.diagnostics)
+                fi
+
+                return _give_up(server, "the compile server refused a request: {reply.message ?? "no reason given"}")
+            esac
+        si
+
+        _give_up(server: ServerConnection, reason: string) -> COMPILE_RESULT? is
+            _say("ghul: {reason}; starting the compiler for each cell instead")
+
+            server.close()
+            _server = null
+
+            return null
+        si
+
+        _says_ready(line: string) -> bool is
+            try
+                let document = JsonDocument.parse(line, _)
+                let ready: JsonElement mut
+
+                return document.root_element.try_get_property("ready", ready ref) /\
+                    ready.value_kind == JsonValueKind.TRUE
+            catch e: System.Text.Json.JsonException
+                return false
+            yrt
+        si
+
+        _request_line(request: CELL_REQUEST) -> string is
+            let buffer = IO.MemoryStream()
+            let json = System.Text.Json.Utf8JsonWriter(buffer, _)
+
+            json.write_start_object()
+            json.write_string("name", request.name)
+            json.write_string("text", request.source)
+            json.write_string("output", _files.assembly_path(request.name))
+            json.write_start_array("references")
+
+            for reference in request.references do
+                json.write_string_value(_files.assembly_path(reference))
+            od
+
+            json.write_end_array()
+            json.write_end_object()
+            json.flush()
+            json.dispose()
+
+            System.Text.Encoding.utf8.get_string(buffer.to_array())
+        si
+    si
+
+    // One reply from the compile server: its status, why it could not
+    // compile if it says, and the compile's diagnostics written as the
+    // compiler writes them to a terminal, so they read the same whichever
+    // backend produced them.
+    class COMPILE_SERVER_REPLY(
+        status: int,
+        message: string?,
+        diagnostics: Collections.List[string],
+        error_lines: Collections.List[int]
+    ) is
+        parse(line: string, file: string) -> COMPILE_SERVER_REPLY? static is
+            try
+                let root = JsonDocument.parse(line, _).root_element
+                let status: JsonElement mut
+                let message: JsonElement mut
+                let diagnostics: JsonElement mut
+
+                if !root.try_get_property("status", status ref) then
+                    return null
+                fi
+
+                let text =
+                    if root.try_get_property("message", message ref) /\
+                        message.value_kind == JsonValueKind.STRING
+                    then message.get_string()
+                    else null
+                    fi
+
+                let lines = LIST[string]()
+                let error_lines = LIST[int]()
+
+                if root.try_get_property("diagnostics", diagnostics ref) /\
+                    diagnostics.value_kind == JsonValueKind.ARRAY
+                then
+                    for diagnostic in diagnostics.enumerate_array() do
+                        lines.add(_line(diagnostic, file))
+
+                        if diagnostic.get_property("severity").get_int32() <= 1 then
+                            error_lines.add(diagnostic.get_property("start_line").get_int32())
+                        fi
+                    od
+                fi
+
+                return COMPILE_SERVER_REPLY(status.get_int32(), text, lines, error_lines)
+            catch e: System.Exception
+                return null
+            yrt
+        si
+
+        // `file: L,C..L,C: severity: message`, with a warning's slug in
+        // brackets before its message, as a batch compile writes it.
+        _line(diagnostic: JsonElement, file: string) -> string static is
+            let number = (name: string) =>
+                diagnostic.get_property(name).get_int32()
+
+            let severity =
+                case number("severity")
+                when 0, 1 then "error"
+                when 2 then "warn"
+                when 3 then "info"
+                else "hint"
+                esac
+
+            let code: JsonElement mut
+
+            let slug =
+                if severity =~ "warn" /\ diagnostic.try_get_property("code", code ref) /\
+                    code.value_kind == JsonValueKind.STRING /\ (code.get_string() ?? "").length > 0
+                then "[{code.get_string()}] "
+                else ""
+                fi
+
+            "{file}: {number("start_line")},{number("start_column")}.."
+                "{number("end_line")},{number("end_column")}: "
+                "{severity}: {slug}{diagnostic.get_property("message").get_string()}"
+        si
+    si
+si

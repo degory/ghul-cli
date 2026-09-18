@@ -7,7 +7,11 @@ own library assembly in its own namespace, referencing the earlier cells'
 assemblies, and the session generates the `use` prelude that makes the
 earlier cells' names visible - one per visible name, naming the cell that
 last defined it, so a redefinition takes effect going forward and nothing
-about name lookup changes.
+about name lookup changes. The `use` directives a cell opens with are
+carried into every later cell's prelude too, and every prelude begins with
+`use default` unless the session is made with `SESSION(false)`. Each
+prelude leaves out the imports its own cell writes, so its length varies
+from cell to cell; `request.prelude_line_count` is the one to use.
 
 This package compiles nothing, loads nothing, runs nothing and names no
 file. A host drives it in three steps:
@@ -37,5 +41,5 @@ a limit of its elements, one level deep, and nothing where the cell ended
 on a statement - and prints nothing, so every host shows the same value
 the same way.
 
-The compiler needs to be recent enough for `--submission` and
-`--reference`.
+The compiler needs to be recent enough for `--submission`, `--reference`
+and `use default`.

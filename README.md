@@ -31,7 +31,7 @@ ghul run [--no-cache] <script> [args...]    # run unconditionally
 ghul compile [--no-cache] <script.ghul>     # compile and print the path to the result
 ghul install-compiler [version]             # install (or update) ghul.compiler
 ghul cache clear                            # empty the compiled-script cache
-ghul repl                                   # an interactive session
+ghul repl [--no-server] [--no-default-use]   # an interactive session
 ghul version                                # print ghul's and ghul.compiler's versions
 ```
 
@@ -70,23 +70,39 @@ the whole compiled-script cache outright.
 
 ## The REPL
 
-`ghul repl` starts an interactive session. Type as many lines as you like
-and end with a blank one to submit them; what you write is compiled and run
-straight away, and what it declares stays available to everything you type
-afterwards:
+`ghul repl` starts an interactive session. What you type is compiled and
+run as soon as it is finished, and what it declares stays available to
+everything you type afterwards:
 
 ```
-> let names mut = Collections.LIST[string]()
+> let names mut = LIST[string]()
 > names.add("first")
->
-> names.add("second")
+> for name in ["second", "third"] do
+|     names.add(name)
+| od
 > names
->
-[first, second]
+[first, second, third]
 ```
+
+A line that finishes what you have typed submits it. One that leaves
+something open - a block with no closing keyword, an open bracket, an
+operator with nothing after it - waits for more with a `|` prompt, and a
+blank line submits whatever is there regardless. Text that can never be
+finished is submitted straight away, so its errors are reported at once.
 
 A submission that ends on a value shows it, so the last line above needs
 no `write_line`. A submission that ends on a statement shows nothing.
+
+The compiler's default imports (`use default`) are in force in every
+submission, so `write_line`, the pipes and the collections need no `use`.
+`ghul repl --no-default-use` leaves them out. A `use` you type stays in
+force for every later submission, the same as a definition does:
+
+```
+> use IO.Path.combine
+> combine("a", "b")
+a/b
+```
 
 Redefining something replaces it going forward, rather than editing what has
 already run: a later cell sees the new one, and code compiled earlier keeps
@@ -96,10 +112,18 @@ so `let x = 41` followed later by `let x = "now a string"` is fine.
 `:help` lists the commands, `:reset` starts a fresh session, and `:quit`
 leaves.
 
-Each submission is compiled as its own small library and loaded into the
-session, so three things are true of this version:
+The session keeps one compiler running for its whole length, started
+before the first prompt so that it warms up while you type. The first
+submission takes about a second; after that a submission takes a fifth of
+a second or so from Enter to its answer, most of it spent working out
+whether the line finishes a submission, which is asked each time Enter is
+pressed. `ghul repl --no-server` starts the compiler afresh for each
+submission instead, well over a second each, and the session does the same by itself, saying so once, if the
+running compiler fails or stops answering.
 
-- A submission takes about a second, nearly all of it starting the compiler.
+Each submission is compiled as its own small library and loaded into the
+session, so two things are true of this version:
+
 - A name beginning with `_` is private to the submission that declares it:
   each submission is its own assembly, and such a name does not leave one.
 - A trait declared in one submission can be implemented in a later one, but
@@ -107,7 +131,7 @@ session, so three things are true of this version:
 
 Each of those is this version of the REPL rather than something about the
 language, and each is lifted by a later one. The session needs
-`ghul.compiler` 59.3.0 or newer, and says so if an older one is installed.
+`ghul.compiler` 59.6.0 or newer, and says so if an older one is installed.
 
 The session itself - the accepted cells, the import prelude each new
 submission needs, and what a compiled cell exports - is published
