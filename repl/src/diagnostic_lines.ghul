@@ -1,6 +1,10 @@
 namespace Ghul.Repl is
     use System.Text.RegularExpressions.Regex
 
+    // Where a cell sits in the session, and how many generated lines
+    // come before what the user wrote.
+    class CELL_SPAN(index: int, prelude_lines: int);
+
     // The compiler is given the generated prelude and the user's text as
     // one file, so every line it reports is that many lines further down
     // than what the user wrote. Subtracting the prelude puts the numbers
@@ -34,6 +38,57 @@ namespace Ghul.Repl is
             let tail = m.groups["tail"].value
 
             "{head}: {start_line - prelude_lines},{start_column}..{end_line - prelude_lines},{end_column}: {tail}"
+        si
+
+        // The diagnostic as the user is shown it: every location in a cell
+        // of the session, related ones included, names the cell by its
+        // label and counts lines from the first the user wrote, using the
+        // prelude of the cell it points into. A location in some other
+        // file, or in a cell's generated prelude, is left as it is.
+        for_display(diagnostic: CELL_DIAGNOSTIC, cells: Collections.Map[string, CELL_SPAN]) -> CELL_DIAGNOSTIC static is
+            let related = Collections.LIST[CELL_RELATED]()
+
+            for r in diagnostic.related do
+                related.add(CELL_RELATED(r.message, _for_display(r.location, cells)))
+            od
+
+            return CELL_DIAGNOSTIC(
+                _for_display(diagnostic.location, cells),
+                diagnostic.severity,
+                diagnostic.code,
+                diagnostic.message,
+                related)
+        si
+
+        _for_display(location: CELL_LOCATION?, cells: Collections.Map[string, CELL_SPAN]) -> CELL_LOCATION? static is
+            if !location? then
+                return null
+            fi
+
+            let file = IO.Path.get_file_name(location.path) ?? ""
+
+            if !file.ends_with(".ghul") then
+                return location
+            fi
+
+            let name = file.substring(0, file.length - 5)
+
+            if !cells.contains_key(name) then
+                return location
+            fi
+
+            let span = cells[name]
+
+            if location.start_line <= span.prelude_lines then
+                return location
+            fi
+
+            return CELL_LOCATION(
+                cell_label_for(span.index),
+                location.start_line - span.prelude_lines,
+                location.start_column,
+                location.end_line - span.prelude_lines,
+                location.end_column)
         si
     si
 si

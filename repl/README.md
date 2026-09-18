@@ -13,6 +13,13 @@ carried into every later cell's prelude too, and every prelude begins with
 prelude leaves out the imports its own cell writes, so its length varies
 from cell to cell; `request.prelude_line_count` is the one to use.
 
+A host hands back the compiler's diagnostics in `CELL_REPLY`, either as
+`CELL_DIAGNOSTIC`s or as the compiler's own lines, which it takes apart.
+`accept` returns them as the user should see them: every location in a
+cell, related ones included, names the cell by its label (`cell-3`) and
+counts lines from the first the user wrote. `CELL_ERROR.describe` does the
+same for an exception a cell threw.
+
 This package compiles nothing, loads nothing, runs nothing and names no
 file. A host drives it in three steps:
 

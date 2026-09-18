@@ -104,6 +104,10 @@ force for every later submission, the same as a definition does:
 a/b
 ```
 
+Messages name a submission by its label, `cell-3` for the third. Its name
+in code is `cell3`, which is what `cell3.x` reaches an earlier submission's
+`x` through.
+
 Redefining something replaces it going forward, rather than editing what has
 already run: a later cell sees the new one, and code compiled earlier keeps
 the behaviour it was compiled against. Redefining at a new type is allowed,

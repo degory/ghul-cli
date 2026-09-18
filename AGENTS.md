@@ -51,7 +51,10 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
   since two imports of one name are a duplicate even when they name
   different things, and leaves out any the cell writes itself so the
   user's own line is the one compiled; `prelude_line_count` is per cell
-  as a result. It compiles nothing, loads nothing, runs nothing and names
+  as a result. `accept` shows diagnostics as `DIAGNOSTIC_LINES.for_display`
+  maps them: a cell is named `cell-<N>` and its lines counted past the
+  prelude of the cell a location points into, which is why the session
+  keeps each cell's prelude length. It compiles nothing, loads nothing, runs nothing and names
   no file: a host calls `prepare(source)` for the request, compiles that
   however it likes, and calls `accept(request, reply)` with what came
   back. `CELL_EXPORTS.read` takes an assembly the host has already

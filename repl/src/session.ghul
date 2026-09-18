@@ -28,11 +28,32 @@ namespace Ghul.Repl is
         references: Collections.List[string]
     );
 
-    // What the host got back. The diagnostics are the compiler's own
-    // lines, still carrying the line numbers of the text that was
-    // compiled. A cell that compiled arrives with its loaded form; one
-    // that did not arrives with none, and the session is left as it was.
-    class CELL_REPLY(diagnostics: Collections.List[string], loaded: LOADED_CELL?);
+    // What the host got back. The diagnostics still carry the paths and
+    // line numbers of the text that was compiled. A cell that compiled
+    // arrives with its loaded form; one that did not arrives with none,
+    // and the session is left as it was.
+    class CELL_REPLY is
+        diagnostics: Collections.List[CELL_DIAGNOSTIC]
+        loaded: LOADED_CELL?
+
+        init(diagnostics: Collections.List[CELL_DIAGNOSTIC], loaded: LOADED_CELL?) is
+            self.diagnostics = diagnostics
+            self.loaded = loaded
+        si
+
+        // For a host holding only the compiler's own lines, which are
+        // taken apart here.
+        init(lines: Collections.List[string], loaded: LOADED_CELL?) is
+            let parsed = LIST[CELL_DIAGNOSTIC]()
+
+            for line in lines do
+                parsed.add(CELL_DIAGNOSTIC.parse(line))
+            od
+
+            diagnostics = parsed
+            self.loaded = loaded
+        si
+    si
 
     // What a submission did. A cell that compiled is accepted whatever
     // its own code then does: its definitions exist and later cells can
@@ -56,6 +77,11 @@ namespace Ghul.Repl is
     // stays in force the way a definition does.
     class SESSION is
         _cells: LIST[CELL]
+
+        // Each accepted cell's index and prelude length, by name, so a
+        // diagnostic pointing into an earlier cell is shown where the
+        // user wrote it.
+        _spans: Collections.MAP[string, CELL_SPAN]
         _want_default_use: bool
 
         // One import per name, newest first: a later cell's definition
@@ -73,6 +99,7 @@ namespace Ghul.Repl is
 
         init(want_default_use: bool) is
             _cells = LIST[CELL]()
+            _spans = Collections.MAP[string, CELL_SPAN]()
             _want_default_use = want_default_use
             _bindings = Collections.MAP[string, string]()
             _wildcards = LIST[string]()
@@ -168,19 +195,25 @@ namespace Ghul.Repl is
         // Take the answer to a request. A cell that compiled joins the
         // session, and its names and its own imports are visible to
         // every later one; one that did not leaves the session exactly as
-        // it was. The diagnostics come back with the generated prelude
-        // subtracted, so their line numbers are the user's own again.
+        // it was. The diagnostics come back naming each cell by its label
+        // and with its generated prelude subtracted, so what they point
+        // at is what the user wrote.
         accept(request: CELL_REQUEST, reply: CELL_REPLY) -> SUBMIT_OUTCOME is
             let diagnostics = LIST[string]()
 
-            for line in reply.diagnostics do
-                diagnostics.add(DIAGNOSTIC_LINES.strip_prelude(line, request.prelude_line_count))
+            let spans = Collections.MAP[string, CELL_SPAN](_spans)
+
+            spans[request.name] = CELL_SPAN(request.index, request.prelude_line_count)
+
+            for diagnostic in reply.diagnostics do
+                diagnostics.add(DIAGNOSTIC_LINES.for_display(diagnostic, spans).render())
             od
 
             if let loaded = reply.loaded then
                 let cell = CELL(request.index, request.name, request.source, loaded.exports)
 
                 _cells.add(cell)
+                _spans[cell.name] = CELL_SPAN(request.index, request.prelude_line_count)
 
                 _carry_imports(_user_text(request))
 

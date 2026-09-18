@@ -1,5 +1,6 @@
 namespace Ghul.Cli.Repl is
     use Collections.LIST
+    use Ghul.Repl.CELL_DIAGNOSTIC
     use Ghul.Repl.CELL_REQUEST
     use IO.Directory
     use IO.File
@@ -7,7 +8,7 @@ namespace Ghul.Cli.Repl is
 
     // What compiling one cell produced: where the assembly was written,
     // where it compiled, and the compiler's own diagnostic lines.
-    class COMPILE_RESULT(assembly_path: string?, diagnostics: Collections.List[string]) is
+    class COMPILE_RESULT(assembly_path: string?, diagnostics: Collections.List[CELL_DIAGNOSTIC]) is
         is_success: bool => assembly_path?
     si
 
@@ -93,7 +94,7 @@ namespace Ghul.Cli.Repl is
             // the cell rather than where the session happens to keep it.
             start_info.argument_list.add("{request.name}.ghul")
 
-            let diagnostics = LIST[string]()
+            let diagnostics = LIST[CELL_DIAGNOSTIC]()
 
             if let process = System.Diagnostics.Process.start(start_info) then
                 // Both streams are read at once, as everything else here
@@ -113,7 +114,7 @@ namespace Ghul.Cli.Repl is
                     let trimmed = line.trim()
 
                     if trimmed.length > 0 /\ !trimmed.starts_with("***") /\ !trimmed.starts_with("!!!") then
-                        diagnostics.add(trimmed)
+                        diagnostics.add(CELL_DIAGNOSTIC.parse(trimmed))
                     fi
                 od
 
@@ -124,7 +125,7 @@ namespace Ghul.Cli.Repl is
                 return COMPILE_RESULT(null, diagnostics)
             fi
 
-            diagnostics.add("ghul: failed to start the compiler")
+            diagnostics.add(CELL_DIAGNOSTIC.parse("ghul: failed to start the compiler"))
 
             return COMPILE_RESULT(null, diagnostics)
         si

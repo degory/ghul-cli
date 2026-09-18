@@ -1,0 +1,118 @@
+namespace Ghul.Repl is
+    use Collections.LIST
+    use System.Text.RegularExpressions.Regex
+
+    // A range in a file, as the compiler reports one: lines and columns
+    // from 1, the end column one past the last character.
+    class CELL_LOCATION(
+        path: string,
+        start_line: int,
+        start_column: int,
+        end_line: int,
+        end_column: int
+    ) is
+        render() -> string => "{path}: {start_line},{start_column}..{end_line},{end_column}"
+    si
+
+    // A second place a diagnostic points at, with what is there. With no
+    // location it sits on the diagnostic's own position, and only its
+    // message is worth showing.
+    class CELL_RELATED(message: string, location: CELL_LOCATION?);
+
+    // One compiler diagnostic, taken apart. Where the compiler's line
+    // could not be read as one, the location is absent and the message
+    // is the whole line.
+    class CELL_DIAGNOSTIC(
+        location: CELL_LOCATION?,
+        severity: string,
+        code: string?,
+        message: string,
+        related: Collections.List[CELL_RELATED]
+    ) is
+        // As a batch compile writes it: the position, the severity, a
+        // slug in brackets where there is one, the message, and each
+        // related location in brackets after it.
+        render() -> string is
+            let location = self.location
+
+            if !location? then
+                return message
+            fi
+
+            let slug = if code? /\ code.length > 0 then "[{code}] " else "" fi
+            let result = System.Text.StringBuilder("{location.render()}: {severity}: {slug}{message}")
+
+            for r in related do
+                if let at = r.location then
+                    result.append(" [{r.message}: {at.render()}]")
+                else
+                    result.append(" [{r.message}]")
+                fi
+            od
+
+            return result.to_string()
+        si
+
+        // One line of a batch compile's output. A trailing bracketed
+        // `message: path: L,C..L,C` is a related location; anything
+        // else in brackets is left in the message.
+        parse(line: string) -> CELL_DIAGNOSTIC static is
+            let head = Regex.match(
+                line,
+                "^(?<path>.*?): (?<sl>[0-9]+),(?<sc>[0-9]+)\\.\\.(?<el>[0-9]+),(?<ec>[0-9]+): (?<severity>[a-z]+): (?<rest>.*)$")
+
+            if !head.success then
+                return CELL_DIAGNOSTIC(null, "", null, line, LIST[CELL_RELATED]())
+            fi
+
+            let location =
+                CELL_LOCATION(
+                    head.groups["path"].value,
+                    int.parse(head.groups["sl"].value),
+                    int.parse(head.groups["sc"].value),
+                    int.parse(head.groups["el"].value),
+                    int.parse(head.groups["ec"].value))
+
+            let rest mut = head.groups["rest"].value
+            let related = LIST[CELL_RELATED]()
+
+            do
+                let tail = Regex.match(
+                    rest,
+                    " \\[(?<message>[^\\[\\]]*): (?<path>[^\\[\\]]+?): (?<sl>[0-9]+),(?<sc>[0-9]+)\\.\\.(?<el>[0-9]+),(?<ec>[0-9]+)\\]$")
+
+                if !tail.success then
+                    break
+                fi
+
+                related.insert(
+                    0,
+                    CELL_RELATED(
+                        tail.groups["message"].value,
+                        CELL_LOCATION(
+                            tail.groups["path"].value,
+                            int.parse(tail.groups["sl"].value),
+                            int.parse(tail.groups["sc"].value),
+                            int.parse(tail.groups["el"].value),
+                            int.parse(tail.groups["ec"].value))))
+
+                rest = rest.substring(0, tail.index)
+            od
+
+            let code: string? mut = null
+            let slug = Regex.match(rest, "^\\[(?<code>[a-z0-9-]+)\\] ")
+
+            if slug.success then
+                code = slug.groups["code"].value
+                rest = rest.substring(slug.length)
+            fi
+
+            return CELL_DIAGNOSTIC(location, head.groups["severity"].value, code, rest, related)
+        si
+    si
+
+    // What a cell is called wherever the user is shown it. Its
+    // submission name is `cell<N>`, since that is its namespace and has
+    // to be an identifier; the label only has to be read.
+    cell_label_for(index: int) -> string => "cell-{index}"
+si
