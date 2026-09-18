@@ -1,0 +1,115 @@
+namespace Ghul.Cli.Repl is
+    use Collections.LIST
+    use IO.Directory
+    use IO.File
+    use IO.Path
+
+    // Compiles each cell by spawning the compiler, the way the rest of
+    // this tool does. About a second a cell, nearly all of it process
+    // start-up and building the metadata context over the reference
+    // pack, which is why a resident backend is what the latency target
+    // eventually needs.
+    class SPAWN_BACKEND(_compiler_shim: string, _session_directory: string, _runtime_assembly: string?): CompileBackend is
+        compile(
+            index: int,
+            source: string,
+            references: Collections.List[string]
+        ) -> COMPILE_RESULT is
+            Directory.create_directory(_session_directory)
+
+            // The marker the compiler stops at when it derives a
+            // namespace-less file's namespace from its path: without it
+            // the name would carry the whole temporary path.
+            let marker = Path.join([_session_directory, "ghul.json"])
+
+            if !File.exists(marker) then
+                File.write_all_text(marker, "{{}}")
+            fi
+
+            // A cell's assembly references the ghūl runtime, and the
+            // host process that loads it has to be able to find it: its
+            // own copy is whatever version this tool was built against,
+            // which is not the version the cells were compiled against.
+            if let runtime = _runtime_assembly /\ File.exists(runtime) then
+                let beside_cells = Path.join([_session_directory, Path.get_file_name(runtime)!])
+
+                if !File.exists(beside_cells) then
+                    File.copy(runtime, beside_cells, false)
+                fi
+            fi
+
+            let source_path = Path.join([_session_directory, "{CELL_FILE_STEM}{index}.ghul"])
+            let output_path = Path.join([_session_directory, "{CELL_FILE_STEM}{index}.dll"])
+
+            File.write_all_text(source_path, source)
+
+            let start_info = System.Diagnostics.ProcessStartInfo()
+
+            start_info.file_name = _compiler_shim
+            start_info.use_shell_execute = false
+            start_info.redirect_standard_output = true
+            start_info.redirect_standard_error = true
+            start_info.working_directory = _session_directory
+
+            start_info.argument_list.add("--library")
+
+            // Naming any reference at all takes the compiler off its own
+            // discovery of the framework's, so the whole set has to be
+            // named here. DELETE once `--reference` (which adds to the
+            // discovered set rather than replacing it) is published:
+            // then only the cells below need naming.
+            for reference in SDK_REFERENCES.discover(_runtime_assembly) do
+                start_info.argument_list.add("-a")
+                start_info.argument_list.add(reference)
+            od
+
+            for reference in references do
+                start_info.argument_list.add("-a")
+                start_info.argument_list.add(reference)
+            od
+
+            start_info.argument_list.add("-o")
+            start_info.argument_list.add(output_path)
+            start_info.argument_list.add(source_path)
+
+            let diagnostics = LIST[string]()
+
+            if let process = System.Diagnostics.Process.start(start_info) then
+                // Both streams are read at once, as everything else here
+                // that redirects a child's output does: reading one to
+                // the end first deadlocks as soon as the other fills its
+                // pipe buffer, which a cell with a long diagnostic dump
+                // does.
+                let out_task = process.standard_output.read_to_end_async()
+                let err_task = process.standard_error.read_to_end_async()
+
+                process.wait_for_exit()
+
+                let out = out_task.result
+                let err = err_task.result
+
+                for line in "{err}{out}".split(['\n']) do
+                    let trimmed = line.trim()
+
+                    if trimmed.length > 0 /\ !trimmed.starts_with("***") /\ !trimmed.starts_with("!!!") then
+                        diagnostics.add(trimmed)
+                    fi
+                od
+
+                if process.exit_code == 0 /\ File.exists(output_path) then
+                    return COMPILE_RESULT(output_path, diagnostics)
+                fi
+
+                return COMPILE_RESULT(null, diagnostics)
+            fi
+
+            diagnostics.add("ghul: failed to start the compiler")
+
+            return COMPILE_RESULT(null, diagnostics)
+        si
+    si
+
+    // The stem of each cell's file name, which is also what the
+    // compiler's derived namespace ends with.
+    CELL_FILE_STEM: string => "cell"
+si

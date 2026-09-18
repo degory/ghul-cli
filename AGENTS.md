@@ -41,6 +41,20 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
   `AssemblyInformationalVersion` (the same reflection idiom `ghul`'s own
   `--version` uses in `ghul/src/driver/main.ghul`) alongside the installed
   `ghul.compiler` version, if any.
+- `src/repl/` — the interactive session behind `ghul repl`. `SESSION`
+  holds the accepted cells and generates each submission's import
+  prelude (one `use` per visible name, naming the cell that last defined
+  it) with no console I/O anywhere in it, so a notebook kernel or the
+  playground can drive the same object. A cell is compiled through the
+  `CompileBackend` interface - `SPAWN_BACKEND` runs the compiler per
+  cell, about a second each - and loaded by `CellHost`, which reads what
+  the cell exported off the emitted assembly and invokes its entry.
+  `SDK_REFERENCES` exists only because naming any reference takes the
+  compiler off its own discovery of the framework's, so a cell that
+  references an earlier one has to name them all: delete it when the
+  compiler publishes a reference flag that adds to the discovered set.
+  `SUBMISSION_END` is the blank-line rule, in one place because a real
+  completeness answer needs a compiler mode that does not exist yet.
 - `unit-tests/` — MSTest project covering the pure path/cache-key/
   runnable-by-default/stdin-marker/source-resolution logic.
 - `tests/smoke.sh` — end-to-end test: builds the tool, points it at a real

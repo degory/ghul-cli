@@ -1,0 +1,206 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+
+    use Ghul.Cli.Repl.CELL
+    use Ghul.Cli.Repl.CellHost
+    use Ghul.Cli.Repl.CompileBackend
+    use Ghul.Cli.Repl.COMPILE_RESULT
+    use Ghul.Cli.Repl.DIAGNOSTIC_LINES
+    use Ghul.Cli.Repl.LOADED_CELL
+    use Ghul.Cli.Repl.SESSION
+    use Ghul.Cli.Repl.SUBMISSION_END
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    // A backend that compiles nothing: it records what it was asked to
+    // compile, and answers however the test says.
+    class FAKE_BACKEND(_succeeds: bool, _diagnostics: Collections.List[string]): CompileBackend is
+        sources: LIST[string] public
+
+        init(..) is
+            sources = LIST[string]()
+        si
+
+        compile(
+            index: int,
+            source: string,
+            references: Collections.List[string]
+        ) -> COMPILE_RESULT is
+            sources.add(source)
+
+            if _succeeds then
+                return COMPILE_RESULT("cell{index}.dll", _diagnostics)
+            fi
+
+            return COMPILE_RESULT(null, _diagnostics)
+        si
+    si
+
+    // A host that loads nothing: each assembly exports whatever the test
+    // queued for it, under a namespace named after the file.
+    class FAKE_HOST(_exports: Collections.List[Collections.List[string]]): CellHost is
+        loads: int public
+        runs: int public
+
+        init(..) is si
+
+        load(assembly_path: string) -> LOADED_CELL is
+            let index = loads
+
+            loads = loads + 1
+
+            let names = if index < _exports.count then _exports[index] else LIST[string]() fi
+
+            return LOADED_CELL("ns{index + 1}", names, null)
+        si
+
+        run(cell: LOADED_CELL) -> string? is
+            runs = runs + 1
+
+            return null
+        si
+    si
+
+    @TestClass()
+    class REPL_SESSION_TESTS is
+        init() is si
+
+        _names(names: Collections.List[string]) -> LIST[Collections.List[string]] is
+            let result = LIST[Collections.List[string]]()
+
+            result.add(names)
+
+            return result
+        si
+
+        @Test()
+        prelude__is_empty_for_the_first_cell() is
+            let session = SESSION(FAKE_BACKEND(true, LIST[string]()), FAKE_HOST(LIST[Collections.List[string]]()))
+
+            assert session.prelude() =~ "";
+        si
+
+        @Test()
+        prelude__imports_every_name_an_accepted_cell_exported() is
+            let session = SESSION(FAKE_BACKEND(true, LIST[string]()), FAKE_HOST(_names(LIST[string](["x", "inc"]))))
+
+            session.submit("let x = 1\n");
+
+            assert session.prelude() =~ "use ns1.inc\nuse ns1.x\n";
+        si
+
+        // The newest definer wins, which is what makes a redefinition
+        // take effect for every later cell.
+        @Test()
+        prelude__names_the_newest_cell_that_defined_each_name() is
+            let exports = LIST[Collections.List[string]]()
+
+            exports.add(LIST[string](["x", "inc"]))
+            exports.add(LIST[string](["x"]))
+
+            let session = SESSION(FAKE_BACKEND(true, LIST[string]()), FAKE_HOST(exports))
+
+            session.submit("let x = 1\n");
+            session.submit("let x = 2\n");
+
+            assert session.prelude() =~ "use ns1.inc\nuse ns2.x\n";
+        si
+
+        @Test()
+        submit__prepends_the_prelude_to_what_the_user_wrote() is
+            let backend = FAKE_BACKEND(true, LIST[string]())
+            let session = SESSION(backend, FAKE_HOST(_names(LIST[string](["x"]))))
+
+            session.submit("let x = 1\n");
+            session.submit("write_line(x)\n");
+
+            assert backend.sources[1] =~ "use ns1.x\nwrite_line(x)\n";
+        si
+
+        // A cell that does not compile is not part of the session: it
+        // exports nothing, it is not loaded, and it is not run.
+        @Test()
+        submit__leaves_no_trace_of_a_cell_that_failed_to_compile() is
+            let host = FAKE_HOST(_names(LIST[string](["x"])))
+            let session = SESSION(FAKE_BACKEND(false, LIST[string](["test.ghul: 1,1..1,2: error: no"])), host)
+
+            let result = session.submit("let x = 1\n");
+
+            assert !result.is_accepted;
+            assert session.cells.count == 0;
+            assert session.prelude() =~ "";
+            assert host.loads == 0;
+            assert host.runs == 0;
+        si
+
+        @Test()
+        submit__accepts_and_runs_a_cell_that_compiled() is
+            let host = FAKE_HOST(_names(LIST[string](["x"])))
+            let session = SESSION(FAKE_BACKEND(true, LIST[string]()), host)
+
+            let result = session.submit("let x = 1\n");
+
+            assert result.is_accepted;
+            assert session.cells.count == 1;
+            assert host.runs == 1;
+        si
+    si
+
+    @TestClass()
+    class REPL_DIAGNOSTIC_TESTS is
+        init() is si
+
+        // The user's line 1 is the file's line 3 when two lines of
+        // prelude went in front of it.
+        @Test()
+        strip_prelude__moves_a_diagnostic_back_past_the_prelude() is
+            let mapped = DIAGNOSTIC_LINES.strip_prelude("cell2.ghul: 4,5..4,9: error: symbol not found: y", 2);
+
+            assert mapped =~ "cell2.ghul: 2,5..2,9: error: symbol not found: y";
+        si
+
+        // A diagnostic about the generated lines themselves is left
+        // alone: the user did not write them and cannot fix them.
+        @Test()
+        strip_prelude__leaves_a_diagnostic_in_the_prelude_alone() is
+            let line = "cell2.ghul: 1,5..1,9: error: symbol not found: y"
+
+            assert DIAGNOSTIC_LINES.strip_prelude(line, 2) =~ line;
+        si
+
+        @Test()
+        strip_prelude__leaves_a_line_alone_when_there_is_no_prelude() is
+            let line = "cell1.ghul: 3,5..3,9: error: symbol not found: y"
+
+            assert DIAGNOSTIC_LINES.strip_prelude(line, 0) =~ line;
+        si
+
+        @Test()
+        strip_prelude__leaves_a_line_it_cannot_read_alone() is
+            let line = "ghul: failed to start the compiler"
+
+            assert DIAGNOSTIC_LINES.strip_prelude(line, 2) =~ line;
+        si
+    si
+
+    @TestClass()
+    class REPL_SUBMISSION_END_TESTS is
+        init() is si
+
+        @Test()
+        is_complete__is_true_for_a_blank_line_after_something() is
+            assert SUBMISSION_END.is_complete(LIST[string](["let x = 1"]), "");
+        si
+
+        @Test()
+        is_complete__is_false_for_a_blank_line_with_nothing_typed() is
+            assert !SUBMISSION_END.is_complete(LIST[string](), "");
+        si
+
+        @Test()
+        is_complete__is_false_for_a_line_with_content() is
+            assert !SUBMISSION_END.is_complete(LIST[string](["let x = 1"]), "let y = 2");
+        si
+    si
+si

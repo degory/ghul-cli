@@ -1,0 +1,136 @@
+namespace Ghul.Cli.Repl is
+    use Collections.LIST
+    use IO.Directory
+    use IO.Path
+
+    // DELETE THIS FILE once the compiler publishes `--reference`, which
+    // adds a reference to the set it discovers for itself rather than
+    // replacing it. Until then a cell that references an earlier cell
+    // has to name the framework's assemblies too, so this repeats the
+    // compiler's own rule for finding them - the newest reference pack
+    // under the .NET root - which is knowledge that belongs there and
+    // not here, and will go silently out of step if that rule changes.
+    class SDK_REFERENCES is
+        // Every assembly a cell compiles against, before the session's
+        // own: the framework's reference pack, and the ghūl runtime
+        // beside the compiler.
+        discover(runtime_assembly: string?) -> Collections.List[string] static is
+            let result = LIST[string]()
+
+            if let pack = reference_pack() then
+                let files = LIST[string](Directory.get_files(pack, "*.dll"))
+
+                files.sort()
+
+                for file in files do
+                    result.add(file)
+                od
+            fi
+
+            if let runtime = runtime_assembly /\ IO.File.exists(runtime) then
+                result.add(runtime)
+            fi
+
+            return result
+        si
+
+        reference_pack() -> string? static is
+            let root = dotnet_root()
+
+            if !root? then
+                return null
+            fi
+
+            let packs = Path.join([root, "packs", "Microsoft.NETCore.App.Ref"])
+
+            if !Directory.exists(packs) then
+                return null
+            fi
+
+            let newest = newest_version_directory(packs)
+
+            if !newest? then
+                return null
+            fi
+
+            let reference_path = Path.join([newest, "ref", TARGET_FRAMEWORK])
+
+            if !Directory.exists(reference_path) then
+                return null
+            fi
+
+            return reference_path
+        si
+
+        // Where the running host itself came from, which is the .NET
+        // installation a spawned compiler will use as well. The runtime
+        // directory is `<root>/shared/Microsoft.NETCore.App/<version>`,
+        // so the root is three levels above it.
+        dotnet_root() -> string? static is
+            if let configured = System.Environment.get_environment_variable("DOTNET_ROOT") /\ Directory.exists(configured) then
+                return configured
+            fi
+
+            let runtime_directory =
+                System.Runtime.InteropServices.RuntimeEnvironment.get_runtime_directory()
+
+            if !runtime_directory? \/ runtime_directory.length == 0 then
+                return null
+            fi
+
+            let current mut = runtime_directory.trim_end([Path.directory_separator_char])
+
+            for i in 0..3 do
+                let parent = Path.get_directory_name(current)
+
+                if !parent? \/ parent.length == 0 then
+                    return null
+                fi
+
+                current = parent
+            od
+
+            if !Directory.exists(current) then
+                return null
+            fi
+
+            return current
+        si
+
+        // Reference packs are named by version, and the versions sort as
+        // their parts rather than as text, so 10.0.2 is not newer than
+        // 10.0.12.
+        newest_version_directory(packs: string) -> string? static is
+            let best: string? mut = null
+            let best_version: System.Version? mut = null
+
+            for directory in Directory.get_directories(packs) do
+                let name = Path.get_file_name(directory)
+
+                if !name? then
+                    continue
+                fi
+
+                let version: System.Version? mut
+
+                if !System.Version.try_parse(name, version ref) \/ !version? then
+                    continue
+                fi
+
+                if !best_version? \/ version > best_version then
+                    best = directory
+                    best_version = version
+                fi
+            od
+
+            return best
+        si
+    si
+
+    TARGET_FRAMEWORK: string => "net10.0"
+
+    // Every session directory starts with this, so the namespace the
+    // compiler derives from a cell's path starts with a letter and is a
+    // plain identifier.
+    REPL_SESSION_PREFIX: string => "ghulrepl_"
+si

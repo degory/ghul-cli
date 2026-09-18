@@ -31,6 +31,7 @@ ghul run [--no-cache] <script> [args...]    # run unconditionally
 ghul compile [--no-cache] <script.ghul>     # compile and print the path to the result
 ghul install-compiler [version]             # install (or update) ghul.compiler
 ghul cache clear                            # empty the compiled-script cache
+ghul repl                                   # an interactive session
 ghul version                                # print ghul's and ghul.compiler's versions
 ```
 
@@ -66,6 +67,47 @@ curl -fsSL https://example.com/greet.ghul | ghul -
 exists — useful if a cached result ever looks wrong and a rebuild is wanted
 without reaching for `ghul cache clear` first. `ghul cache clear` empties
 the whole compiled-script cache outright.
+
+## The REPL
+
+`ghul repl` starts an interactive session. Type as many lines as you like
+and end with a blank one to submit them; what you write is compiled and run
+straight away, and what it declares stays available to everything you type
+afterwards:
+
+```
+> let names mut = Collections.LIST[string]()
+> names.add("first")
+>
+> names.add("second")
+> IO.Std.write_line("{names.count}")
+>
+2
+```
+
+Redefining something replaces it going forward, rather than editing what has
+already run: a later cell sees the new one, and code compiled earlier keeps
+the behaviour it was compiled against. Redefining at a new type is allowed,
+so `let x = 41` followed later by `let x = "now a string"` is fine.
+
+`:help` lists the commands, `:reset` starts a fresh session, and `:quit`
+leaves.
+
+Each submission is compiled as its own small library and loaded into the
+session, so four things are true of this first version:
+
+- A submission takes about a second, nearly all of it starting the compiler.
+- A class or trait declared in one submission cannot be subclassed or
+  implemented in a later one: each submission is its own assembly, and a
+  ghūl class is closed to the assembly that declares it. Declare both in the
+  same submission.
+- A name beginning with `_` is private to the submission that declares it,
+  for the same reason.
+- A submission's value is not printed. Write `IO.Std.write_line` to see
+  something.
+
+Each of those is the first version of the REPL rather than something about
+the language, and each is lifted by a later one.
 
 ## Installing
 
