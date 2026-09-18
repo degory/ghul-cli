@@ -647,13 +647,8 @@ namespace Ghul.Cli is
                     options.want_default_use,
                     say)
 
-            let check = Host.COMPLETENESS_CHECK(compiler_shim, Host.HOST_SESSIONS.new_session_directory())
-
             let terminal =
-                Repl.TERMINAL(
-                    make_session,
-                    Repl.SUBMISSION_END(text => check.check(text)),
-                    options.want_default_use)
+                Repl.TERMINAL(make_session, options.want_default_use)
 
             return run_closing_on_signal(terminal)
         fi

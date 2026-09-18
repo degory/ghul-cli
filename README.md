@@ -112,6 +112,8 @@ Redefining something replaces it going forward, rather than editing what has
 already run: a later cell sees the new one, and code compiled earlier keeps
 the behaviour it was compiled against. Redefining at a new type is allowed,
 so `let x = 41` followed later by `let x = "now a string"` is fine.
+A redefinition can read the value it replaces: after `let x = 10, y = 20`,
+`let x = x + y` makes `x` 30.
 
 `:help` lists the commands, `:reset` starts a fresh session, and `:quit`
 leaves.

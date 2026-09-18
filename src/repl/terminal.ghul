@@ -45,12 +45,18 @@ namespace Ghul.Cli.Repl is
     // report what happened. Everything it knows about a cell it learns
     // from SESSION, so a notebook or the playground can take its place
     // without any of this.
-    class TERMINAL(_make_session: () -> HOSTED_SESSION, _submission_end: SUBMISSION_END, _want_default_use: bool) is
+    class TERMINAL(_make_session: () -> HOSTED_SESSION, _want_default_use: bool) is
         _display: CELL_DISPLAY
         _current: HOSTED_SESSION?
 
+        _submission_end: SUBMISSION_END
+
         init(..) is
             _display = CELL_DISPLAY()
+
+            // Asked of the session in use, whose compile server answers
+            // it once it is ready.
+            _submission_end = SUBMISSION_END(text => if let session = _current then session.check(text) else Completeness.COMPLETE fi)
         si
 
         run() -> int is

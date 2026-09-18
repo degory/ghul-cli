@@ -70,14 +70,15 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
   `HOST_SESSIONS.start` assembles one. `SERVER_BACKEND` compiles on one
   `ghul-compiler --compile-server` started with the session, falling back to
   `SPAWN_BACKEND` (the compiler per cell, about a second each) for good
-  when the server fails, and for one cell when it reports an error in
-  the generated prelude, which is never the user's (ghul#2773);
+  when the server fails. The server also answers completeness checks
+  once it is ready, which `HOSTED_SESSION.check` asks before falling back
+  to `COMPLETENESS_CHECK`;
   `SESSION_LOAD_CONTEXT` resolves the cells' own ghūl runtime, which is
   not the one this tool was built against; `HOSTED_SESSION` is the three
   steps in order, running an accepted cell after it has joined the
   session, and writes nothing to the console. `COMPLETENESS_CHECK` runs
-  `ghul-compiler --check-complete` (a spawn per call) and answers complete,
-  incomplete or invalid.
+  `ghul-compiler --check-complete` (a spawn per call, a few hundred
+  milliseconds) and answers complete, incomplete or invalid.
 - `src/repl/` — the terminal front end. `SUBMISSION_END` submits on any
   answer but incomplete; a blank line forces submission. The session needs
   `ghul.compiler` `MINIMUM_REPL_COMPILER` or newer, for `--submission`,

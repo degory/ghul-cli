@@ -86,6 +86,16 @@ namespace Ghul.Repl.Host is
             return SUBMIT_RESULT(true, outcome.diagnostics, run.value, run.error)
         si
 
+        // Asked when the backend cannot say whether text is complete.
+        completeness_fallback: COMPLETENESS_CHECK? public
+
+        // Whether typed text is complete: asked of the backend, which
+        // answers from the compile server when there is one, and
+        // otherwise of the fallback. With neither, text counts as
+        // complete and goes to the compiler.
+        check(text: string) -> Completeness =>
+            _backend.check(text) ?? completeness_fallback?.check(text) ?? Completeness.COMPLETE
+
         // Ends the session's compiler, if it keeps one running.
         close() is
             _backend.close()
@@ -115,7 +125,11 @@ namespace Ghul.Repl.Host is
                     spawn
                 fi
 
-            return HOSTED_SESSION(backend, directory, want_default_use)
+            let session = HOSTED_SESSION(backend, directory, want_default_use)
+
+            session.completeness_fallback = COMPLETENESS_CHECK(compiler_shim, IO.Path.join([directory, "check"]))
+
+            return session
         si
 
         // A fresh directory under the temporary directory, for one
