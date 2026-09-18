@@ -129,13 +129,9 @@ namespace Ghul.Jupyter is
             when "is_complete_request" then
                 _is_complete(channel, request)
             when "complete_request" then
-                channel.send(
-                    _messages.reply(
-                        request,
-                        "complete_reply",
-                        CONTENT.no_completions("", _int_member(request.content, "cursor_pos"))))
+                _complete(channel, request)
             when "inspect_request" then
-                channel.send(_messages.reply(request, "inspect_reply", CONTENT.nothing_found()))
+                _inspect(channel, request)
             when "comm_info_request" then
                 channel.send(_messages.reply(request, "comm_info_reply", CONTENT.no_comms()))
             when "history_request" then
@@ -263,6 +259,57 @@ namespace Ghul.Jupyter is
             channel.send(
                 _messages.reply(request, "execute_reply", CONTENT.execute_reply_ok(_execution_count)))
 
+        si
+
+        // What could be written where the cursor is. The session answers
+        // in the cell's own lines and columns, and Jupyter asks in
+        // characters from the start of the cell, so the position is
+        // converted going in and the replaced range comes back in
+        // characters. Where no analyser is available the answer is no
+        // matches, which is what it was before there was one.
+        _complete(channel: CHANNEL, request: MESSAGE) is
+            let code = JSON.string_member(request.content, "code") ?? ""
+            let cursor_pos = _int_member(request.content, "cursor_pos")
+
+            let matches = LIST[(name: string, detail: string?)]()
+
+            if let found =
+                _session.complete(
+                    code,
+                    CURSOR.line_of(code, cursor_pos),
+                    CURSOR.column_of(code, cursor_pos))
+            then
+                for completion in found do
+                    matches.add((name = completion.name, detail = completion.description))
+                od
+            fi
+
+            channel.send(
+                _messages.reply(
+                    request,
+                    "complete_reply",
+                    CONTENT.completions(matches, CURSOR.word_start(code, cursor_pos), cursor_pos)))
+        si
+
+        // The declaration at the cursor, which a notebook shows when the
+        // user asks what something is.
+        _inspect(channel: CHANNEL, request: MESSAGE) is
+            let code = JSON.string_member(request.content, "code") ?? ""
+            let cursor_pos = _int_member(request.content, "cursor_pos")
+
+            let answer =
+                if let described =
+                    _session.hover(
+                        code,
+                        CURSOR.line_of(code, cursor_pos),
+                        CURSOR.column_of(code, cursor_pos))
+                then
+                    CONTENT.found(described)
+                else
+                    CONTENT.nothing_found()
+                fi
+
+            channel.send(_messages.reply(request, "inspect_reply", answer))
         si
 
         _is_complete(channel: CHANNEL, request: MESSAGE) is

@@ -1,0 +1,62 @@
+namespace Ghul.Jupyter is
+    // Jupyter counts a cursor as characters from the start of the cell;
+    // the session counts lines and columns, both from one. These convert
+    // between them, and find the word a completion would replace.
+    class CURSOR is
+        // The line and column a character offset falls on. An offset past
+        // the end sits at the end, which is where a cursor is when a cell
+        // ends without a newline.
+        line_of(text: string, offset: int) -> int static is
+            let limit = _clamp(text, offset)
+            let line mut = 1
+
+            for i in 0..limit do
+                if text[i] == '\n' then
+                    line = line + 1
+                fi
+            od
+
+            return line
+        si
+
+        column_of(text: string, offset: int) -> int static is
+            let limit = _clamp(text, offset)
+            let column mut = 1
+
+            for i in 0..limit do
+                if text[i] == '\n' then
+                    column = 1
+                else
+                    column = column + 1
+                fi
+            od
+
+            return column
+        si
+
+        // Where the name being completed starts, so a front end replaces
+        // what has been typed of it rather than inserting beside it. The
+        // characters a ghūl name is made of, and no others.
+        word_start(text: string, offset: int) -> int static is
+            let start mut = _clamp(text, offset)
+
+            while start > 0 /\ _is_name_character(text[start - 1]) do
+                start = start - 1
+            od
+
+            return start
+        si
+
+        _is_name_character(c: char) -> bool static =>
+            char.is_letter_or_digit(c) \/ c == '_'
+
+        _clamp(text: string, offset: int) -> int static =>
+            if offset < 0 then
+                0
+            elif offset > text.length then
+                text.length
+            else
+                offset
+            fi
+    si
+si

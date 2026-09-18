@@ -158,15 +158,62 @@ namespace Ghul.Jupyter is
             return JSON.object(members)
         si
 
-        // Nothing to offer yet, shaped so that an answer from analysis
-        // mode drops into the same reply.
-        no_completions(code: string, cursor_pos: int) -> string static is
+        // What could be written where the cursor is. `cursor_start` and
+        // `cursor_end` say what the front end replaces, which is what has
+        // been typed of the name so far.
+        completions(
+            matches: Collections.List[(name: string, detail: string?)],
+            cursor_start: int,
+            cursor_end: int
+        ) -> string static is
+            let names = LIST[string]()
+            let described = LIST[(name: string, value: string)]()
+
+            for match in matches do
+                names.add(JSON.quote(match.name))
+
+                if let detail = match.detail then
+                    described.add((name = match.name, value = JSON.quote(detail)))
+                fi
+            od
+
+            // Where a front end shows more than a name, this is where it
+            // reads it from: the experimental key Jupyter's own kernels
+            // put per-match detail under.
+            let metadata = LIST[(name: string, value: string)]()
+
+            if described.count > 0 then
+                metadata.add((name = "_jupyter_types_experimental", value = JSON.object(described)))
+            fi
+
             let members = LIST[(name: string, value: string)]()
 
             members.add((name = "status", value = JSON.quote("ok")))
-            members.add((name = "matches", value = "[]"))
-            members.add((name = "cursor_start", value = "{cursor_pos}"))
-            members.add((name = "cursor_end", value = "{cursor_pos}"))
+            members.add((name = "matches", value = JSON.array(names)))
+            members.add((name = "cursor_start", value = "{cursor_start}"))
+            members.add((name = "cursor_end", value = "{cursor_end}"))
+            members.add((name = "metadata", value = JSON.object(metadata)))
+
+            return JSON.object(members)
+        si
+
+        no_completions(code: string, cursor_pos: int) -> string static =>
+            completions(LIST[(name: string, detail: string?)](), cursor_pos, cursor_pos)
+
+        // What the declaration at the cursor is, as a front end shows it:
+        // plain text, and the same text as markdown so a notebook that
+        // renders it gets something to render.
+        found(text: string) -> string static is
+            let data = LIST[(name: string, value: string)]()
+
+            data.add((name = "text/plain", value = JSON.quote(text)))
+            data.add((name = "text/markdown", value = JSON.quote("```ghul\n{text}\n```")))
+
+            let members = LIST[(name: string, value: string)]()
+
+            members.add((name = "status", value = JSON.quote("ok")))
+            members.add((name = "found", value = "true"))
+            members.add((name = "data", value = JSON.object(data)))
             members.add((name = "metadata", value = JSON.EMPTY_OBJECT))
 
             return JSON.object(members)

@@ -245,6 +245,30 @@ namespace Ghul.Jupyter.Tests is
             _stream_text(wrote.published).contains("printed"),
             "what a cell writes arrives as a stream message")
 
+        Std.write_line("completion and inspection of an earlier cell's name:")
+
+        _execute(client, "declared_in_an_earlier_cell(n: int) -> int => n * 2\n", null)
+
+        let typed = "declared_in_an_ear"
+
+        let completed = _complete(client, typed, typed.length)
+
+        client.check(
+            _names(completed) |> Ghul.Pipes.any(n => n =~ "declared_in_an_earlier_cell"),
+            "completion offers a name declared in an earlier cell")
+
+        client.check(
+            _int_member(completed, "cursor_start") == 0 /\
+                _int_member(completed, "cursor_end") == typed.length,
+            "and replaces what has been typed of it")
+
+        let inspected = _inspect(client, "declared_in_an_earlier_cell(1)", 3)
+
+        client.check(
+            inspected.contains("declared_in_an_earlier_cell") /\
+                JSON.bool_member(inspected, "found", false),
+            "inspection finds that name's declaration")
+
         Std.write_line("is_complete:")
 
         _is_complete(client, "let x = 1\n", "complete")
@@ -314,6 +338,74 @@ namespace Ghul.Jupyter.Tests is
         client.check(
             reply? /\ JSON.string_member(reply.content, "status") =~ want,
             "{code.trim()} is {want}")
+    si
+
+    _complete(client: CLIENT, code: string, cursor_pos: int) -> string is
+        let sent =
+            client.send(
+                "complete_request",
+                JSON.object(
+                    LIST[(name: string, value: string)]([
+                        (name = "code", value = JSON.quote(code)),
+                        (name = "cursor_pos", value = "{cursor_pos}")
+                    ])))
+
+        let reply = client.reply()
+
+        return if let answer = reply then answer.content else JSON.EMPTY_OBJECT fi
+    si
+
+    _inspect(client: CLIENT, code: string, cursor_pos: int) -> string is
+        let sent =
+            client.send(
+                "inspect_request",
+                JSON.object(
+                    LIST[(name: string, value: string)]([
+                        (name = "code", value = JSON.quote(code)),
+                        (name = "cursor_pos", value = "{cursor_pos}"),
+                        (name = "detail_level", value = "0")
+                    ])))
+
+        let reply = client.reply()
+
+        return if let answer = reply then answer.content else JSON.EMPTY_OBJECT fi
+    si
+
+    // The names a complete_reply offered, read out of its matches array.
+    _names(content: string) -> Collections.List[string] is
+        let names = LIST[string]()
+
+        try
+            let document = System.Text.Json.JsonDocument.parse(content, _)
+            let matches: System.Text.Json.JsonElement mut
+
+            if document.root_element.try_get_property("matches", matches ref) then
+                for match in matches.enumerate_array() do
+                    if let name = match.get_string() then
+                        names.add(name)
+                    fi
+                od
+            fi
+        catch e: System.Text.Json.JsonException
+            return names
+        yrt
+
+        return names
+    si
+
+    _int_member(content: string, name: string) -> int is
+        try
+            let document = System.Text.Json.JsonDocument.parse(content, _)
+            let value: System.Text.Json.JsonElement mut
+
+            if document.root_element.try_get_property(name, value ref) then
+                return value.get_int32()
+            fi
+        catch e: System.Text.Json.JsonException
+            return -1
+        yrt
+
+        return -1
     si
 
     _has(published: Collections.List[MESSAGE], msg_type: string) -> bool is

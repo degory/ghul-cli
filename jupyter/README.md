@@ -58,9 +58,10 @@ Protocol 5.3 over the five ZeroMQ sockets, signed with the connection
 file's key: `kernel_info_request`, `execute_request` (with `stream`,
 `execute_result` and `error` published as the cell runs),
 `is_complete_request` answered by the compiler, `shutdown_request` and
-`interrupt_request`. `complete_request` and `inspect_request` answer
-politely with nothing, shaped so that analysis mode's completion and hover
-can be plugged into them.
+`interrupt_request`. `complete_request` and `inspect_request` are answered
+from the session's own analyser, so a name declared in an earlier cell
+completes and can be inspected in a later one; where no analyser is
+available they answer with nothing rather than failing.
 
 Restarting is the front end starting the process again, so a restart is a
 new session. A cell cannot read standard input.
