@@ -576,8 +576,40 @@ namespace Ghul.Cli is
         return Path.join([Path.get_temp_path(), "{REPL_SESSION_PREFIX}{unique}"])
     si
 
+    // The oldest compiler the session can be built on: `--reference`,
+    // which lets a cell see the cells before it without naming the
+    // framework's assemblies too.
+    MINIMUM_REPL_COMPILER: string => "59.2.0"
+
+    // Whether what is installed is old enough to be missing something
+    // the session needs. A version that does not parse is left alone:
+    // it is a build of the compiler rather than a release, and whoever
+    // installed it knows what it is.
+    is_too_old_for_repl(version: string) -> bool is
+        let installed: System.Version? mut
+        let minimum: System.Version? mut
+
+        if
+            !System.Version.try_parse(version, installed ref) \/ !installed? \/
+            !System.Version.try_parse(MINIMUM_REPL_COMPILER, minimum ref) \/ !minimum?
+        then
+            return false
+        fi
+
+        return installed < minimum
+    si
+
     cmd_repl() -> int is
         let tools_dir = tools_directory()
+
+        if let installed: string = installed_compiler_version(tools_dir) /\ is_too_old_for_repl(installed) then
+            Std.error.write_line(
+                "ghul: the session needs ghul.compiler {MINIMUM_REPL_COMPILER} or newer; {installed} is installed")
+
+            Std.error.write_line("ghul: install-compiler {MINIMUM_REPL_COMPILER} to update it")
+
+            return 1
+        fi
 
         if let compiler_version: string = ensure_compiler_installed(tools_dir, null, false) then
             let compiler_shim = "{tools_dir}/ghul-compiler"

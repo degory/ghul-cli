@@ -53,18 +53,11 @@ namespace Ghul.Cli.Repl is
 
             start_info.argument_list.add("--library")
 
-            // Naming any reference at all takes the compiler off its own
-            // discovery of the framework's, so the whole set has to be
-            // named here. DELETE once `--reference` (which adds to the
-            // discovered set rather than replacing it) is published:
-            // then only the cells below need naming.
-            for reference in SDK_REFERENCES.discover(_runtime_assembly) do
-                start_info.argument_list.add("-a")
-                start_info.argument_list.add(reference)
-            od
-
+            // `--reference` adds to the references the compiler finds for
+            // itself, where `-a` would replace them and leave the cell
+            // without the framework's.
             for reference in references do
-                start_info.argument_list.add("-a")
+                start_info.argument_list.add("--reference")
                 start_info.argument_list.add(reference)
             od
 
@@ -112,4 +105,8 @@ namespace Ghul.Cli.Repl is
     // The stem of each cell's file name, which is also what the
     // compiler's derived namespace ends with.
     CELL_FILE_STEM: string => "cell"
+
+    // Every session directory starts with this, so the namespace the
+    // compiler derives from a cell's path is a plain identifier.
+    REPL_SESSION_PREFIX: string => "ghulrepl_"
 si
