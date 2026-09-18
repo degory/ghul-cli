@@ -10,10 +10,15 @@ namespace Ghul.Jupyter.Tests is
     // anything it checked did not hold.
     entry(args: string[]) -> int is
         if args.count < 2 then
-            Std.error.write_line("usage: jupyter-client <kernel.dll> <directory>")
+            Std.error.write_line("usage: jupyter-client <kernel.dll> <directory> [--abandon]")
 
             return 1
         fi
+
+        // Leaves the kernel to notice for itself that its front end has
+        // gone, which is what happens to a user when the front end
+        // crashes.
+        let want_abandon = args.count > 2 /\ args[2] =~ "--abandon"
 
         let kernel_assembly = args[0]
         let directory = args[1]
@@ -45,19 +50,75 @@ namespace Ghul.Jupyter.Tests is
 
         let process = started
 
+        // The script owns this pid as well: a client killed before its
+        // own cleanup runs - a timeout, a signal - must not leave a
+        // kernel behind.
+        IO.File.write_all_text(IO.Path.join([directory, "kernel.pid"]), "{process.id}")
+
         let client = CLIENT(connection)
 
         try
-            return _drive(client)
+            if want_abandon then
+                return _abandon(client)
+            fi
+
+            let outcome = _drive(client)
+
+            // A kernel told to shut down has to go on its own, and take
+            // its compile server with it.
+            if !_waited_for_exit(process, 10) then
+                Std.error.write_line("the kernel was still running after shutdown_request")
+
+                return 1
+            fi
+
+            return outcome
         finally
             client.close()
 
-            if !process.has_exited then
+            // Not in the abandoning run: leaving it is the point there,
+            // and the script is what makes sure it went.
+            if !want_abandon /\ !process.has_exited then
                 process.kill(true)
             fi
 
             NetMQ.NetMQConfig.cleanup(false)
         yrt
+    si
+
+    // The front end goes without a word: this program checks the kernel
+    // is up, then leaves it running and exits. What the kernel sees is
+    // the process that started it disappearing, which is what a crashed
+    // front end looks like - and which of them noticed is the script's
+    // to check, since this program is the thing that has to go first.
+    _abandon(client: CLIENT) -> int is
+        Std.write_line("abandoning the kernel:")
+
+        client.send("kernel_info_request", JSON.EMPTY_OBJECT)
+
+        if !client.reply()? then
+            Std.error.write_line("the kernel never answered, so there is nothing to abandon")
+
+            return 1
+        fi
+
+        Std.write_line("  the kernel is up; leaving it without a front end")
+
+        return 0
+    si
+
+    _waited_for_exit(process: System.Diagnostics.Process, seconds: int) -> bool is
+        let deadline = System.DateTime.utc_now.add_seconds(cast double(seconds))
+
+        while System.DateTime.utc_now < deadline do
+            if process.has_exited then
+                return true
+            fi
+
+            System.Threading.Thread.sleep(200)
+        od
+
+        return process.has_exited
     si
 
     _drive(client: CLIENT) -> int is
