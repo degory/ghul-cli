@@ -185,16 +185,6 @@ namespace Ghul.Repl.Host is
             when 0 then
                 return COMPILE_RESULT(_files.assembly_path(request.name), reply.diagnostics)
             when 1 then
-                // An error in the lines the session generated is never the
-                // user's. It is what a compile server does when it cannot
-                // import a type from an earlier cell that a compiler started
-                // afresh can, so the cell is compiled that way instead.
-                for line in reply.error_lines do
-                    if line <= request.prelude_line_count then
-                        return null
-                    fi
-                od
-
                 return COMPILE_RESULT(null, reply.diagnostics)
             else
                 // The compiler failing on this cell's source, which
@@ -205,6 +195,57 @@ namespace Ghul.Repl.Host is
 
                 return _give_up(server, "the compile server refused a request: {reply.message ?? "no reason given"}")
             esac
+        si
+
+        // Asked of the server once it is ready, which answers in a few
+        // milliseconds. Until then the check is left to the fallback, so
+        // the first line typed does not wait for the server to warm up.
+        check(text: string) -> Completeness? is
+            let server = _server
+
+            if !server? then
+                return null
+            fi
+
+            if !_is_ready then
+                let first = server.await_ready(0)
+
+                if !first? then
+                    return null
+                fi
+
+                if !_says_ready(first) then
+                    let _ = _give_up(server, "the compile server did not start")
+
+                    return null
+                fi
+
+                _is_ready = true
+            fi
+
+            let answer = server.exchange(_check_line(text), REPLY_TIMEOUT_MS)
+
+            if !answer? then
+                let _ = _give_up(server, "the compile server stopped answering")
+
+                return null
+            fi
+
+            let reply = COMPILE_SERVER_REPLY.parse(answer, "check.ghul")
+
+            if !reply? then
+                let _ = _give_up(server, "the compile server sent something that is not a reply")
+
+                return null
+            fi
+
+            return
+                case reply.completeness
+                when "complete" then Completeness.COMPLETE
+                when "incomplete" then Completeness.INCOMPLETE
+                when "invalid" then Completeness.INVALID
+                else null
+                esac
         si
 
         _give_up(server: ServerConnection, reason: string) -> COMPILE_RESULT? is
@@ -234,6 +275,21 @@ namespace Ghul.Repl.Host is
             yrt
         si
 
+        _check_line(text: string) -> string is
+            let buffer = IO.MemoryStream()
+            let json = System.Text.Json.Utf8JsonWriter(buffer, _)
+
+            json.write_start_object()
+            json.write_string("name", "check")
+            json.write_boolean("check", true)
+            json.write_string("text", text)
+            json.write_end_object()
+            json.flush()
+            json.dispose()
+
+            System.Text.Encoding.utf8.get_string(buffer.to_array())
+        si
+
         _request_line(request: CELL_REQUEST) -> string is
             let buffer = IO.MemoryStream()
             let json = System.Text.Json.Utf8JsonWriter(buffer, _)
@@ -258,12 +314,13 @@ namespace Ghul.Repl.Host is
     si
 
     // One reply from the compile server: its status, why it could not
-    // compile if it says, and the compile's diagnostics.
+    // compile if it says, the compile's diagnostics, and for a check,
+    // whether the text was complete.
     class COMPILE_SERVER_REPLY(
         status: int,
         message: string?,
         diagnostics: Collections.List[CELL_DIAGNOSTIC],
-        error_lines: Collections.List[int]
+        completeness: string?
     ) is
         parse(line: string, file: string) -> COMPILE_SERVER_REPLY? static is
             try
@@ -284,21 +341,16 @@ namespace Ghul.Repl.Host is
                     fi
 
                 let parsed = LIST[CELL_DIAGNOSTIC]()
-                let error_lines = LIST[int]()
 
                 if root.try_get_property("diagnostics", diagnostics ref) /\
                     diagnostics.value_kind == JsonValueKind.ARRAY
                 then
                     for diagnostic in diagnostics.enumerate_array() do
                         parsed.add(_diagnostic(diagnostic, file))
-
-                        if diagnostic.get_property("severity").get_int32() <= 1 then
-                            error_lines.add(diagnostic.get_property("start_line").get_int32())
-                        fi
                     od
                 fi
 
-                return COMPILE_SERVER_REPLY(status.get_int32(), text, parsed, error_lines)
+                return COMPILE_SERVER_REPLY(status.get_int32(), text, parsed, _string(root, "completeness"))
             catch e: System.Exception
                 return null
             yrt

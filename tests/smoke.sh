@@ -368,6 +368,22 @@ if [[ "$repl_extend_out" != *"circle"* ]]; then
     exit 1
 fi
 
+echo "smoke: a redefinition reads the value it replaces..." >&2
+repl_redefine_in="$scratch/repl-redefine-in.txt"
+cat > "$repl_redefine_in" <<'REPL'
+let x = 10, y = 20
+let x = x + y
+x
+:quit
+REPL
+repl_redefine_out="$(dotnet "$cli" repl < "$repl_redefine_in" 2>"$scratch/repl-redefine.err")" || true
+if [[ "$repl_redefine_out" != *"30"* ]]; then
+    echo "smoke: expected 'let x = x + y' to read the earlier x, got:" >&2
+    echo "$repl_redefine_out" >&2
+    cat "$scratch/repl-redefine.err" >&2
+    exit 1
+fi
+
 echo "smoke: a cell that does not compile leaves the session unchanged..." >&2
 repl_bad_in="$scratch/repl-bad-in.txt"
 cat > "$repl_bad_in" <<'REPL'

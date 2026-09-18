@@ -568,8 +568,9 @@ namespace Ghul.Cli is
     // which names the cell's namespace and answers with the value it
     // ended on, `--check-complete`, which says whether what has been
     // typed is finished, and `--compile-server`, which keeps one compiler
-    // running for the session.
-    MINIMUM_REPL_COMPILER: string => "59.6.0"
+    // running for the session, answers that same question, and imports
+    // a type whose base is in another cell.
+    MINIMUM_REPL_COMPILER: string => "59.8.0"
 
     // Whether what is installed is old enough to be missing something
     // the session needs. A version that does not parse is left alone:
@@ -647,13 +648,8 @@ namespace Ghul.Cli is
                     options.want_default_use,
                     say)
 
-            let check = Host.COMPLETENESS_CHECK(compiler_shim, Host.HOST_SESSIONS.new_session_directory())
-
             let terminal =
-                Repl.TERMINAL(
-                    make_session,
-                    Repl.SUBMISSION_END(text => check.check(text)),
-                    options.want_default_use)
+                Repl.TERMINAL(make_session, options.want_default_use)
 
             return run_closing_on_signal(terminal)
         fi
