@@ -1,0 +1,151 @@
+namespace Ghul.Repl is
+    use Collections.LIST
+    use System.Reflection.Assembly
+    use System.Reflection.BindingFlags
+
+    // What running a cell produced.
+    class RUN_RESULT(value: object?, error: string?);
+
+    // A cell's assembly, read: the names later cells can import from it,
+    // and the entry to run. What namespace they sit in is not read back,
+    // since the request already named it.
+    class LOADED_CELL(
+        exports: Collections.List[string],
+        globals: System.Type?
+    );
+
+    // What a cell declared, read off an assembly the host loaded. The
+    // host owns the loading: a terminal reads a file it just wrote, a
+    // browser page loads bytes it was sent into a context it shares with
+    // the earlier cells, and neither wants the other's answer.
+    class CELL_EXPORTS is
+        // Everything public and static on the namespace's globals type,
+        // less the two entry points a host calls itself, plus every
+        // public type in the namespace. The spelling is already ghūl's,
+        // so a name goes into a generated `use` as it is read here.
+        read(assembly: Assembly) -> LOADED_CELL static is
+            let exports = LIST[string]()
+
+            let globals: System.Type? mut = null
+
+            for type in assembly.get_types() do
+                if !type.is_public then
+                    continue
+                fi
+
+                if type.name =~ GLOBALS_TYPE_NAME then
+                    globals = type
+                else
+                    exports.add(type.name)
+                fi
+            od
+
+            if let globals_type = globals then
+                let flags = static_flags(false)
+
+                for method in globals_type.get_methods(flags) do
+                    if !_is_entry_point_name(method.name) /\ !exports.contains(method.name) then
+                        exports.add(method.name)
+                    fi
+                od
+
+                for member in globals_type.get_fields(flags) do
+                    if !exports.contains(member.name) then
+                        exports.add(member.name)
+                    fi
+                od
+            fi
+
+            return LOADED_CELL(exports, globals)
+        si
+
+        // The enum's own `|` does not resolve on a reflected
+        // `BindingFlags`, so the value is built as the bits it is.
+        static_flags(want_non_public: bool) -> BindingFlags static is
+            let flags mut = cast int(BindingFlags.PUBLIC) | cast int(BindingFlags.STATIC)
+
+            if want_non_public then
+                flags = flags | cast int(BindingFlags.NON_PUBLIC)
+            fi
+
+            return cast BindingFlags(flags)
+        si
+
+        _is_entry_point_name(name: string) -> bool static =>
+            name =~ MAIN_ENTRY_NAME \/ name =~ USER_ENTRY_NAME
+    si
+
+    // Invoking a cell once it is part of the session. A cell that throws
+    // is still part of it: it compiled, so its definitions are there for
+    // later cells whatever its own code then did.
+    class CELL_ENTRY is
+        run(cell: LOADED_CELL) -> RUN_RESULT static is
+            let globals = cell.globals
+
+            if !globals? then
+                return RUN_RESULT(null, null)
+            fi
+
+            // `_entry` is the Main-compatible wrapper and the one the
+            // runtime would have entered at: it takes the command-line
+            // arguments alone. The `entry` beside it is the user-facing
+            // shape, which for a cell of top-level statements also
+            // carries the process environment, and nothing here can
+            // supply one - so it is the fallback, for a cell whose entry
+            // needs no wrapper.
+            let main = _find_entry(globals)
+
+            if !main? then
+                return RUN_RESULT(null, null)
+            fi
+
+            let arguments =
+                if main.get_parameters().count == 0 then
+                    System.Array.empty[object]()
+                else
+                    [cast object(System.Array.empty[string]())]
+                fi
+
+            try
+                // The entry answers with the value of the cell's final
+                // expression, or with nothing where the cell ended on a
+                // statement.
+                return RUN_RESULT(main.invoke(null, arguments), null)
+            catch e: System.Reflection.TargetInvocationException
+                let inner = e.inner_exception
+
+                return RUN_RESULT(null, if inner? then "{inner}" else "{e}" fi)
+            catch e: System.Exception
+                return RUN_RESULT(null, "{e}")
+            yrt
+        si
+
+        _find_entry(globals: System.Type) -> System.Reflection.MethodInfo? static is
+            let methods = globals.get_methods(CELL_EXPORTS.static_flags(true))
+
+            for method in methods do
+                if method.name =~ MAIN_ENTRY_NAME then
+                    return method
+                fi
+            od
+
+            for method in methods do
+                if method.name =~ USER_ENTRY_NAME /\ method.get_parameters().count <= 1 then
+                    return method
+                fi
+            od
+
+            return null
+        si
+    si
+
+    // What the compiler calls the type holding a namespace's globals,
+    // and the two entry points it synthesises for a file of top-level
+    // statements.
+    GLOBALS_TYPE_NAME: string => "$globals"
+    MAIN_ENTRY_NAME: string => "_entry"
+    USER_ENTRY_NAME: string => "entry"
+
+    // The runtime every compiled cell references.
+    GHUL_RUNTIME_ASSEMBLY: string => "ghul-runtime"
+si

@@ -621,10 +621,10 @@ namespace Ghul.Cli is
 
             let terminal =
                 Repl.TERMINAL(
-                    () -> Repl.SESSION =>
-                        Repl.SESSION(
+                    () -> Repl.REPL_SESSION =>
+                        Repl.REPL_SESSION(
                             Repl.SPAWN_BACKEND(compiler_shim, directory, runtime_assembly),
-                            Repl.REFLECTION_CELL_HOST(directory)))
+                            directory))
 
             return terminal.run()
         fi

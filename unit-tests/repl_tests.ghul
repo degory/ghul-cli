@@ -1,168 +1,160 @@
 namespace Ghul.Cli.Tests is
     use Collections.LIST
 
-    use Ghul.Cli.Repl.CELL
-    use Ghul.Cli.Repl.CellHost
-    use Ghul.Cli.Repl.CompileBackend
-    use Ghul.Cli.Repl.COMPILE_RESULT
-    use Ghul.Cli.Repl.DIAGNOSTIC_LINES
-    use Ghul.Cli.Repl.LOADED_CELL
-    use Ghul.Cli.Repl.SESSION
     use Ghul.Cli.Repl.SUBMISSION_END
+
+    use Ghul.Repl.CELL_REPLY
+    use Ghul.Repl.CELL_REQUEST
+    use Ghul.Repl.DIAGNOSTIC_LINES
+    use Ghul.Repl.LOADED_CELL
+    use Ghul.Repl.SESSION
 
     use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
     use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
-
-    // A backend that compiles nothing: it records what it was asked to
-    // compile, and answers however the test says.
-    class FAKE_BACKEND(_succeeds: bool, _diagnostics: Collections.List[string]): CompileBackend is
-        sources: LIST[string] public
-
-        init(..) is
-            sources = LIST[string]()
-        si
-
-        compile(
-            index: int,
-            source: string,
-            references: Collections.List[string]
-        ) -> COMPILE_RESULT is
-            sources.add(source)
-
-            if _succeeds then
-                return COMPILE_RESULT("cell{index}.dll", _diagnostics)
-            fi
-
-            return COMPILE_RESULT(null, _diagnostics)
-        si
-    si
-
-    // A host that loads nothing: each assembly exports whatever the test
-    // queued for it, under a namespace named after the file.
-    class FAKE_HOST(_exports: Collections.List[Collections.List[string]], _value: object?): CellHost is
-        loads: int public
-        runs: int public
-
-        init(..) is si
-
-        load(assembly_path: string) -> LOADED_CELL is
-            let index = loads
-
-            loads = loads + 1
-
-            let names = if index < _exports.count then _exports[index] else LIST[string]() fi
-
-            return LOADED_CELL("ns{index + 1}", names, null)
-        si
-
-        run(cell: LOADED_CELL) -> Ghul.Cli.Repl.RUN_RESULT is
-            runs = runs + 1
-
-            return Ghul.Cli.Repl.RUN_RESULT(_value, null)
-        si
-    si
 
     @TestClass()
     class REPL_SESSION_TESTS is
         init() is si
 
-        _names(names: Collections.List[string]) -> LIST[Collections.List[string]] is
-            let result = LIST[Collections.List[string]]()
+        _no_diagnostics() -> Collections.List[string] => LIST[string]()
 
-            result.add(names)
+        // A cell that compiled, exporting the given names.
+        _compiled(names: Collections.List[string]) -> CELL_REPLY =>
+            CELL_REPLY(_no_diagnostics(), LOADED_CELL(names, null))
 
-            return result
+        _accept(session: SESSION, source: string, names: Collections.List[string]) -> CELL_REQUEST is
+            let request = session.prepare(source)
+
+            session.accept(request, _compiled(names));
+
+            return request
         si
 
         @Test()
         prelude__is_empty_for_the_first_cell() is
-            let session = SESSION(FAKE_BACKEND(true, LIST[string]()), FAKE_HOST(LIST[Collections.List[string]](), null))
+            assert SESSION().prelude() =~ "";
+        si
 
-            assert session.prelude() =~ "";
+        @Test()
+        prepare__names_each_cell_after_its_position_in_the_session() is
+            let session = SESSION()
+
+            assert session.prepare("let x = 1\n").name =~ "cell1";
+
+            _accept(session, "let x = 1\n", LIST[string](["x"]));
+
+            assert session.prepare("let y = 2\n").name =~ "cell2";
         si
 
         @Test()
         prelude__imports_every_name_an_accepted_cell_exported() is
-            let session = SESSION(FAKE_BACKEND(true, LIST[string]()), FAKE_HOST(_names(LIST[string](["x", "inc"])), null))
+            let session = SESSION()
 
-            session.submit("let x = 1\n");
+            _accept(session, "let x = 1\n", LIST[string](["x", "inc"]));
 
-            assert session.prelude() =~ "use ns1.inc\nuse ns1.x\n";
+            assert session.prelude() =~ "use cell1.inc\nuse cell1.x\n";
         si
 
         // The newest definer wins, which is what makes a redefinition
         // take effect for every later cell.
         @Test()
         prelude__names_the_newest_cell_that_defined_each_name() is
-            let exports = LIST[Collections.List[string]]()
+            let session = SESSION()
 
-            exports.add(LIST[string](["x", "inc"]))
-            exports.add(LIST[string](["x"]))
+            _accept(session, "let x = 1\n", LIST[string](["x", "inc"]));
+            _accept(session, "let x = 2\n", LIST[string](["x"]));
 
-            let session = SESSION(FAKE_BACKEND(true, LIST[string]()), FAKE_HOST(exports, null))
-
-            session.submit("let x = 1\n");
-            session.submit("let x = 2\n");
-
-            assert session.prelude() =~ "use ns1.inc\nuse ns2.x\n";
+            assert session.prelude() =~ "use cell1.inc\nuse cell2.x\n";
         si
 
         @Test()
-        submit__prepends_the_prelude_to_what_the_user_wrote() is
-            let backend = FAKE_BACKEND(true, LIST[string]())
-            let session = SESSION(backend, FAKE_HOST(_names(LIST[string](["x"])), null))
+        prepare__prepends_the_prelude_to_what_the_user_wrote() is
+            let session = SESSION()
 
-            session.submit("let x = 1\n");
-            session.submit("write_line(x)\n");
+            _accept(session, "let x = 1\n", LIST[string](["x"]));
 
-            assert backend.sources[1] =~ "use ns1.x\nwrite_line(x)\n";
+            assert session.prepare("write_line(x)\n").source =~ "use cell1.x\nwrite_line(x)\n";
         si
 
-        // A cell that does not compile is not part of the session: it
-        // exports nothing, it is not loaded, and it is not run.
+        // How far the diagnostics have to move back to name the lines
+        // the user wrote rather than the ones the session generated.
         @Test()
-        submit__leaves_no_trace_of_a_cell_that_failed_to_compile() is
-            let host = FAKE_HOST(_names(LIST[string](["x"])), null)
-            let session = SESSION(FAKE_BACKEND(false, LIST[string](["test.ghul: 1,1..1,2: error: no"])), host)
+        prepare__counts_the_prelude_lines_it_generated() is
+            let session = SESSION()
 
-            let result = session.submit("let x = 1\n");
+            assert session.prepare("let x = 1\n").prelude_line_count == 0;
 
-            assert !result.is_accepted;
+            _accept(session, "let x = 1\n", LIST[string](["x", "inc"]));
+
+            assert session.prepare("write_line(x)\n").prelude_line_count == 2;
+        si
+
+        @Test()
+        prepare__names_the_earlier_cells_a_submission_references() is
+            let session = SESSION()
+
+            _accept(session, "let x = 1\n", LIST[string](["x"]));
+            _accept(session, "let y = 2\n", LIST[string](["y"]));
+
+            let references = session.prepare("write_line(x)\n").references
+
+            assert references.count == 2;
+            assert references[0] =~ "cell1";
+            assert references[1] =~ "cell2";
+        si
+
+        // A cell that did not compile is not part of the session: it
+        // exports nothing and nothing later can import from it.
+        @Test()
+        accept__leaves_no_trace_of_a_cell_that_failed_to_compile() is
+            let session = SESSION()
+            let request = session.prepare("let x = 1\n")
+
+            let outcome =
+                session.accept(
+                    request,
+                    CELL_REPLY(LIST[string](["cell1.ghul: 1,1..1,2: error: no"]), null))
+
+            assert !outcome.is_accepted;
+            assert !outcome.cell?;
             assert session.cells.count == 0;
             assert session.prelude() =~ "";
-            assert host.loads == 0;
-            assert host.runs == 0;
-        si
-
-        // The value the cell ended on reaches the front end, which is
-        // what the terminal shows after the cell's own output.
-        @Test()
-        submit__carries_out_the_value_the_cell_ended_on() is
-            let session = SESSION(FAKE_BACKEND(true, LIST[string]()), FAKE_HOST(_names(LIST[string](["x"])), cast object(41)))
-
-            let result = session.submit("41\n");
-
-            assert result.is_accepted;
-            assert "{result.value}" =~ "41";
         si
 
         @Test()
-        submit__carries_out_nothing_for_a_cell_that_ended_on_a_statement() is
-            let session = SESSION(FAKE_BACKEND(true, LIST[string]()), FAKE_HOST(_names(LIST[string](["x"])), null))
+        accept__keeps_a_cell_that_compiled() is
+            let session = SESSION()
+            let request = session.prepare("let x = 1\n")
 
-            assert !session.submit("let x = 1\n").value?;
-        si
+            let outcome = session.accept(request, _compiled(LIST[string](["x"])))
 
-        @Test()
-        submit__accepts_and_runs_a_cell_that_compiled() is
-            let host = FAKE_HOST(_names(LIST[string](["x"])), null)
-            let session = SESSION(FAKE_BACKEND(true, LIST[string]()), host)
-
-            let result = session.submit("let x = 1\n");
-
-            assert result.is_accepted;
+            assert outcome.is_accepted;
             assert session.cells.count == 1;
-            assert host.runs == 1;
+
+            if let cell = outcome.cell then
+                assert cell.name =~ "cell1";
+                assert cell.source =~ "let x = 1\n";
+            else
+                assert false else "the accepted cell should have come back";
+            fi
+        si
+
+        // The line numbers a front end shows are the user's own, so the
+        // generated prelude comes back off them here.
+        @Test()
+        accept__moves_the_diagnostics_back_past_the_prelude() is
+            let session = SESSION()
+
+            _accept(session, "let x = 1\n", LIST[string](["x", "inc"]));
+
+            let request = session.prepare("write_line(y)\n")
+
+            let outcome =
+                session.accept(
+                    request,
+                    CELL_REPLY(LIST[string](["cell2.ghul: 3,12..3,13: error: symbol not found: y"]), null))
+
+            assert outcome.diagnostics[0] =~ "cell2.ghul: 1,12..1,13: error: symbol not found: y";
         si
     si
 

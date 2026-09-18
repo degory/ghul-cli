@@ -31,6 +31,8 @@
     <None Include="README.md" Pack="true" PackagePath="\" />
     <None Include="LICENSE*" Pack="true" PackagePath="\" />
 
+    <ProjectReference Include="repl/repl.ghulproj" />
+
     <GhulSources Include="src/**/*.ghul" />
   </ItemGroup>
 </Project>

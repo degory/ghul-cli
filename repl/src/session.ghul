@@ -1,0 +1,146 @@
+namespace Ghul.Repl is
+    use Collections.LIST
+
+    // One accepted submission: the name its namespace and its assembly
+    // take, what the user wrote, and the names it made visible to later
+    // cells. Held for as long as the session lives, since every later
+    // cell references it and may import from it.
+    class CELL(
+        index: int,
+        name: string,
+        source: string,
+        exports: Collections.List[string]
+    );
+
+    // What a host has to compile, and nothing about how. The source is
+    // the whole cell text, generated prelude included. The references
+    // are the names of the session's earlier cells, in the order they
+    // were accepted, which the host maps to whatever it holds them as -
+    // a file, bytes, an assembly it already has loaded. A host that
+    // writes the cell out names the assembly `<name>.dll`: a compiler
+    // records a reference under the referenced file's own name, so a
+    // later cell's import only resolves when the two agree.
+    class CELL_REQUEST(
+        index: int,
+        name: string,
+        source: string,
+        prelude_line_count: int,
+        references: Collections.List[string]
+    );
+
+    // What the host got back. The diagnostics are the compiler's own
+    // lines, still carrying the line numbers of the text that was
+    // compiled. A cell that compiled arrives with its loaded form; one
+    // that did not arrives with none, and the session is left as it was.
+    class CELL_REPLY(diagnostics: Collections.List[string], loaded: LOADED_CELL?);
+
+    // What a submission did. A cell that compiled is accepted whatever
+    // its own code then does: its definitions exist and later cells can
+    // use them, so running it is the host's business and happens after
+    // this.
+    class SUBMIT_OUTCOME(
+        is_accepted: bool,
+        diagnostics: Collections.List[string],
+        cell: CELL?
+    );
+
+    // The session: the cells accepted so far, and what a new submission
+    // does to them. It compiles nothing, loads nothing, runs nothing and
+    // names no file, so a terminal, a notebook kernel and a browser page
+    // each drive the same object over whatever compiles for them.
+    class SESSION is
+        _cells: LIST[CELL]
+
+        init() is
+            _cells = LIST[CELL]()
+        si
+
+        cells: Collections.List[CELL] => _cells
+
+        // Every name a new cell can see, and the cell that last defined
+        // it. Later cells win, which is what makes a redefinition take
+        // effect going forward without any lookup rule changing.
+        visible_names() -> Collections.Map[string, CELL] is
+            let result = Collections.MAP[string, CELL]()
+
+            for cell in _cells do
+                for name in cell.exports do
+                    result[name] = cell
+                od
+            od
+
+            return result
+        si
+
+        // One `use` per visible name, naming the cell that last defined
+        // it. A name the submission declares itself needs no exclusion:
+        // a declaration in the cell already beats an import.
+        prelude() -> string is
+            let lines = LIST[string]()
+
+            for entry in visible_names() do
+                lines.add("use {entry.value.name}.{entry.key}")
+            od
+
+            lines.sort()
+
+            if lines.count == 0 then
+                return ""
+            fi
+
+            return "{lines |> Ghul.Pipes.join("\n")}\n"
+        si
+
+        // What the next submission needs compiling. Calling this twice
+        // without accepting in between describes the same cell twice:
+        // nothing is recorded until the reply comes back.
+        prepare(source: string) -> CELL_REQUEST is
+            let index = _cells.count + 1
+            let prelude_text = prelude()
+            let prelude_line_count = if prelude_text.length == 0 then 0 else prelude_text.split(['\n']).count - 1 fi
+
+            let references = LIST[string]()
+
+            for cell in _cells do
+                references.add(cell.name)
+            od
+
+            return CELL_REQUEST(
+                index,
+                cell_name_for(index),
+                "{prelude_text}{source}",
+                prelude_line_count,
+                references)
+        si
+
+        // Take the answer to a request. A cell that compiled joins the
+        // session and its names are visible to every later one; one that
+        // did not leaves the session exactly as it was. The diagnostics
+        // come back with the generated prelude subtracted, so their line
+        // numbers are the user's own again.
+        accept(request: CELL_REQUEST, reply: CELL_REPLY) -> SUBMIT_OUTCOME is
+            let diagnostics = LIST[string]()
+
+            for line in reply.diagnostics do
+                diagnostics.add(DIAGNOSTIC_LINES.strip_prelude(line, request.prelude_line_count))
+            od
+
+            if let loaded = reply.loaded then
+                let cell = CELL(request.index, request.name, request.source, loaded.exports)
+
+                _cells.add(cell)
+
+                return SUBMIT_OUTCOME(true, diagnostics, cell)
+            fi
+
+            return SUBMIT_OUTCOME(false, diagnostics, null)
+        si
+    si
+
+    // What a cell's namespace is called, and the stem of any file a host
+    // writes it to. Its index is enough: a session's cells never meet
+    // another session's.
+    cell_name_for(index: int) -> string => "{CELL_NAME_STEM}{index}"
+
+    CELL_NAME_STEM: string => "cell"
+si

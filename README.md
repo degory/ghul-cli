@@ -109,6 +109,12 @@ Each of those is this version of the REPL rather than something about the
 language, and each is lifted by a later one. The session needs
 `ghul.compiler` 59.3.0 or newer, and says so if an older one is installed.
 
+The session itself - the accepted cells, the import prelude each new
+submission needs, and what a compiled cell exports - is published
+separately as `ghul.repl`, so a browser page or a notebook kernel can host
+the same session over whatever compiles for it. It compiles nothing and
+runs nothing itself; see `repl/README.md`.
+
 ## Installing
 
 ```sh

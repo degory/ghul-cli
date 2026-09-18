@@ -76,8 +76,12 @@ jobs:
     - name: Run smoke test
       run: ./tests/smoke.sh
 
-    - name: Create package
-      run: dotnet pack -nologo -p:Version=${{ needs.version.outputs.package }}
+    # Both packages carry the run's version: they are released together
+    # from one repository, and the tool bundles the library it references.
+    - name: Create packages
+      run: |
+        dotnet pack -nologo ghul-cli.ghulproj -p:Version=${{ needs.version.outputs.package }}
+        dotnet pack -nologo repl/repl.ghulproj -p:Version=${{ needs.version.outputs.package }}
 
     - uses: actions/upload-artifact@v7
       with:
@@ -158,6 +162,7 @@ jobs:
       run: |
         gh release create "${{ needs.version.outputs.tag }}" \
           ./nupkg/ghul.cli.${{ needs.version.outputs.package }}.nupkg \
+          ./nupkg/ghul.repl.${{ needs.version.outputs.package }}.nupkg \
           --title "${{ needs.version.outputs.tag }}" \
           --notes-file changelog.txt
 

@@ -1,20 +1,30 @@
 namespace Ghul.Cli.Repl is
     use Collections.LIST
+    use Ghul.Repl.CELL_REQUEST
     use IO.Directory
     use IO.File
     use IO.Path
+
+    // What compiling one cell produced: where the assembly was written,
+    // where it compiled, and the compiler's own diagnostic lines.
+    class COMPILE_RESULT(assembly_path: string?, diagnostics: Collections.List[string]) is
+        is_success: bool => assembly_path?
+    si
 
     // Compiles each cell by spawning the compiler, the way the rest of
     // this tool does. About a second a cell, nearly all of it process
     // start-up and building the metadata context over the reference
     // pack, which is why a resident backend is what the latency target
     // eventually needs.
-    class SPAWN_BACKEND(_compiler_shim: string, _session_directory: string, _runtime_assembly: string?): CompileBackend is
-        compile(
-            index: int,
-            source: string,
-            references: Collections.List[string]
-        ) -> COMPILE_RESULT is
+    class SPAWN_BACKEND(_compiler_shim: string, _session_directory: string, _runtime_assembly: string?) is
+        // The file a cell of the given name is written to. The compiler
+        // records a reference under the referenced file's own name, so a
+        // later cell's generated import only resolves while the assembly
+        // and the submission share one name.
+        assembly_path(name: string) -> string =>
+            Path.join([_session_directory, "{name}.dll"])
+
+        compile(request: CELL_REQUEST) -> COMPILE_RESULT is
             Directory.create_directory(_session_directory)
 
             // A cell's assembly references the ghūl runtime, and the
@@ -29,10 +39,10 @@ namespace Ghul.Cli.Repl is
                 fi
             fi
 
-            let source_path = Path.join([_session_directory, "{CELL_FILE_STEM}{index}.ghul"])
-            let output_path = Path.join([_session_directory, "{CELL_FILE_STEM}{index}.dll"])
+            let source_path = Path.join([_session_directory, "{request.name}.ghul"])
+            let output_path = assembly_path(request.name)
 
-            File.write_all_text(source_path, source)
+            File.write_all_text(source_path, request.source)
 
             let start_info = System.Diagnostics.ProcessStartInfo()
 
@@ -48,14 +58,14 @@ namespace Ghul.Cli.Repl is
             // the generated imports of every later cell name. Without
             // it the compiler would derive one from the file's path.
             start_info.argument_list.add("--submission")
-            start_info.argument_list.add(namespace_name_for(index))
+            start_info.argument_list.add(request.name)
 
             // `--reference` adds to the references the compiler finds for
             // itself, where `-a` would replace them and leave the cell
             // without the framework's.
-            for reference in references do
+            for reference in request.references do
                 start_info.argument_list.add("--reference")
-                start_info.argument_list.add(reference)
+                start_info.argument_list.add(assembly_path(reference))
             od
 
             start_info.argument_list.add("-o")
@@ -98,14 +108,6 @@ namespace Ghul.Cli.Repl is
             return COMPILE_RESULT(null, diagnostics)
         si
     si
-
-    // What a cell's namespace is called. Its own name is enough: each
-    // session has a process to itself, and two sessions never see each
-    // other's assemblies.
-    namespace_name_for(index: int) -> string => "{CELL_FILE_STEM}{index}"
-
-    // The stem of each cell's file name, and of its namespace.
-    CELL_FILE_STEM: string => "cell"
 
     // Every session directory starts with this, so the namespace the
     // compiler derives from a cell's path is a plain identifier.

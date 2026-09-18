@@ -41,21 +41,30 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
   `AssemblyInformationalVersion` (the same reflection idiom `ghul`'s own
   `--version` uses in `ghul/src/driver/main.ghul`) alongside the installed
   `ghul.compiler` version, if any.
-- `src/repl/` — the interactive session behind `ghul repl`. `SESSION`
-  holds the accepted cells and generates each submission's import
-  prelude (one `use` per visible name, naming the cell that last defined
-  it) with no console I/O anywhere in it, so a notebook kernel or the
-  playground can drive the same object. A cell is compiled through the
-  `CompileBackend` interface - `SPAWN_BACKEND` runs the compiler per
-  cell, about a second each - and loaded by `CellHost`, which reads what
-  the cell exported off the emitted assembly and invokes its entry.
-  `CELL_DISPLAY` is everything the terminal knows about showing the
-  value a submission ended on, so a richer display replaces it and
+- `repl/` — the `ghul.repl` package: the session core, published so that
+  the browser playground and a notebook kernel build on the same one.
+  `SESSION` holds the accepted cells and generates each submission's
+  import prelude (one `use` per visible name, naming the cell that last
+  defined it). It compiles nothing, loads nothing, runs nothing and names
+  no file: a host calls `prepare(source)` for the request, compiles that
+  however it likes, and calls `accept(request, reply)` with what came
+  back. `CELL_EXPORTS.read` takes an assembly the host has already
+  loaded, so a host holding its cells as bytes never writes them out, and
+  `CELL_ENTRY.run` invokes one. Where a host does write a cell out it
+  names the assembly `<request.name>.dll`, since the compiler records a
+  reference under the referenced file's own name.
+- `src/repl/` — the terminal front end and the way this tool hosts a
+  session. `SPAWN_BACKEND` runs the compiler per cell, about a second
+  each; `SESSION_LOAD_CONTEXT` resolves the cells' own ghūl runtime,
+  which is not the one this tool was built against; `REPL_SESSION` is the
+  three steps in order, running an accepted cell after it has joined the
+  session. `CELL_DISPLAY` is everything the terminal knows about showing
+  the value a submission ended on, so a richer display replaces it and
   nothing else. `SUBMISSION_END` is the blank-line rule, in one place
-  because a real completeness answer needs a compiler mode that does not
-  exist yet. The session needs `ghul.compiler` `MINIMUM_REPL_COMPILER`
-  or newer, for `--reference` and `--submission`, and refuses to start
-  on an older one rather than failing a cell at a time.
+  because a real completeness answer needs a compiler mode this tool does
+  not use yet. The session needs `ghul.compiler` `MINIMUM_REPL_COMPILER`
+  or newer, for `--reference` and `--submission`, and refuses to start on
+  an older one rather than failing a cell at a time.
 - `unit-tests/` — MSTest project covering the pure path/cache-key/
   runnable-by-default/stdin-marker/source-resolution logic.
 - `tests/smoke.sh` — end-to-end test: builds the tool, points it at a real
