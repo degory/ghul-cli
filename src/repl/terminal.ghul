@@ -187,6 +187,7 @@ namespace Ghul.Cli.Repl is
             Std.write_line("a line that finishes what you have typed submits it; one that leaves")
             Std.write_line("something open waits for more, and a blank line submits regardless")
             Std.write_line("what you end on is shown, unless you end on a statement")
+            Std.write_line("messages call a cell cell-3; in code it is cell3, as in cell3.x")
 
             if _want_default_use then
                 Std.write_line("the compiler's default imports (use default) are in force in every cell")

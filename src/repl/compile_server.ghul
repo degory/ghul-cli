@@ -1,5 +1,8 @@
 namespace Ghul.Cli.Repl is
     use Collections.LIST
+    use Ghul.Repl.CELL_DIAGNOSTIC
+    use Ghul.Repl.CELL_LOCATION
+    use Ghul.Repl.CELL_RELATED
     use Ghul.Repl.CELL_REQUEST
     use System.Text.Json.JsonDocument
     use System.Text.Json.JsonElement
@@ -203,7 +206,13 @@ namespace Ghul.Cli.Repl is
         si
 
         _give_up(server: ServerConnection, reason: string) -> COMPILE_RESULT? is
-            _say("ghul: {reason}; starting the compiler for each cell instead")
+            // A reason can name a cell's file, which is shown by its label.
+            let labelled = System.Text.RegularExpressions.Regex.replace(
+                reason,
+                "[^\\s:]*cell([0-9]+)\\.(ghul|dll)\\b",
+                m => Ghul.Repl.cell_label_for(int.parse(m.groups[1].value)))
+
+            _say("ghul: {labelled}; starting the compiler for each cell instead")
 
             server.close()
             _server = null
@@ -247,13 +256,11 @@ namespace Ghul.Cli.Repl is
     si
 
     // One reply from the compile server: its status, why it could not
-    // compile if it says, and the compile's diagnostics written as the
-    // compiler writes them to a terminal, so they read the same whichever
-    // backend produced them.
+    // compile if it says, and the compile's diagnostics.
     class COMPILE_SERVER_REPLY(
         status: int,
         message: string?,
-        diagnostics: Collections.List[string],
+        diagnostics: Collections.List[CELL_DIAGNOSTIC],
         error_lines: Collections.List[int]
     ) is
         parse(line: string, file: string) -> COMPILE_SERVER_REPLY? static is
@@ -274,14 +281,14 @@ namespace Ghul.Cli.Repl is
                     else null
                     fi
 
-                let lines = LIST[string]()
+                let parsed = LIST[CELL_DIAGNOSTIC]()
                 let error_lines = LIST[int]()
 
                 if root.try_get_property("diagnostics", diagnostics ref) /\
                     diagnostics.value_kind == JsonValueKind.ARRAY
                 then
                     for diagnostic in diagnostics.enumerate_array() do
-                        lines.add(_line(diagnostic, file))
+                        parsed.add(_diagnostic(diagnostic, file))
 
                         if diagnostic.get_property("severity").get_int32() <= 1 then
                             error_lines.add(diagnostic.get_property("start_line").get_int32())
@@ -289,38 +296,68 @@ namespace Ghul.Cli.Repl is
                     od
                 fi
 
-                return COMPILE_SERVER_REPLY(status.get_int32(), text, lines, error_lines)
+                return COMPILE_SERVER_REPLY(status.get_int32(), text, parsed, error_lines)
             catch e: System.Exception
                 return null
             yrt
         si
 
-        // `file: L,C..L,C: severity: message`, with a warning's slug in
-        // brackets before its message, as a batch compile writes it.
-        _line(diagnostic: JsonElement, file: string) -> string static is
-            let number = (name: string) =>
-                diagnostic.get_property(name).get_int32()
-
+        // The wire's severities, named as a batch compile names them. A
+        // related location on the diagnostic's own position has no
+        // location of its own, as a batch compile writes it.
+        _diagnostic(diagnostic: JsonElement, file: string) -> CELL_DIAGNOSTIC static is
             let severity =
-                case number("severity")
+                case diagnostic.get_property("severity").get_int32()
                 when 0, 1 then "error"
                 when 2 then "warn"
                 when 3 then "info"
                 else "hint"
                 esac
 
-            let code: JsonElement mut
+            let location = _location(diagnostic, "path", file)
+            let code = _string(diagnostic, "code")
+            let related = LIST[CELL_RELATED]()
+            let entries: JsonElement mut
 
-            let slug =
-                if severity =~ "warn" /\ diagnostic.try_get_property("code", code ref) /\
-                    code.value_kind == JsonValueKind.STRING /\ (code.get_string() ?? "").length > 0
-                then "[{code.get_string()}] "
-                else ""
-                fi
+            if diagnostic.try_get_property("related", entries ref) /\ entries.value_kind == JsonValueKind.ARRAY then
+                for entry in entries.enumerate_array() do
+                    let at = _location(entry.get_property("location"), "file", file)
 
-            "{file}: {number("start_line")},{number("start_column")}.."
-                "{number("end_line")},{number("end_column")}: "
-                "{severity}: {slug}{diagnostic.get_property("message").get_string()}"
+                    related.add(
+                        CELL_RELATED(
+                            _string(entry, "message") ?? "",
+                            if _same_place(at, location) then null else at fi))
+                od
+            fi
+
+            return CELL_DIAGNOSTIC(
+                location,
+                severity,
+                if code? /\ code.length > 0 then code else null fi,
+                _string(diagnostic, "message") ?? "",
+                related)
         si
+
+        _location(element: JsonElement, path_property: string, file: string) -> CELL_LOCATION static =>
+            CELL_LOCATION(
+                _string(element, path_property) ?? file,
+                element.get_property("start_line").get_int32(),
+                element.get_property("start_column").get_int32(),
+                element.get_property("end_line").get_int32(),
+                element.get_property("end_column").get_int32())
+
+        _string(element: JsonElement, name: string) -> string? static is
+            let value: JsonElement mut
+
+            if element.try_get_property(name, value ref) /\ value.value_kind == JsonValueKind.STRING then
+                return value.get_string()
+            fi
+
+            return null
+        si
+
+        _same_place(a: CELL_LOCATION, b: CELL_LOCATION) -> bool static =>
+            a.path =~ b.path /\ a.start_line == b.start_line /\ a.start_column == b.start_column /\
+                a.end_line == b.end_line /\ a.end_column == b.end_column
     si
 si

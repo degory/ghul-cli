@@ -1,0 +1,159 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+
+    use Ghul.Repl.CELL_DIAGNOSTIC
+    use Ghul.Repl.CELL_REPLY
+    use Ghul.Repl.CELL_REQUEST
+    use Ghul.Repl.LOADED_CELL
+    use Ghul.Repl.SESSION
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    @TestClass()
+    class CELL_LABEL_TESTS is
+        init() is si
+
+        _accept(session: SESSION, source: string, names: Collections.List[string]) is
+            let request = session.prepare(source)
+
+            session.accept(request, CELL_REPLY(LIST[string](), LOADED_CELL(names, null)));
+        si
+
+        // What the compiler says about a cell that did not compile, as the
+        // user is shown it.
+        _shown(session: SESSION, source: string, line: string) -> string =>
+            session.accept(session.prepare(source), CELL_REPLY(LIST[string]([line]), null)).diagnostics[0]
+
+        @Test()
+        accept__names_the_cell_by_its_label() is
+            let session = SESSION(false)
+
+            assert _shown(session, "let z = no_such\n", "/tmp/ghulrepl_x/cell1.ghul: 1,9..1,16: error: symbol not found: no_such") =~
+                "cell-1: 1,9..1,16: error: symbol not found: no_such";
+        si
+
+        // The related location is in the same cell as the primary one, so
+        // both are moved past the same prelude.
+        @Test()
+        accept__maps_a_related_location_in_the_same_cell() is
+            let session = SESSION(false)
+
+            _accept(session, "let y = 1\n", LIST[string](["y"]));
+
+            let shown =
+                _shown(
+                    session,
+                    "let x = x + y\n",
+                    "/tmp/ghulrepl_x/cell2.ghul: 2,9..2,10: error: variable is not defined here [x is declared here: /tmp/ghulrepl_x/cell2.ghul: 2,5..2,6]")
+
+            assert shown =~ "cell-2: 1,9..1,10: error: variable is not defined here [x is declared here: cell-2: 1,5..1,6]";
+        si
+
+        // The case the related location was left unmapped in: a two-line
+        // prelude, and the declaration on the cell's only line.
+        @Test()
+        accept__maps_a_related_location_past_a_two_line_prelude() is
+            let session = SESSION()
+
+            _accept(session, "let y = 1\n", LIST[string](["y"]));
+
+            let shown =
+                _shown(
+                    session,
+                    "let x = x + y\n",
+                    "/tmp/ghulrepl_x/cell2.ghul: 3,9..3,10: error: variable is not defined here [x is declared here: /tmp/ghulrepl_x/cell2.ghul: 3,5..3,6]")
+
+            assert shown =~ "cell-2: 1,9..1,10: error: variable is not defined here [x is declared here: cell-2: 1,5..1,6]";
+        si
+
+        // A related location in an earlier cell is moved past that cell's
+        // own prelude, which is shorter than the current one's here.
+        @Test()
+        accept__maps_a_related_location_in_an_earlier_cell_by_its_own_prelude() is
+            let session = SESSION(false)
+
+            _accept(session, "let a = 1\n", LIST[string](["a"]));
+            _accept(session, "inc(n: int) -> int => n + a\n", LIST[string](["inc"]));
+
+            let shown =
+                _shown(
+                    session,
+                    "inc(\"x\")\n",
+                    "cell3.ghul: 3,1..3,4: error: no overload found for inc(string) [tried: cell2.ghul: 2,1..2,4]")
+
+            assert shown =~ "cell-3: 1,1..1,4: error: no overload found for inc(string) [tried: cell-2: 1,1..1,4]";
+        si
+
+        @Test()
+        accept__leaves_a_location_outside_the_session_alone() is
+            let session = SESSION(false)
+
+            let line = "/home/user/lib/thing.ghul: 4,1..4,6: error: something [declared here: /home/user/lib/thing.ghul: 2,1..2,6]"
+
+            assert _shown(session, "x\n", line) =~ line;
+        si
+
+        @Test()
+        accept__labels_a_cell_with_a_two_digit_number() is
+            let session = SESSION(false)
+
+            for i in 1::11 do
+                _accept(session, "let v{i} = {i}\n", LIST[string](["v{i}"]));
+            od
+
+            assert _shown(session, "no_such\n", "cell12.ghul: 12,1..12,8: error: symbol not found: no_such") =~
+                "cell-12: 1,1..1,8: error: symbol not found: no_such";
+        si
+
+        @Test()
+        accept__leaves_a_line_it_cannot_read_alone() is
+            assert _shown(SESSION(), "x\n", "ghul: failed to start the compiler") =~ "ghul: failed to start the compiler";
+        si
+
+        @Test()
+        parse__reads_the_slug_and_every_related_location() is
+            let diagnostic =
+                CELL_DIAGNOSTIC.parse("cell1.ghul: 2,5..2,8: warn: [some-slug] message with [brackets] [first: a.ghul: 1,1..1,2] [second: b.ghul: 3,1..3,2]")
+
+            assert diagnostic.code =~ "some-slug";
+            assert diagnostic.message =~ "message with [brackets]";
+            assert diagnostic.related.count == 2;
+            assert diagnostic.related[1].location?.path =~ "b.ghul";
+            assert diagnostic.render() =~ "cell1.ghul: 2,5..2,8: warn: [some-slug] message with [brackets] [first: a.ghul: 1,1..1,2] [second: b.ghul: 3,1..3,2]";
+        si
+    si
+si
+
+// Stands in for a cell: a cell's namespace is its submission name.
+@suppress("non-pascal-case-name")
+namespace cell7 is
+    thrower() -> int => throw System.InvalidOperationException("empty")
+si
+
+namespace Ghul.Cli.Tests is
+    use Ghul.Repl.CELL_ERROR
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    @TestClass()
+    class CELL_ERROR_TESTS is
+        init() is si
+
+        @Test()
+        describe__names_a_cells_frames_by_its_label() is
+            let described mut = ""
+
+            try
+                cell7.thrower();
+            catch e: System.InvalidOperationException
+                described = CELL_ERROR.describe(e)
+            yrt
+
+            assert described.starts_with("System.InvalidOperationException: empty");
+            assert described.contains("at thrower in cell-7");
+            assert !described.contains("cell7.");
+        si
+    si
+si

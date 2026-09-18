@@ -114,9 +114,9 @@ namespace Ghul.Repl is
             catch e: System.Reflection.TargetInvocationException
                 let inner = e.inner_exception
 
-                return RUN_RESULT(null, if inner? then "{inner}" else "{e}" fi)
+                return RUN_RESULT(null, CELL_ERROR.describe(inner ?? e))
             catch e: System.Exception
-                return RUN_RESULT(null, "{e}")
+                return RUN_RESULT(null, CELL_ERROR.describe(e))
             yrt
         si
 
@@ -142,6 +142,90 @@ namespace Ghul.Repl is
     // What the compiler calls the type holding a namespace's globals,
     // and the two entry points it synthesises for a file of top-level
     // statements.
+
+    // What a cell that threw is reported as: the exception and the frames
+    // it passed through, with a cell's frames naming the cell by its
+    // label, and without the frames of the reflection call that ran it.
+    class CELL_ERROR is
+        describe(e: System.Exception) -> string static is
+            let result = System.Text.StringBuilder("{e.get_type().full_name}: {e.message}")
+            let frames = System.Diagnostics.StackTrace(e, false).get_frames()
+
+            let previous: string? mut = null
+
+            // A cell's entry and the wrapper that calls it are one frame
+            // to the user.
+            for frame in frames do
+                if let line = _frame(frame) /\ !(line =~ previous) then
+                    result.append("\n   at {line}")
+
+                    previous = line
+                fi
+            od
+
+            let inner mut = e.inner_exception
+
+            while inner? do
+                result.append("\n ---> {inner.get_type().full_name}: {inner.message}")
+
+                inner = inner.inner_exception
+            od
+
+            return result.to_string()
+        si
+
+        _frame(frame: System.Diagnostics.StackFrame) -> string? static is
+            let method = frame.get_method()
+
+            if !method? then
+                return null
+            fi
+
+            let owner = method.declaring_type
+
+            if !owner? then
+                return method.name
+            fi
+
+            let space = owner.`namespace ?? ""
+
+            if space.starts_with("System.Reflection") then
+                return null
+            fi
+
+            if let index = _cell_index(space) then
+                let label = cell_label_for(index)
+
+                if owner.name =~ GLOBALS_TYPE_NAME then
+                    if method.name =~ MAIN_ENTRY_NAME \/ method.name =~ USER_ENTRY_NAME then
+                        return label
+                    fi
+
+                    return "{method.name} in {label}"
+                fi
+
+                return "{owner.name}.{method.name} in {label}"
+            fi
+
+            return "{owner.full_name}.{method.name}"
+        si
+
+        // The index of the cell a namespace is, or null for any other.
+        _cell_index(space: string) -> int? static is
+            if !space.starts_with(CELL_NAME_STEM) then
+                return null
+            fi
+
+            let index: int mut
+
+            if int.try_parse(space.substring(CELL_NAME_STEM.length), index ref) then
+                return index
+            fi
+
+            return null
+        si
+    si
+
     GLOBALS_TYPE_NAME: string => "$globals"
     MAIN_ENTRY_NAME: string => "_entry"
     USER_ENTRY_NAME: string => "entry"

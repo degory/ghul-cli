@@ -391,6 +391,17 @@ if ! grep -q "no_such_name" "$scratch/repl-bad.err"; then
     cat "$scratch/repl-bad.err" >&2
     exit 1
 fi
+if ! grep -q "^cell-[0-9]*: " "$scratch/repl-bad.err" || grep -q "/tmp" "$scratch/repl-bad.err"; then
+    echo "smoke: expected the failed cell to be named by its label, not its file, stderr was:" >&2
+    cat "$scratch/repl-bad.err" >&2
+    exit 1
+fi
+dotnet "$cli" repl --no-server < "$repl_bad_in" > /dev/null 2> "$scratch/repl-bad-spawn.err" || true
+if ! grep -q "^cell-[0-9]*: " "$scratch/repl-bad-spawn.err" || grep -q "/tmp" "$scratch/repl-bad-spawn.err"; then
+    echo "smoke: expected --no-server to name the failed cell by its label too, stderr was:" >&2
+    cat "$scratch/repl-bad-spawn.err" >&2
+    exit 1
+fi
 
 # The compile server is the default, so every session above went through
 # it; none of them should have had to fall back.

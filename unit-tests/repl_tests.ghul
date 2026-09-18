@@ -154,7 +154,7 @@ namespace Ghul.Cli.Tests is
                     request,
                     CELL_REPLY(LIST[string](["cell2.ghul: 3,12..3,13: error: symbol not found: y"]), null))
 
-            assert outcome.diagnostics[0] =~ "cell2.ghul: 1,12..1,13: error: symbol not found: y";
+            assert outcome.diagnostics[0] =~ "cell-2: 1,12..1,13: error: symbol not found: y";
         si
     si
 
