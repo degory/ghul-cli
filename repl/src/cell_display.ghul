@@ -1,4 +1,4 @@
-namespace Ghul.Cli.Repl is
+namespace Ghul.Repl is
     use Collections.LIST
 
     // One line for the value a cell ended on, or null where there is

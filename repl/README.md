@@ -32,5 +32,10 @@ host that holds its cells as bytes in one load context never has to write
 them out. A cell that compiled is accepted whatever its own code then
 does, so it is run after it has joined the session.
 
+`CELL_DISPLAY.format` renders the value a cell ended on - a collection to
+a limit of its elements, one level deep, and nothing where the cell ended
+on a statement - and prints nothing, so every host shows the same value
+the same way.
+
 The compiler needs to be recent enough for `--submission` and
 `--reference`.
