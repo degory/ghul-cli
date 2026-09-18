@@ -129,9 +129,16 @@ done
 
 echo "jupyter: a kernel asked to stop by a signal..." >&2
 
+mkdir -p "$scratch/signalled"
+
 dotnet "$scratch/kernel/ghul.jupyter.dll" kernel "$scratch/abandoned/connection.json" \
     > "$scratch/signalled.log" 2>&1 &
 signalled_pid=$!
+
+# Recorded where the trap looks, like the ones the client starts: a
+# script killed while waiting below would otherwise leave this one behind,
+# which is the leak this is all about.
+echo "$signalled_pid" > "$scratch/signalled/kernel.pid"
 
 sleep 3
 kill -TERM "$signalled_pid"
