@@ -1,5 +1,6 @@
 namespace Ghul.Cli.Repl is
     use Collections.LIST
+    use Ghul.Repl.CELL_DISPLAY
     use IO.Std
 
     // Whether the lines typed so far are a submission. A blank line ends

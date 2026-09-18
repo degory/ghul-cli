@@ -50,7 +50,10 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
   however it likes, and calls `accept(request, reply)` with what came
   back. `CELL_EXPORTS.read` takes an assembly the host has already
   loaded, so a host holding its cells as bytes never writes them out, and
-  `CELL_ENTRY.run` invokes one. Where a host does write a cell out it
+  `CELL_ENTRY.run` invokes one. `CELL_DISPLAY` renders the value a cell
+  ended on and prints nothing, so a terminal and a page show the same
+  value the same way; a notebook wanting a MIME bundle replaces it.
+  Where a host does write a cell out it
   names the assembly `<request.name>.dll`, since the compiler records a
   reference under the referenced file's own name.
 - `src/repl/` — the terminal front end and the way this tool hosts a
@@ -58,9 +61,7 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
   each; `SESSION_LOAD_CONTEXT` resolves the cells' own ghūl runtime,
   which is not the one this tool was built against; `REPL_SESSION` is the
   three steps in order, running an accepted cell after it has joined the
-  session. `CELL_DISPLAY` is everything the terminal knows about showing
-  the value a submission ended on, so a richer display replaces it and
-  nothing else. `SUBMISSION_END` is the blank-line rule, in one place
+  session. `SUBMISSION_END` is the blank-line rule, in one place
   because a real completeness answer needs a compiler mode this tool does
   not use yet. The session needs `ghul.compiler` `MINIMUM_REPL_COMPILER`
   or newer, for `--reference` and `--submission`, and refuses to start on
