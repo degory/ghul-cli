@@ -1,0 +1,113 @@
+namespace Ghul.Jupyter is
+    use Collections.LIST
+    use IO.Path
+
+    // How a front end is to start the kernel, written into the kernelspec
+    // from what the installing process can see of itself. A front end
+    // started from a desktop launcher does not have the shell's PATH, so
+    // neither the tool's name nor the .NET host it runs on can be left for
+    // it to find.
+    class LAUNCH is
+        // The command before the kernel's own arguments: the tool by its
+        // absolute path when it runs from its own executable, as a .NET
+        // tool shim does, or the .NET host and the tool's assembly when it
+        // runs as `dotnet ghul-jupyter.dll`. The bare name is the fallback
+        // where the process cannot say where it is.
+        command(process_path: string?, entry_assembly: string?) -> LIST[string] static is
+            let result = LIST[string]()
+
+            if !process_path? \/ process_path.length == 0 then
+                result.add(TOOL_COMMAND)
+
+                return result
+            fi
+
+            result.add(process_path)
+
+            let host = Path.get_file_name_without_extension(process_path) ?? ""
+
+            if host =~ "dotnet" /\ entry_assembly? /\ entry_assembly.length > 0 then
+                result.add(entry_assembly)
+            fi
+
+            return result
+        si
+
+        // The .NET installation the running host belongs to: the runtime
+        // directory is `<root>/shared/Microsoft.NETCore.App/<version>/`.
+        root_from_runtime_directory(runtime_directory: string) -> string? static is
+            let version = Path.get_directory_name(runtime_directory.trim_end(['/', '\\']))
+            let framework = if version? then Path.get_directory_name(version) else null fi
+            let shared = if framework? then Path.get_directory_name(framework) else null fi
+
+            return shared
+        si
+
+        // Where a .NET host looks for its installation without being told.
+        // A root anywhere else - a user-local install under the home
+        // directory, most often - has to be named for the tool shim, and
+        // the compiler's, to start.
+        is_default_root(root: string) -> bool static =>
+            root.trim_end(['/', '\\']) =~ "/usr/share/dotnet" \/
+            root.trim_end(['/', '\\']) =~ "/usr/lib/dotnet" \/
+            root.trim_end(['/', '\\']) =~ "/usr/local/share/dotnet" \/
+            root.trim_end(['/', '\\']) =~ "/usr/local/share/dotnet/x64"
+
+        // The variables the kernel is started with, as name and value.
+        // PATH puts the .NET installation and the tools directory in front
+        // of whatever the front end has; `${PATH}` is expanded by Jupyter
+        // and by the VS Code extension alike.
+        environment(dotnet_root: string?, tools_directory: string?) -> LIST[(name: string, value: string)] static is
+            let result = LIST[(name: string, value: string)]()
+
+            if dotnet_root? /\ !is_default_root(dotnet_root) then
+                result.add((name = "DOTNET_ROOT", value = dotnet_root))
+            fi
+
+            let directories = LIST[string]()
+
+            if dotnet_root? then
+                directories.add(dotnet_root)
+            fi
+
+            if tools_directory? then
+                directories.add(tools_directory)
+            fi
+
+            if directories.count > 0 then
+                directories.add("${{PATH}}")
+
+                result.add((name = "PATH", value = string.join(Path.path_separator.to_string(), directories)))
+            fi
+
+            return result
+        si
+
+        // What this process knows of its own .NET installation: the root
+        // it was told, or the one its runtime was loaded from.
+        current_dotnet_root() -> string? static is
+            if let told = System.Environment.get_environment_variable("DOTNET_ROOT") /\ told.trim().length > 0 then
+                return told
+            fi
+
+            return root_from_runtime_directory(System.Runtime.InteropServices.RuntimeEnvironment.get_runtime_directory())
+        si
+
+        // The directory .NET tools are installed into: the one this tool
+        // runs from when it runs from its own executable, otherwise the
+        // usual `~/.dotnet/tools`.
+        current_tools_directory(process_path: string?) -> string? static is
+            if process_path? then
+                let host = Path.get_file_name_without_extension(process_path) ?? ""
+
+                if host !~ "dotnet" then
+                    return Path.get_directory_name(process_path)
+                fi
+            fi
+
+            let home = System.Environment.get_folder_path(System.Environment_SpecialFolder.USER_PROFILE)
+
+            return Path.join([home, ".dotnet", "tools"])
+        si
+    si
+si

@@ -6,11 +6,12 @@ namespace Ghul.Jupyter.Tests is
     use IO.Std
 
     // Drives a kernel through what a notebook does. Takes the kernel
-    // assembly to run and a directory to work in; answers non-zero if
+    // assembly to run, or an installed kernelspec to start it the way a
+    // front end would, and a directory to work in; answers non-zero if
     // anything it checked did not hold.
     entry(args: string[]) -> int is
         if args.count < 2 then
-            Std.error.write_line("usage: jupyter-client <kernel.dll> <directory> [--abandon]")
+            Std.error.write_line("usage: jupyter-client <kernel.dll | kernel.json> <directory> [--abandon]")
 
             return 1
         fi
@@ -32,13 +33,12 @@ namespace Ghul.Jupyter.Tests is
 
         let connection = CONNECTION.read(connection_file)
 
-        let start_info = System.Diagnostics.ProcessStartInfo()
-
-        start_info.file_name = "dotnet"
-        start_info.use_shell_execute = false
-        start_info.argument_list.add(kernel_assembly)
-        start_info.argument_list.add("kernel")
-        start_info.argument_list.add(connection_file)
+        let start_info =
+            if kernel_assembly.ends_with(".json") then
+                _from_kernelspec(kernel_assembly, connection_file)
+            else
+                _from_assembly(kernel_assembly, connection_file)
+            fi
 
         let started = System.Diagnostics.Process.start(start_info)
 
@@ -91,6 +91,79 @@ namespace Ghul.Jupyter.Tests is
     // the process that started it disappearing, which is what a crashed
     // front end looks like - and which of them noticed is the script's
     // to check, since this program is the thing that has to go first.
+    _from_assembly(kernel_assembly: string, connection_file: string) -> System.Diagnostics.ProcessStartInfo is
+        let start_info = System.Diagnostics.ProcessStartInfo()
+
+        start_info.file_name = "dotnet"
+        start_info.use_shell_execute = false
+        start_info.argument_list.add(kernel_assembly)
+        start_info.argument_list.add("kernel")
+        start_info.argument_list.add(connection_file)
+
+        return start_info
+    si
+
+    // Starts the kernel from its kernelspec the way a front end launched
+    // from a desktop does: with none of the shell's environment beyond
+    // HOME, and the kernelspec's own `env` laid over that, `${{VAR}}`
+    // expanded against it.
+    _from_kernelspec(spec: string, connection_file: string) -> System.Diagnostics.ProcessStartInfo is
+        let root = System.Text.Json.JsonDocument.parse(IO.File.read_all_text(spec), _).root_element
+        let argv = LIST[string]()
+
+        for part in root.get_property("argv").enumerate_array() do
+            argv.add((part.get_string() ?? "").replace("{{connection_file}}", connection_file))
+        od
+
+        let start_info = System.Diagnostics.ProcessStartInfo()
+
+        start_info.file_name = argv[0]
+        start_info.use_shell_execute = false
+
+        for i in 1..argv.count do
+            start_info.argument_list.add(argv[i])
+        od
+
+        let home = start_info.environment["HOME"]
+
+        start_info.environment.clear()
+        start_info.environment["HOME"] = home
+
+        for member in root.enumerate_object() do
+            if member.name =~ "env" then
+                for variable in member.value.enumerate_object() do
+                    start_info.environment[variable.name] = _expand(variable.value.get_string() ?? "", start_info.environment)
+                od
+            fi
+        od
+
+        return start_info
+    si
+
+    _expand(value: string, environment: Collections.MutableMap[string, string?]) -> string is
+        let result = System.Text.StringBuilder()
+        let i mut = 0
+
+        while i < value.length do
+            let close = if value[i] == '$' /\ i + 1 < value.length /\ value[i + 1] == '{' then value.index_of('}', i) else -1 fi
+
+            if close > 0 then
+                let name = value.substring(i + 2, close - i - 2)
+
+                if environment.contains_key(name) then
+                    result.append(environment[name] ?? "")
+                fi
+
+                i = close + 1
+            else
+                result.append(value[i])
+                i = i + 1
+            fi
+        od
+
+        return result.to_string()
+    si
+
     _abandon(client: CLIENT) -> int is
         Std.write_line("abandoning the kernel:")
 

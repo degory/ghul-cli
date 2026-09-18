@@ -1,0 +1,104 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+
+    use Ghul.Jupyter.JSON
+    use Ghul.Jupyter.KERNELSPEC
+    use Ghul.Jupyter.LAUNCH
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    @TestClass()
+    class JUPYTER_LAUNCH_TESTS is
+        init() is si
+
+        @Test()
+        command__names_the_tool_shim_by_its_absolute_path() is
+            let command = LAUNCH.command("/home/u/.dotnet/tools/ghul-jupyter", "/x/ghul-jupyter.dll")
+
+            assert command.count == 1;
+            assert command[0] =~ "/home/u/.dotnet/tools/ghul-jupyter";
+        si
+
+        @Test()
+        command__names_the_host_and_the_assembly_under_dotnet() is
+            let command = LAUNCH.command("/home/u/.dotnet/dotnet", "/x/ghul-jupyter.dll")
+
+            assert command.count == 2;
+            assert command[0] =~ "/home/u/.dotnet/dotnet";
+            assert command[1] =~ "/x/ghul-jupyter.dll";
+        si
+
+        @Test()
+        command__falls_back_to_the_bare_name_without_a_process_path() is
+            let command = LAUNCH.command(null, null)
+
+            assert command.count == 1;
+            assert command[0] =~ "ghul-jupyter";
+        si
+
+        @Test()
+        root_from_runtime_directory__climbs_out_of_the_framework_version() is
+            let root = LAUNCH.root_from_runtime_directory("/home/u/.dotnet/shared/Microsoft.NETCore.App/10.0.1/")
+
+            assert root =~ "/home/u/.dotnet";
+        si
+
+        @Test()
+        environment__names_a_root_outside_the_default_locations() is
+            let variables = LAUNCH.environment("/home/u/.dotnet", "/home/u/.dotnet/tools")
+
+            assert variables.count == 2;
+            assert variables[0].`0 =~ "DOTNET_ROOT";
+            assert variables[0].`1 =~ "/home/u/.dotnet";
+            assert variables[1].`0 =~ "PATH";
+            assert variables[1].`1 =~ "/home/u/.dotnet:/home/u/.dotnet/tools:${{PATH}}";
+        si
+
+        @Test()
+        environment__leaves_a_default_root_to_the_host() is
+            let variables = LAUNCH.environment("/usr/lib/dotnet/", "/home/u/.dotnet/tools")
+
+            assert variables.count == 1;
+            assert variables[0].`0 =~ "PATH";
+            assert variables[0].`1 =~ "/usr/lib/dotnet/:/home/u/.dotnet/tools:${{PATH}}";
+        si
+
+        @Test()
+        environment__is_empty_when_nothing_is_known() is
+            assert LAUNCH.environment(null, null).count == 0;
+        si
+
+        @Test()
+        contents__writes_the_command_and_the_environment() is
+            let command = LIST[string]()
+            command.add("/home/u/.dotnet/tools/ghul-jupyter")
+
+            let text = KERNELSPEC.contents(command, LAUNCH.environment("/home/u/.dotnet", "/home/u/.dotnet/tools"))
+            let json = System.Text.Json.JsonDocument.parse(text, _).root_element
+
+            let argv = json.get_property("argv")
+
+            assert argv.get_array_length() == 3;
+            assert argv[0].get_string() =~ "/home/u/.dotnet/tools/ghul-jupyter";
+            assert argv[1].get_string() =~ "kernel";
+            assert argv[2].get_string() =~ "{{connection_file}}";
+
+            let env = json.get_property("env")
+
+            assert env.get_property("DOTNET_ROOT").get_string() =~ "/home/u/.dotnet";
+            assert env.get_property("PATH").get_string() =~ "/home/u/.dotnet:/home/u/.dotnet/tools:${{PATH}}";
+        si
+
+        @Test()
+        contents__leaves_out_an_empty_environment() is
+            let command = LIST[string]()
+            command.add("ghul-jupyter")
+
+            let text = KERNELSPEC.contents(command, LIST[(name: string, value: string)]())
+            let json = System.Text.Json.JsonDocument.parse(text, _).root_element
+
+            assert !json.try_get_property("env", _);
+        si
+    si
+si

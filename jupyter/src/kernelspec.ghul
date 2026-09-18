@@ -38,12 +38,24 @@ namespace Ghul.Jupyter is
         directory() -> string static =>
             Path.join([data_directory(), "kernels", KERNEL_NAME])
 
-        // The kernelspec itself. `{connection_file}` is Jupyter's own
-        // placeholder, and it substitutes the path before running this.
+        // The kernelspec for this process, as `install` writes it.
         contents() -> string static is
+            let process_path = System.Environment.process_path
+
+            return contents(
+                LAUNCH.command(process_path, System.Reflection.Assembly.get_entry_assembly()?.location),
+                LAUNCH.environment(LAUNCH.current_dotnet_root(), LAUNCH.current_tools_directory(process_path)))
+        si
+
+        // The kernelspec itself. `{{connection_file}}` is Jupyter's own
+        // placeholder, and it substitutes the path before running this.
+        contents(command: LIST[string], environment: LIST[(name: string, value: string)]) -> string static is
             let argv = LIST[string]()
 
-            argv.add(JSON.quote(TOOL_COMMAND))
+            for part in command do
+                argv.add(JSON.quote(part))
+            od
+
             argv.add(JSON.quote("kernel"))
             argv.add(JSON.quote("{{connection_file}}"))
 
@@ -53,6 +65,16 @@ namespace Ghul.Jupyter is
             members.add((name = "display_name", value = JSON.quote(DISPLAY_NAME)))
             members.add((name = "language", value = JSON.quote(LANGUAGE_NAME)))
             members.add((name = "interrupt_mode", value = JSON.quote("message")))
+
+            if environment.count > 0 then
+                let variables = LIST[(name: string, value: string)]()
+
+                for variable in environment do
+                    variables.add((name = variable.name, value = JSON.quote(variable.value)))
+                od
+
+                members.add((name = "env", value = JSON.object(variables)))
+            fi
 
             return JSON.object(members)
         si
