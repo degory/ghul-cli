@@ -27,6 +27,12 @@ namespace Ghul.Cli.Repl is
     // from SESSION, so a notebook or the playground can take its place
     // without any of this.
     class TERMINAL(_make_session: () -> SESSION) is
+        _display: CELL_DISPLAY
+
+        init(..) is
+            _display = CELL_DISPLAY()
+        si
+
         run() -> int is
             Std.write_line("ghūl repl. :help for commands, a blank line to submit.")
 
@@ -81,6 +87,12 @@ namespace Ghul.Cli.Repl is
             for line in result.diagnostics do
                 Std.error.write_line(line)
             od
+
+            // After whatever the cell itself wrote, so a cell that
+            // prints and then ends on a value reads in the order it ran.
+            if let shown = _display.format(result.value) then
+                Std.write_line(shown)
+            fi
 
             if let error = result.run_error then
                 Std.error.write_line(error)

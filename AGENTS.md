@@ -49,12 +49,13 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
   `CompileBackend` interface - `SPAWN_BACKEND` runs the compiler per
   cell, about a second each - and loaded by `CellHost`, which reads what
   the cell exported off the emitted assembly and invokes its entry.
-  `SDK_REFERENCES` exists only because naming any reference takes the
-  compiler off its own discovery of the framework's, so a cell that
-  references an earlier one has to name them all: delete it when the
-  compiler publishes a reference flag that adds to the discovered set.
-  `SUBMISSION_END` is the blank-line rule, in one place because a real
-  completeness answer needs a compiler mode that does not exist yet.
+  `CELL_DISPLAY` is everything the terminal knows about showing the
+  value a submission ended on, so a richer display replaces it and
+  nothing else. `SUBMISSION_END` is the blank-line rule, in one place
+  because a real completeness answer needs a compiler mode that does not
+  exist yet. The session needs `ghul.compiler` `MINIMUM_REPL_COMPILER`
+  or newer, for `--reference` and `--submission`, and refuses to start
+  on an older one rather than failing a cell at a time.
 - `unit-tests/` — MSTest project covering the pure path/cache-key/
   runnable-by-default/stdin-marker/source-resolution logic.
 - `tests/smoke.sh` — end-to-end test: builds the tool, points it at a real

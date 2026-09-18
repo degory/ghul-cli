@@ -17,15 +17,6 @@ namespace Ghul.Cli.Repl is
         ) -> COMPILE_RESULT is
             Directory.create_directory(_session_directory)
 
-            // The marker the compiler stops at when it derives a
-            // namespace-less file's namespace from its path: without it
-            // the name would carry the whole temporary path.
-            let marker = Path.join([_session_directory, "ghul.json"])
-
-            if !File.exists(marker) then
-                File.write_all_text(marker, "{{}}")
-            fi
-
             // A cell's assembly references the ghūl runtime, and the
             // host process that loads it has to be able to find it: its
             // own copy is whatever version this tool was built against,
@@ -52,6 +43,12 @@ namespace Ghul.Cli.Repl is
             start_info.working_directory = _session_directory
 
             start_info.argument_list.add("--library")
+
+            // What the cell's namespace is called, which decides what
+            // the generated imports of every later cell name. Without
+            // it the compiler would derive one from the file's path.
+            start_info.argument_list.add("--submission")
+            start_info.argument_list.add(namespace_name_for(index))
 
             // `--reference` adds to the references the compiler finds for
             // itself, where `-a` would replace them and leave the cell
@@ -102,8 +99,12 @@ namespace Ghul.Cli.Repl is
         si
     si
 
-    // The stem of each cell's file name, which is also what the
-    // compiler's derived namespace ends with.
+    // What a cell's namespace is called. Its own name is enough: each
+    // session has a process to itself, and two sessions never see each
+    // other's assemblies.
+    namespace_name_for(index: int) -> string => "{CELL_FILE_STEM}{index}"
+
+    // The stem of each cell's file name, and of its namespace.
     CELL_FILE_STEM: string => "cell"
 
     // Every session directory starts with this, so the namespace the

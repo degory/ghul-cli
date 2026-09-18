@@ -578,8 +578,9 @@ namespace Ghul.Cli is
 
     // The oldest compiler the session can be built on: `--reference`,
     // which lets a cell see the cells before it without naming the
-    // framework's assemblies too.
-    MINIMUM_REPL_COMPILER: string => "59.2.0"
+    // framework's assemblies too, and `--submission`, which names the
+    // cell's namespace and answers with the value it ended on.
+    MINIMUM_REPL_COMPILER: string => "59.3.0"
 
     // Whether what is installed is old enough to be missing something
     // the session needs. A version that does not parse is left alone:
