@@ -51,12 +51,23 @@ namespace Ghul.Cli.Repl is
 
         _submission_end: SUBMISSION_END
 
+        // Lines are edited in place when a person is typing them at a
+        // terminal, and read as they come otherwise.
+        _reader: LineReader
+
         init(..) is
             _display = CELL_DISPLAY()
 
             // Asked of the session in use, whose compile server answers
             // it once it is ready.
             _submission_end = SUBMISSION_END(text => if let session = _current then session.check(text) else Completeness.COMPLETE fi)
+
+            _reader =
+                if Std.is_input_redirected \/ Std.is_output_redirected then
+                    PLAIN_READER()
+                else
+                    CONSOLE_EDITOR((text, line, column) => _names(text, line, column))
+                fi
         si
 
         run() -> int is
@@ -68,9 +79,7 @@ namespace Ghul.Cli.Repl is
             let lines = LIST[string]()
 
             loop: do
-                Std.write(if lines.count == 0 then "> " else "| " fi)
-
-                let line = Std.read_line()
+                let line = _reader.read_line(if lines.count == 0 then "> " else "| " fi, lines)
 
                 if !line? then
                     Std.write_line("")
@@ -153,6 +162,24 @@ namespace Ghul.Cli.Repl is
                 // cells whatever its own code then did.
                 Std.error.write_line("ghul: the cell was kept: it compiled, so its definitions are in the session")
             fi
+        si
+
+        _names(text: string, line: int, column: int) -> Collections.List[string]? is
+            let offered = _current?.complete(text, line, column)
+
+            if !offered? then
+                return null
+            fi
+
+            let names = LIST[string]()
+
+            for item in offered do
+                names.add(item.name)
+            od
+
+            names.sort(System.StringComparer.ordinal)
+
+            return names
         si
 
         // What could follow some text, one name to a line.
