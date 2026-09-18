@@ -44,6 +44,7 @@ namespace Ghul.Cli.Repl is
     class SUBMIT_RESULT(
         is_accepted: bool,
         diagnostics: Collections.List[string],
+        value: object?,
         run_error: string?
     );
 
@@ -117,7 +118,7 @@ namespace Ghul.Cli.Repl is
             od
 
             if !result.is_success then
-                return SUBMIT_RESULT(false, diagnostics, null)
+                return SUBMIT_RESULT(false, diagnostics, null, null)
             fi
 
             let assembly_path = result.assembly_path!
@@ -131,7 +132,9 @@ namespace Ghul.Cli.Repl is
                     assembly_path,
                     loaded.exports))
 
-            return SUBMIT_RESULT(true, diagnostics, _host.run(loaded))
+            let run = _host.run(loaded)
+
+            return SUBMIT_RESULT(true, diagnostics, run.value, run.error)
         si
     si
 si

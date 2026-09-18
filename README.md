@@ -80,10 +80,13 @@ afterwards:
 > names.add("first")
 >
 > names.add("second")
-> IO.Std.write_line("{names.count}")
+> names
 >
-2
+[first, second]
 ```
+
+A submission that ends on a value shows it, so the last line above needs
+no `write_line`. A submission that ends on a statement shows nothing.
 
 Redefining something replaces it going forward, rather than editing what has
 already run: a later cell sees the new one, and code compiled earlier keeps
@@ -94,20 +97,17 @@ so `let x = 41` followed later by `let x = "now a string"` is fine.
 leaves.
 
 Each submission is compiled as its own small library and loaded into the
-session, so four things are true of this first version:
+session, so three things are true of this version:
 
 - A submission takes about a second, nearly all of it starting the compiler.
-- A class or trait declared in one submission cannot be subclassed or
-  implemented in a later one: each submission is its own assembly, and a
-  ghūl class is closed to the assembly that declares it. Declare both in the
-  same submission.
-- A name beginning with `_` is private to the submission that declares it,
-  for the same reason.
-- A submission's value is not printed. Write `IO.Std.write_line` to see
-  something.
+- A name beginning with `_` is private to the submission that declares it:
+  each submission is its own assembly, and such a name does not leave one.
+- A trait declared in one submission can be implemented in a later one, but
+  not where the trait declares a property.
 
-Each of those is the first version of the REPL rather than something about
-the language, and each is lifted by a later one.
+Each of those is this version of the REPL rather than something about the
+language, and each is lifted by a later one. The session needs
+`ghul.compiler` 59.3.0 or newer, and says so if an older one is installed.
 
 ## Installing
 

@@ -3,6 +3,9 @@ namespace Ghul.Cli.Repl is
     use System.Reflection.Assembly
     use System.Reflection.BindingFlags
 
+    // What running a cell produced.
+    class RUN_RESULT(value: object?, error: string?);
+
     // A cell's assembly, loaded: the namespace the compiler put it in,
     // the names later cells can import from it, and the entry to run.
     class LOADED_CELL(
@@ -19,10 +22,11 @@ namespace Ghul.Cli.Repl is
     class CellHost open is
         load(assembly_path: string) -> LOADED_CELL;
 
-        // What the cell's own code threw, or null where it ran to the
-        // end. The cell is accepted either way: it compiled, so its
-        // definitions exist for later cells to use.
-        run(cell: LOADED_CELL) -> string?;
+        // What the cell produced: the value it ended on, where it ended
+        // on one, and what its own code threw, where it threw. The cell
+        // is accepted either way: it compiled, so its definitions exist
+        // for later cells to use.
+        run(cell: LOADED_CELL) -> RUN_RESULT;
     si
 
     // The cells' own load context. The tool is itself a ghūl program, so
@@ -114,11 +118,11 @@ namespace Ghul.Cli.Repl is
             return LOADED_CELL(namespace_name, exports, globals)
         si
 
-        run(cell: LOADED_CELL) -> string? is
+        run(cell: LOADED_CELL) -> RUN_RESULT is
             let globals = cell.globals
 
             if !globals? then
-                return null
+                return RUN_RESULT(null, null)
             fi
 
             // `_entry` is the Main-compatible wrapper and the one the
@@ -131,7 +135,7 @@ namespace Ghul.Cli.Repl is
             let main = _find_entry(globals)
 
             if !main? then
-                return null
+                return RUN_RESULT(null, null)
             fi
 
             let arguments =
@@ -142,15 +146,18 @@ namespace Ghul.Cli.Repl is
                 fi
 
             try
-                main.invoke(null, arguments)
-
-                return null
+                // The entry answers with the value of the cell's final
+                // expression, or with nothing where the cell ended on a
+                // statement. A compiler that predates that returns void,
+                // which reflection reports as nothing, so this is the
+                // same code either way.
+                return RUN_RESULT(main.invoke(null, arguments), null)
             catch e: System.Reflection.TargetInvocationException
                 let inner = e.inner_exception
 
-                return if inner? then "{inner}" else "{e}" fi
+                return RUN_RESULT(null, if inner? then "{inner}" else "{e}" fi)
             catch e: System.Exception
-                return "{e}"
+                return RUN_RESULT(null, "{e}")
             yrt
         si
 

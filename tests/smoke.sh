@@ -302,6 +302,72 @@ for expected in "cell1: x is 41" "now a string 101 7 2"; do
     fi
 done
 
+echo "smoke: 'ghul repl' shows the value a submission ends on..." >&2
+repl_values_in="$scratch/repl-values-in.txt"
+cat > "$repl_values_in" <<'REPL'
+41
+
+"now a string"
+
+(left = 3, right = 4)
+
+Collections.LIST[int]([1, 2, 3])
+
+let held = 7
+
+IO.Std.write_line("printed")
+
+:quit
+REPL
+repl_values_out="$(dotnet "$cli" repl < "$repl_values_in" 2>"$scratch/repl-values.err")" || {
+    echo "smoke: ghul repl exited non-zero:" >&2
+    cat "$scratch/repl-values.err" >&2
+    exit 1
+}
+# A collection shows what is in it; a submission ending on a statement shows
+# nothing, so `let held = 7` and the write_line contribute no value line.
+for expected in "41" "now a string" "(3, 4)" "[1, 2, 3]" "printed"; do
+    if [[ "$repl_values_out" != *"$expected"* ]]; then
+        echo "smoke: expected the repl to show '$expected', got:" >&2
+        echo "$repl_values_out" >&2
+        exit 1
+    fi
+done
+if [[ "$repl_values_out" == *"held"* ]]; then
+    echo "smoke: a submission ending on a let should show nothing, got:" >&2
+    echo "$repl_values_out" >&2
+    exit 1
+fi
+
+echo "smoke: 'ghul repl' extends a class declared in an earlier submission..." >&2
+repl_extend_in="$scratch/repl-extend-in.txt"
+cat > "$repl_extend_in" <<'REPL'
+class SHAPE is
+    init() is si
+    name() -> string => "shape"
+si
+
+class CIRCLE: SHAPE is
+    init() is super.init() si
+    name() -> string => "circle"
+si
+
+CIRCLE().name()
+
+:quit
+REPL
+repl_extend_out="$(dotnet "$cli" repl < "$repl_extend_in" 2>"$scratch/repl-extend.err")" || {
+    echo "smoke: ghul repl exited non-zero:" >&2
+    cat "$scratch/repl-extend.err" >&2
+    exit 1
+}
+if [[ "$repl_extend_out" != *"circle"* ]]; then
+    echo "smoke: expected a subclass of an earlier submission's class to work, got:" >&2
+    echo "$repl_extend_out" >&2
+    cat "$scratch/repl-extend.err" >&2
+    exit 1
+fi
+
 echo "smoke: a cell that does not compile leaves the session unchanged..." >&2
 repl_bad_in="$scratch/repl-bad-in.txt"
 cat > "$repl_bad_in" <<'REPL'
