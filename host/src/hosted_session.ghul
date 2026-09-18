@@ -81,10 +81,39 @@ namespace Ghul.Repl.Host is
                 return SUBMIT_RESULT(false, outcome.diagnostics, null, null)
             fi
 
+            if let assembly_path = compiled.assembly_path then
+                _analysis?.add(IO.Path.get_full_path(assembly_path))
+            fi
+
             let run = CELL_ENTRY.run(loaded)
 
             return SUBMIT_RESULT(true, outcome.diagnostics, run.value, run.error)
         si
+
+        _analysis: ANALYSIS_SESSION?
+
+        // Completion, hover and diagnostics for text not yet submitted,
+        // from an analyser the connection starts, which is not started
+        // until one of them is asked for.
+        start_analysis(start: () -> AnalyserConnection?, say: (string) -> void) is
+            _analysis = ANALYSIS_SESSION(start, _session, say)
+        si
+
+        // Whether completion, hover and diagnostics can still be answered.
+        is_analysis_available: bool => _analysis?.is_available ?? false
+
+        // What could be written at a line and column of text not yet
+        // submitted, both from 1, or null when that cannot be answered.
+        complete(text: string, line: int, column: int) -> Collections.List[ANALYSIS_COMPLETION]? =>
+            _analysis?.complete(text, line, column)
+
+        // The declaration at a line and column of text not yet submitted.
+        hover(text: string, line: int, column: int) -> string? =>
+            _analysis?.hover(text, line, column)
+
+        // What compiling text not yet submitted would report.
+        diagnostics(text: string) -> Collections.List[string]? =>
+            _analysis?.diagnostics(text)
 
         // Asked when the backend cannot say whether text is complete.
         completeness_fallback: COMPLETENESS_CHECK? public
@@ -99,6 +128,7 @@ namespace Ghul.Repl.Host is
         // Ends the session's compiler, if it keeps one running.
         close() is
             _backend.close()
+            _analysis?.close()
         si
     si
 
@@ -129,6 +159,8 @@ namespace Ghul.Repl.Host is
 
             session.completeness_fallback = COMPLETENESS_CHECK(compiler_shim, IO.Path.join([directory, "check"]))
 
+            session.start_analysis(() => _start_analyser(compiler_shim, IO.Path.join([directory, "analysis"])), say)
+
             return session
         si
 
@@ -137,6 +169,16 @@ namespace Ghul.Repl.Host is
         // from them.
         new_session_directory() -> string static =>
             IO.Path.join([IO.Path.get_temp_path(), "{REPL_SESSION_PREFIX}{System.Guid.new_guid().to_string("N")}"])
+
+        _start_analyser(compiler_shim: string, directory: string) -> AnalyserConnection? static is
+            try
+                IO.Directory.create_directory(directory)
+
+                return ANALYSER_PROCESS(compiler_shim, directory)
+            catch e: System.Exception
+                return null
+            yrt
+        si
 
         // Null when it cannot be started at all, which the backend
         // reports once and then compiles without it.

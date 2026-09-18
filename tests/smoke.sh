@@ -495,8 +495,26 @@ if ! grep -q "secret" "$scratch/repl-reset.err"; then
     exit 1
 fi
 
+echo "smoke: ':complete' and ':hover' see an earlier cell's names..." >&2
+repl_analysis_in="$scratch/repl-analysis-in.txt"
+cat > "$repl_analysis_in" <<'REPL'
+let answer = 41
+:complete ans
+:hover answer
+:quit
+REPL
+repl_analysis_out="$(dotnet "$cli" repl < "$repl_analysis_in" 2>"$scratch/repl-analysis.err")" || true
+for expected in "answer" "answer: int"; do
+    if [[ "$repl_analysis_out" != *"$expected"* ]]; then
+        echo "smoke: expected completion and hover to show '$expected', got:" >&2
+        echo "$repl_analysis_out" >&2
+        cat "$scratch/repl-analysis.err" >&2
+        exit 1
+    fi
+done
+
 compile_servers() {
-    pgrep -af -- "--compile-server" | grep -F "$HOME/" || true
+    pgrep -af -- "--compile-server|--analyse" | grep -F "$HOME/" || true
 }
 
 if [[ -n "$(compile_servers)" ]]; then

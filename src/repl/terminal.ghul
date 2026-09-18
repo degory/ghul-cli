@@ -91,7 +91,15 @@ namespace Ghul.Cli.Repl is
                     when ":help" then
                         _write_help()
                     else
-                        Std.write_line("unknown command {line.trim()}; :help for the list")
+                        let command = line.trim()
+
+                        if command.starts_with(":complete ") then
+                            _complete(session, command.substring(":complete ".length))
+                        elif command.starts_with(":hover ") then
+                            _hover(session, command.substring(":hover ".length))
+                        else
+                            Std.write_line("unknown command {command}; :help for the list")
+                        fi
                     esac
 
                     continue
@@ -147,10 +155,42 @@ namespace Ghul.Cli.Repl is
             fi
         si
 
+        // What could follow some text, one name to a line.
+        _complete(session: HOSTED_SESSION, text: string) is
+            if let offered = session.complete(text, 1, text.length + 1) then
+                let names = LIST[string]()
+
+                for item in offered do
+                    names.add(item.name)
+                od
+
+                names.sort(System.StringComparer.ordinal)
+
+                for name in names do
+                    Std.write_line(name)
+                od
+            else
+                Std.write_line("completion is not available")
+            fi
+        si
+
+        // The declaration the last character of some text belongs to.
+        _hover(session: HOSTED_SESSION, text: string) is
+            if let shown = session.hover(text, 1, text.length) then
+                Std.write_line(shown)
+            elif session.is_analysis_available then
+                Std.write_line("nothing there")
+            else
+                Std.write_line("hover is not available")
+            fi
+        si
+
         _write_help() is
-            Std.write_line(":help    this list")
-            Std.write_line(":reset   start a new session, forgetting every cell")
-            Std.write_line(":quit    leave")
+            Std.write_line(":help            this list")
+            Std.write_line(":reset           start a new session, forgetting every cell")
+            Std.write_line(":complete TEXT   what could follow TEXT")
+            Std.write_line(":hover TEXT      what the end of TEXT names")
+            Std.write_line(":quit            leave")
             Std.write_line("")
             Std.write_line("a line that finishes what you have typed submits it; one that leaves")
             Std.write_line("something open waits for more, and a blank line submits regardless")

@@ -1,0 +1,238 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+
+    use Ghul.Repl.CELL_REPLY
+    use Ghul.Repl.LOADED_CELL
+    use Ghul.Repl.SESSION
+    use Ghul.Repl.Host.ANALYSIS_SESSION
+    use Ghul.Repl.Host.AnalyserConnection
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    // Answers each kind of request with a fixed reply, and records what
+    // it was sent.
+    class FAKE_ANALYSER(capabilities: Collections.List[string]) is
+        sent: LIST[string]
+        replies: Collections.MAP[string, string]
+        is_closed: bool public
+
+        init(..) is
+            sent = LIST[string]()
+            replies = Collections.MAP[string, string]()
+
+            replies["diagnostics"] = "{{\"kind\":\"diagnostics\",\"diagnostics\":[]}}"
+            replies["add_references"] = "{{\"kind\":\"add_references\",\"message\":null}}"
+        si
+    si
+
+    class FAKE_CONNECTION(_fake: FAKE_ANALYSER): AnalyserConnection is
+        capabilities(timeout_ms: int) -> Collections.List[string]? => _fake.capabilities
+
+        exchange(line: string, kind: string, timeout_ms: int) -> string? is
+            _fake.sent.add(line)
+
+            let reply: string mut = _
+
+            return if _fake.replies.try_get_value(kind, reply ref) then reply else null fi
+        si
+
+        close() is
+            _fake.is_closed = true
+        si
+    si
+
+    @TestClass()
+    class ANALYSIS_SESSION_TESTS is
+        init() is si
+
+        _capable() -> FAKE_ANALYSER => FAKE_ANALYSER(LIST[string](["add-references"]))
+
+        // A session with one accepted cell defining `x`, so the prelude is
+        // `use default` and `use cell1.x`: two lines.
+        _session() -> SESSION is
+            let session = SESSION()
+            let request = session.prepare("let x = 1\n")
+
+            session.accept(request, CELL_REPLY(LIST[string](), LOADED_CELL(LIST[string](["x"]), null)));
+
+            return session
+        si
+
+        _analysis(fake: FAKE_ANALYSER, session: SESSION, said: LIST[string]) -> ANALYSIS_SESSION =>
+            ANALYSIS_SESSION(() => FAKE_CONNECTION(fake), session, line => said.add(line))
+
+        _field(line: string, name: string) -> int =>
+            System.Text.Json.JsonDocument.parse(line, _).root_element.get_property(name).get_int32()
+
+        @Test()
+        complete__moves_the_position_past_the_prelude() is
+            let fake = _capable()
+
+            fake.replies["completion"] = "{{\"kind\":\"completion\",\"items\":[]}}"
+
+            _analysis(fake, _session(), LIST[string]()).complete("let y = x", 1, 10);
+
+            let asked = fake.sent[fake.sent.count - 1]
+
+            assert _field(asked, "line") == 3;
+            assert _field(asked, "column") == 10;
+        si
+
+        @Test()
+        complete__offers_names_starting_with_what_is_typed_and_none_of_the_machinery() is
+            let fake = _capable()
+
+            fake.replies["completion"] =
+                "{{\"kind\":\"completion\",\"items\":["
+                "{{\"name\":\"xs\",\"description\":\"xs: int\"}},"
+                "{{\"name\":\"x\",\"description\":\"x: int\"}},"
+                "{{\"name\":\"y\",\"description\":\"y: int\"}},"
+                "{{\"name\":\"cell1\",\"description\":\"namespace cell1\"}},"
+                "{{\"name\":\"input\",\"description\":\"namespace input\"}},"
+                "{{\"name\":\"entry\",\"description\":\"entry()\"}}]}}"
+
+            let offered = _analysis(fake, _session(), LIST[string]()).complete("let z = x", 1, 10)
+
+            assert offered?;
+
+            let names = LIST[string]()
+
+            for item in offered! do
+                names.add(item.name)
+            od
+
+            assert names |> Ghul.Pipes.join(",") =~ "xs,x";
+        si
+
+        @Test()
+        complete__offers_no_machinery_with_nothing_typed() is
+            let fake = _capable()
+
+            fake.replies["completion"] =
+                "{{\"kind\":\"completion\",\"items\":["
+                "{{\"name\":\"x\",\"description\":\"x: int\"}},"
+                "{{\"name\":\"cell12\",\"description\":\"namespace cell12\"}},"
+                "{{\"name\":\"_entry\",\"description\":\"_entry()\"}}]}}"
+
+            let offered = _analysis(fake, _session(), LIST[string]()).complete("", 1, 1)
+
+            assert offered!.count == 1;
+            assert offered![0].name =~ "x";
+        si
+
+        // A diagnostic comes back on the user's line, named by the cell the
+        // text would become.
+        @Test()
+        diagnostics__moves_a_diagnostic_back_and_labels_it() is
+            let fake = _capable()
+
+            fake.replies["diagnostics"] =
+                "{{\"kind\":\"diagnostics\",\"diagnostics\":[{{\"path\":\"input.ghul\",\"start_line\":3,\"start_column\":9,"
+                "\"end_line\":3,\"end_column\":16,\"severity\":1,\"message\":\"symbol not found: no_such\",\"code\":\"\","
+                "\"related\":[{{\"message\":\"x is declared here\",\"location\":{{\"file\":\"input.ghul\",\"start_line\":3,"
+                "\"start_column\":5,\"end_line\":3,\"end_column\":6}}}}]}}]}}"
+
+            let shown = _analysis(fake, _session(), LIST[string]()).diagnostics("let z = no_such")
+
+            assert shown!.count == 1;
+            assert shown![0] =~ "cell-2: 1,9..1,16: error: symbol not found: no_such [x is declared here: cell-2: 1,5..1,6]";
+        si
+
+        @Test()
+        diagnostics__leaves_out_one_about_the_prelude() is
+            let fake = _capable()
+
+            fake.replies["diagnostics"] =
+                "{{\"kind\":\"diagnostics\",\"diagnostics\":[{{\"path\":\"input.ghul\",\"start_line\":2,\"start_column\":1,"
+                "\"end_line\":2,\"end_column\":10,\"severity\":1,\"message\":\"duplicate use\",\"code\":\"\"}}]}}"
+
+            let shown = _analysis(fake, _session(), LIST[string]()).diagnostics("let z = 1")
+
+            assert shown!.count == 0;
+        si
+
+        @Test()
+        hover__is_null_where_there_is_nothing() is
+            let fake = _capable()
+
+            fake.replies["hover"] = "{{\"kind\":\"hover\",\"signature\":\"\",\"description\":\"\"}}"
+
+            assert !_analysis(fake, _session(), LIST[string]()).hover("  ", 1, 1)?;
+        si
+
+        @Test()
+        hover__moves_the_position_past_the_prelude() is
+            let fake = _capable()
+
+            fake.replies["hover"] = "{{\"kind\":\"hover\",\"signature\":\"x: int\",\"description\":\"\"}}"
+
+            assert _analysis(fake, _session(), LIST[string]()).hover("x", 1, 1) =~ "x: int";
+            assert _field(fake.sent[fake.sent.count - 1], "line") == 3;
+        si
+
+        // An accepted cell reaches the analyser before it is next asked
+        // anything, and only once.
+        @Test()
+        add__hands_an_accepted_cell_over_before_the_next_question() is
+            let fake = _capable()
+            let analysis = _analysis(fake, _session(), LIST[string]())
+
+            analysis.add("/tmp/session/cell1.dll")
+            analysis.diagnostics("x");
+            analysis.diagnostics("x");
+
+            let added = fake.sent |> Ghul.Pipes.filter(line => line.contains("add_references")) |> Ghul.Pipes.collect_list()
+
+            assert added.count == 1;
+            assert added[0].contains("/tmp/session/cell1.dll");
+            assert fake.sent.index_of(added[0]) < fake.sent.count - 1;
+        si
+
+        @Test()
+        an_older_compiler__leaves_analysis_unavailable_and_says_so_once() is
+            let fake = FAKE_ANALYSER(LIST[string](["edit-deltas"]))
+            let said = LIST[string]()
+            let analysis = _analysis(fake, _session(), said)
+
+            assert !analysis.complete("x", 1, 2)?;
+            assert !analysis.hover("x", 1, 1)?;
+            assert !analysis.is_available;
+            assert fake.is_closed;
+            assert said.count == 1;
+            assert fake.sent.count == 0;
+        si
+
+        @Test()
+        an_analyser_that_stops_answering__leaves_analysis_unavailable() is
+            let fake = _capable()
+            let said = LIST[string]()
+            let analysis = _analysis(fake, _session(), said)
+
+            fake.replies.remove("diagnostics");
+
+            assert !analysis.diagnostics("x")?;
+            assert !analysis.is_available;
+            assert fake.is_closed;
+            assert said.count == 1;
+        si
+
+        @Test()
+        close__closes_the_analyser() is
+            let fake = _capable()
+            let analysis = _analysis(fake, _session(), LIST[string]())
+
+            analysis.diagnostics("x");
+            analysis.close()
+
+            assert fake.is_closed;
+        si
+
+        @Test()
+        name_before__is_the_part_of_a_name_the_position_follows() is
+            assert ANALYSIS_SESSION.name_before("let y = x_1", 1, 12) =~ "x_1";
+            assert ANALYSIS_SESSION.name_before("a.b", 1, 3) =~ "";
+            assert ANALYSIS_SESSION.name_before("first\nsecond", 2, 4) =~ "sec";
+        si
+    si
+si

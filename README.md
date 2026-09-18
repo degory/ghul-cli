@@ -116,7 +116,23 @@ A redefinition can read the value it replaces: after `let x = 10, y = 20`,
 `let x = x + y` makes `x` 30.
 
 `:help` lists the commands, `:reset` starts a fresh session, and `:quit`
-leaves.
+leaves. `:complete TEXT` lists what could follow TEXT, and `:hover TEXT`
+says what the end of TEXT names, both taking in everything the session has
+defined so far:
+
+```
+> let answer = 41
+> :complete ans
+answer
+> :hover answer
+answer: int
+```
+
+They start a compiler in analysis mode the first time either is used, which
+takes a second or two; after that an answer takes tens of milliseconds, and
+a little longer straight after a submission, which the analyser has to take
+in first. They need `ghul.compiler` 59.9.0 or newer, and say they are not
+available with an older one.
 
 The session keeps one compiler running for its whole length, started
 before the first prompt so that it warms up while you type. The first
