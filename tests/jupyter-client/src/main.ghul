@@ -1,0 +1,271 @@
+namespace Ghul.Jupyter.Tests is
+    use Collections.LIST
+    use Ghul.Jupyter.CONNECTION
+    use Ghul.Jupyter.JSON
+    use Ghul.Jupyter.MESSAGE
+    use IO.Std
+
+    // Drives a kernel through what a notebook does. Takes the kernel
+    // assembly to run and a directory to work in; answers non-zero if
+    // anything it checked did not hold.
+    entry(args: string[]) -> int is
+        if args.count < 2 then
+            Std.error.write_line("usage: jupyter-client <kernel.dll> <directory>")
+
+            return 1
+        fi
+
+        let kernel_assembly = args[0]
+        let directory = args[1]
+
+        IO.Directory.create_directory(directory)
+
+        let ports = _free_ports(5)
+        let connection_file = IO.Path.join([directory, "connection.json"])
+
+        IO.File.write_all_text(connection_file, _connection_json(ports))
+
+        let connection = CONNECTION.read(connection_file)
+
+        let start_info = System.Diagnostics.ProcessStartInfo()
+
+        start_info.file_name = "dotnet"
+        start_info.use_shell_execute = false
+        start_info.argument_list.add(kernel_assembly)
+        start_info.argument_list.add("kernel")
+        start_info.argument_list.add(connection_file)
+
+        let started = System.Diagnostics.Process.start(start_info)
+
+        if !started? then
+            Std.error.write_line("could not start the kernel")
+
+            return 1
+        fi
+
+        let process = started
+
+        let client = CLIENT(connection)
+
+        try
+            return _drive(client)
+        finally
+            client.close()
+
+            if !process.has_exited then
+                process.kill(true)
+            fi
+
+            NetMQ.NetMQConfig.cleanup(false)
+        yrt
+    si
+
+    _drive(client: CLIENT) -> int is
+        Std.write_line("kernel_info:")
+
+        client.send("kernel_info_request", JSON.EMPTY_OBJECT)
+
+        let info = client.reply()
+
+        client.check(info?, "the kernel answers kernel_info_request")
+
+        if let reply = info then
+            client.check(reply.msg_type =~ "kernel_info_reply", "the answer is a kernel_info_reply")
+            client.check(
+                JSON.string_member(reply.content, "protocol_version") =~ "5.3",
+                "it speaks protocol 5.3")
+        fi
+
+        Std.write_line("three chained cells:")
+
+        _execute(client, "let x = 41\n", null)
+        _execute(client, "add(n: int) -> int => n + 1\n", null)
+        _execute(client, "add(x)\n", "42")
+
+        Std.write_line("a cell that does not compile:")
+
+        let broken = _execute_raw(client, "let y: int = \"not an int\"\n")
+
+        client.check(
+            _has(broken.published, "error"),
+            "a cell that does not compile publishes an error")
+
+        client.check(
+            JSON.string_member(broken.reply_content, "status") =~ "error",
+            "and its execute_reply says error")
+
+        Std.write_line("the session survives it:")
+
+        _execute(client, "add(x)\n", "42")
+
+        Std.write_line("a cell that throws:")
+
+        let threw = _execute_raw(client, "throw System.Exception(\"boom\")\n")
+
+        client.check(_has(threw.published, "error"), "a cell that throws publishes an error")
+
+        Std.write_line("a cell that writes:")
+
+        let wrote = _execute_raw(client, "IO.Std.write_line(\"printed\")\n")
+
+        client.check(
+            _stream_text(wrote.published).contains("printed"),
+            "what a cell writes arrives as a stream message")
+
+        Std.write_line("is_complete:")
+
+        _is_complete(client, "let x = 1\n", "complete")
+        _is_complete(client, "if true then\n", "incomplete")
+
+        Std.write_line("shutdown:")
+
+        client.send("shutdown_request", "{{\"restart\": false}}")
+
+        let shutdown = client.reply()
+
+        client.check(shutdown? /\ shutdown.msg_type =~ "shutdown_reply", "the kernel answers shutdown_request")
+
+        if client.failures.count > 0 then
+            Std.error.write_line("{client.failures.count} checks failed")
+
+            return 1
+        fi
+
+        Std.write_line("all checks passed")
+
+        return 0
+    si
+
+    // What one execute_request produced.
+    class EXECUTION(published: Collections.List[MESSAGE], reply_content: string);
+
+    _execute(client: CLIENT, code: string, want_value: string?) is
+        let done = _execute_raw(client, code)
+
+        client.check(
+            JSON.string_member(done.reply_content, "status") =~ "ok",
+            "the cell {code.trim()} ran")
+
+        if let wanted = want_value then
+            client.check(
+                _result_text(done.published) =~ wanted,
+                "the cell {code.trim()} produced {wanted}")
+        fi
+    si
+
+    _execute_raw(client: CLIENT, code: string) -> EXECUTION is
+        let content = JSON.object(
+            LIST[(name: string, value: string)]([
+                (name = "code", value = JSON.quote(code)),
+                (name = "silent", value = "false"),
+                (name = "store_history", value = "true"),
+                (name = "allow_stdin", value = "false"),
+                (name = "stop_on_error", value = "false")
+            ]))
+
+        client.send("execute_request", content)
+
+        let published = client.published_until_idle()
+        let reply = client.reply()
+
+        return EXECUTION(published, if let answer = reply then answer.content else JSON.EMPTY_OBJECT fi)
+    si
+
+    _is_complete(client: CLIENT, code: string, want: string) is
+        client.send(
+            "is_complete_request",
+            JSON.object(LIST[(name: string, value: string)]([(name = "code", value = JSON.quote(code))])))
+
+        let reply = client.reply()
+
+        client.check(
+            reply? /\ JSON.string_member(reply.content, "status") =~ want,
+            "{code.trim()} is {want}")
+    si
+
+    _has(published: Collections.List[MESSAGE], msg_type: string) -> bool is
+        for message in published do
+            if message.msg_type =~ msg_type then
+                return true
+            fi
+        od
+
+        return false
+    si
+
+    _result_text(published: Collections.List[MESSAGE]) -> string is
+        for message in published do
+            if message.msg_type =~ "execute_result" then
+                return _plain_text(message.content)
+            fi
+        od
+
+        return ""
+    si
+
+    _plain_text(content: string) -> string is
+        let document = System.Text.Json.JsonDocument.parse(content, _)
+        let data: System.Text.Json.JsonElement mut
+        let text: System.Text.Json.JsonElement mut
+
+        if document.root_element.try_get_property("data", data ref) /\
+            data.try_get_property("text/plain", text ref)
+        then
+            return text.get_string() ?? ""
+        fi
+
+        return ""
+    si
+
+    _stream_text(published: Collections.List[MESSAGE]) -> string is
+        let parts = LIST[string]()
+
+        for message in published do
+            if message.msg_type =~ "stream" then
+                parts.add(JSON.string_member(message.content, "text") ?? "")
+            fi
+        od
+
+        return parts |> Ghul.Pipes.join("")
+    si
+
+    // Ports nothing else holds: bound, read back, and released, which is
+    // what Jupyter itself does to fill in a connection file.
+    _free_ports(count: int) -> Collections.List[int] is
+        let listeners = LIST[System.Net.Sockets.TcpListener]()
+        let ports = LIST[int]()
+
+        for i in 0..count do
+            let listener = System.Net.Sockets.TcpListener(System.Net.IPAddress.loopback, 0)
+
+            listener.start()
+
+            ports.add(cast System.Net.IPEndPoint(listener.local_endpoint).port)
+
+            listeners.add(listener)
+        od
+
+        for listener in listeners do
+            listener.stop()
+        od
+
+        return ports
+    si
+
+    _connection_json(ports: Collections.List[int]) -> string is
+        let members = LIST[(name: string, value: string)]()
+
+        members.add((name = "transport", value = JSON.quote("tcp")))
+        members.add((name = "ip", value = JSON.quote("127.0.0.1")))
+        members.add((name = "shell_port", value = "{ports[0]}"))
+        members.add((name = "iopub_port", value = "{ports[1]}"))
+        members.add((name = "stdin_port", value = "{ports[2]}"))
+        members.add((name = "control_port", value = "{ports[3]}"))
+        members.add((name = "hb_port", value = "{ports[4]}"))
+        members.add((name = "key", value = JSON.quote("{System.Guid.new_guid()}")))
+        members.add((name = "signature_scheme", value = JSON.quote("hmac-sha256")))
+        members.add((name = "kernel_name", value = JSON.quote("ghul")))
+
+        return JSON.object(members)
+    si
+si

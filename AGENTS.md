@@ -83,6 +83,21 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
   `ghul.compiler` `MINIMUM_REPL_COMPILER` or newer, for `--submission`,
   `--check-complete` and `--compile-server`, and refuses to start on
   an older one rather than failing a cell at a time.
+- `jupyter/` — the `ghul.jupyter` package: a Jupyter kernel, published as
+  its own .NET tool (`ghul-jupyter`) so that NetMQ is a dependency of the
+  kernel alone. `KERNEL` is the loop and the handlers, `CHANNEL` and
+  `SIGNER` the wire format (framing at `<IDS|MSG>`, hex HMAC-SHA256 over
+  the four JSON parts), `MESSAGES` and `CONTENT` what it sends, `JSON` the
+  little of System.Text.Json it needs, `STREAM_WRITER` what a cell's
+  console output goes to while it runs, `HEARTBEAT` the echo thread, and
+  `KERNELSPEC` the `install`/`uninstall` verbs. Cells are hosted through
+  `ghul.repl.host`, and the compiler is found by `COMPILER_LOCATION` -
+  `GHUL_COMPILER`, then the copy `ghul.cli` installs, then the path.
+- `tests/jupyter-client/` — a front end, enough of one to drive the kernel
+  over ZeroMQ from `tests/jupyter.sh`: kernel_info, cells that chain, a
+  cell that does not compile, one that throws, one that writes,
+  is_complete and shutdown. It is a program rather than a unit test
+  because it needs a kernel process and a compiler.
 - `unit-tests/` — MSTest project covering the pure path/cache-key/
   runnable-by-default/stdin-marker/source-resolution logic.
 - `tests/smoke.sh` — end-to-end test: builds the tool, points it at a real

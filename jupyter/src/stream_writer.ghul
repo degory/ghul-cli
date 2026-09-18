@@ -1,0 +1,96 @@
+namespace Ghul.Jupyter is
+    use System.Text.StringBuilder
+
+    // What a cell's console output goes to while it runs: whole lines
+    // are published as they are written, and whatever is left at the end
+    // of the cell is published when the cell finishes. Line at a time
+    // rather than character at a time, so a front end is not asked to
+    // stitch a message per character back together.
+    class STREAM_WRITER(_publish: (string) -> void): IO.TextWriter is
+        _pending: StringBuilder
+
+        init(..) is
+            _pending = StringBuilder()
+        si
+
+        encoding: System.Text.Encoding => System.Text.Encoding.utf8
+
+        write(value: char) is
+            _pending.append(value)
+
+            if value == '\n' then
+                flush()
+            fi
+        si
+
+        write(value: string?) is
+            if !value? then
+                return
+            fi
+
+            for c in value do
+                write(c)
+            od
+        si
+
+        flush() is
+            if _pending.length == 0 then
+                return
+            fi
+
+            let text = _pending.to_string()
+
+            _pending.clear()
+
+            _publish(text)
+        si
+    si
+
+    // The heartbeat channel: a REP socket echoing whatever arrives, on a
+    // thread of its own so that a kernel busy running a cell still
+    // answers and the front end does not decide it has died.
+    class HEARTBEAT(_address: string) is
+        _thread: System.Threading.Thread?
+        _is_running: bool
+
+        start() is
+            _is_running = true
+
+            let thread = System.Threading.Thread(System.Threading.ThreadStart(() -> void => _serve()))
+
+            thread.is_background = true
+
+            thread.start()
+
+            _thread = thread
+        si
+
+        stop() is
+            _is_running = false
+        si
+
+        _serve() is
+            let socket = NetMQ.Sockets.ResponseSocket("@{_address}")
+
+            try
+                while _is_running do
+                    let frames mut = Collections.LIST[ubyte[]]()
+
+                    if NetMQ.ReceivingSocketExtensions.try_receive_multipart_bytes(
+                        socket,
+                        System.TimeSpan.from_milliseconds(100L),
+                        frames ref,
+                        1)
+                    then
+                        NetMQ.OutgoingSocketExtensions.send_multipart_bytes(socket, frames)
+                    fi
+                od
+            catch e: System.Exception
+                // The socket is closed under us when the kernel stops,
+                // which is how this thread ends.
+            finally
+                socket.dispose()
+            yrt
+        si
+    si
+si

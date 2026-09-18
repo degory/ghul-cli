@@ -1,0 +1,91 @@
+namespace Ghul.Jupyter is
+    use Collections.LIST
+    use System.Text.Json.JsonDocument
+    use System.Text.Json.JsonElement
+    use System.Text.Json.JsonValueKind
+
+    // Reading the few members the kernel needs out of a message part,
+    // and writing the parts it sends. The messages are small and their
+    // shapes are fixed, so this is all the JSON the kernel wants.
+    class JSON is
+        string_member(text: string, name: string) -> string? static is
+            if text.length == 0 then
+                return null
+            fi
+
+            try
+                let document = JsonDocument.parse(text, _)
+                let value: JsonElement mut
+
+                // Only a string answers: a member of another shape is
+                // no more an answer than a missing one, and asking a
+                // JsonElement for a string it does not hold throws.
+                if document.root_element.try_get_property(name, value ref) /\
+                    value.value_kind == JsonValueKind.STRING
+                then
+                    return value.get_string()
+                fi
+            catch e: System.Text.Json.JsonException
+                return null
+            yrt
+
+            return null
+        si
+
+        bool_member(text: string, name: string, fallback: bool) -> bool static is
+            if text.length == 0 then
+                return fallback
+            fi
+
+            try
+                let document = JsonDocument.parse(text, _)
+                let value: JsonElement mut
+
+                if document.root_element.try_get_property(name, value ref) then
+                    if value.value_kind == JsonValueKind.TRUE then
+                        return true
+                    fi
+
+                    if value.value_kind == JsonValueKind.FALSE then
+                        return false
+                    fi
+                fi
+            catch e: System.Text.Json.JsonException
+                return fallback
+            yrt
+
+            return fallback
+        si
+
+        // A JSON string, quoted and escaped.
+        quote(value: string) -> string static is
+            let buffer = IO.MemoryStream()
+            let writer = System.Text.Json.Utf8JsonWriter(buffer, _)
+
+            writer.write_string_value(value)
+            writer.flush()
+            writer.dispose()
+
+            return System.Text.Encoding.utf8.get_string(buffer.to_array())
+        si
+
+        // An object built from members already written as JSON, in the
+        // order they were added.
+        object(members: Collections.List[(name: string, value: string)]) -> string static is
+            let parts = LIST[string]()
+
+            for member in members do
+                parts.add("{quote(member.name)}:{member.value}")
+            od
+
+            let body = parts |> Ghul.Pipes.join(",")
+
+            return "{{{body}}}"
+        si
+
+        array(values: Collections.List[string]) -> string static =>
+            "[{values |> Ghul.Pipes.join(",")}]"
+
+        EMPTY_OBJECT: string static => "{{}}"
+    si
+si

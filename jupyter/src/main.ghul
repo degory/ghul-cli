@@ -1,0 +1,115 @@
+namespace Ghul.Jupyter is
+    use Collections.LIST
+    use Ghul.Repl.Host.COMPLETENESS_CHECK
+    use Ghul.Repl.Host.HOST_SESSIONS
+    use IO.Std
+
+    entry(args: string[]) -> int is
+        if args.count < 1 then
+            _write_usage()
+
+            return 1
+        fi
+
+        case args[0]
+        when "kernel" then
+            if args.count < 2 then
+                Std.error.write_line("ghul-jupyter: kernel needs the connection file Jupyter names")
+
+                return 1
+            fi
+
+            return _run_kernel(args[1])
+        when "install" then
+            Std.write_line("installed the ghūl kernel in {KERNELSPEC.install()}")
+
+            return 0
+        when "uninstall" then
+            if let removed = KERNELSPEC.uninstall() then
+                Std.write_line("removed the ghūl kernel from {removed}")
+            else
+                Std.write_line("no ghūl kernel was installed in {KERNELSPEC.directory()}")
+            fi
+
+            return 0
+        when "version" then
+            Std.write_line(version())
+
+            return 0
+        else
+            _write_usage()
+
+            return 1
+        esac
+    si
+
+    _run_kernel(connection_file: string) -> int is
+        if !IO.File.exists(connection_file) then
+            Std.error.write_line("ghul-jupyter: no connection file at {connection_file}")
+
+            return 1
+        fi
+
+        let compiler = COMPILER_LOCATION.find()
+
+        if !compiler? then
+            Std.error.write_line(
+                "ghul-jupyter: no ghul-compiler found; install the ghul.cli tool and run a script once, "
+                "or point GHUL_COMPILER at one")
+
+            return 1
+        fi
+
+        let connection = CONNECTION.read(connection_file)
+
+        // Nothing the kernel writes on its own account may reach the
+        // front end's stdout: the protocol owns it. Notices go to
+        // stderr, which Jupyter shows in the kernel log.
+        let session =
+            HOST_SESSIONS.start(
+                compiler.shim,
+                compiler.runtime_assembly,
+                true,
+                true,
+                line => Std.error.write_line("ghul-jupyter: {line}"))
+
+        let kernel =
+            KERNEL(
+                connection,
+                session,
+                COMPLETENESS_CHECK(compiler.shim, HOST_SESSIONS.new_session_directory()),
+                version())
+
+        try
+            return kernel.run()
+        finally
+            session.close()
+        yrt
+    si
+
+    version() -> string is
+        let assembly = System.Reflection.Assembly.get_entry_assembly()
+
+        if let entry = assembly then
+            let attribute =
+                System.Reflection.CustomAttributeExtensions.get_custom_attribute[
+                    System.Reflection.AssemblyInformationalVersionAttribute](entry)
+
+            if let informational = attribute then
+                return informational.informational_version
+            fi
+        fi
+
+        return "0.0.0"
+    si
+
+    _write_usage() is
+        Std.error.write_line("usage: ghul-jupyter kernel <connection-file>")
+        Std.error.write_line("       ghul-jupyter install")
+        Std.error.write_line("       ghul-jupyter uninstall")
+        Std.error.write_line("       ghul-jupyter version")
+        Std.error.write_line("")
+        Std.error.write_line("install writes the kernelspec Jupyter and VS Code find the kernel by;")
+        Std.error.write_line("kernel is what they then run, and is not meant to be typed")
+    si
+si
