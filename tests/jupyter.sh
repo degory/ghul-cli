@@ -127,6 +127,32 @@ for pid_file in "$scratch"/*/kernel.pid; do
     fi
 done
 
+echo "jupyter: a kernel asked to stop by a signal..." >&2
+
+dotnet "$scratch/kernel/ghul.jupyter.dll" kernel "$scratch/abandoned/connection.json" \
+    > "$scratch/signalled.log" 2>&1 &
+signalled_pid=$!
+
+sleep 3
+kill -TERM "$signalled_pid"
+
+waited=0
+
+while kill -0 "$signalled_pid" 2>/dev/null; do
+    if (( waited >= 20 )); then
+        echo "jupyter: the kernel ignored SIGTERM" >&2
+        kill -9 "$signalled_pid" 2>/dev/null || true
+        exit 1
+    fi
+
+    sleep 1
+    waited=$(( waited + 1 ))
+done
+
+wait "$signalled_pid" 2>/dev/null || true
+
+echo "jupyter: the kernel went on SIGTERM, after ${waited}s"
+
 echo "jupyter: the kernelspec..." >&2
 
 export JUPYTER_DATA_DIR="$scratch/jupyter"

@@ -84,13 +84,19 @@ namespace Ghul.Jupyter is
         // kernel does however the kernel is asked to leave: a
         // shutdown_request, a front end that died and took the parent
         // watch's answer with it, or a signal.
+        //
+        // A signal only asks. Closing the session here would tear a
+        // compile server out from under a cell the main thread is in the
+        // middle of running, so the handler takes responsibility for the
+        // signal and leaves the closing to the ordinary path out, which
+        // is the only thread that knows the session is not in use.
         let closed = CLOSE_ONCE(() -> void => session.close())
 
         let on_signal =
             (context: System.Runtime.InteropServices.PosixSignalContext) -> void is
-                closed.close()
+                context.cancel = true
 
-                kernel.stop(null)
+                kernel.stop("{context.signal}")
             si
 
         let interrupt =
