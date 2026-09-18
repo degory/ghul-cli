@@ -97,7 +97,9 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
   the four JSON parts), `MESSAGES` and `CONTENT` what it sends, `JSON` the
   little of System.Text.Json it needs, `STREAM_WRITER` what a cell's
   console output goes to while it runs, `HEARTBEAT` the echo thread, and
-  `KERNELSPEC` the `install`/`uninstall` verbs. `PARENT_WATCH` is what
+  `KERNELSPEC` the `install`/`uninstall` verbs, and `CURSOR` the
+  conversion between Jupyter's character offset into a cell and the line
+  and column the session answers in. `PARENT_WATCH` is what
   keeps a kernel from outliving the front end that started it -
   `JPY_PARENT_PID` where Jupyter sets it, a parent that has become init
   otherwise - and `CLOSE_ONCE` settles which of the signal handler and
