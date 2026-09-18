@@ -1,0 +1,87 @@
+namespace Ghul.Cli.Repl is
+    use Ghul.Repl.CELL_EXPORTS
+    use Ghul.Repl.CELL_REPLY
+    use Ghul.Repl.CELL_ENTRY
+    use Ghul.Repl.LOADED_CELL
+    use Ghul.Repl.RUN_RESULT
+    use Ghul.Repl.SESSION
+    use System.Reflection.Assembly
+
+    // What a submission did, for a front end to report.
+    class SUBMIT_RESULT(
+        is_accepted: bool,
+        diagnostics: Collections.List[string],
+        value: object?,
+        run_error: string?
+    );
+
+    // The cells' own load context. The tool is itself a ghūl program, so
+    // its process already holds a ghūl runtime - the one it was built
+    // against, which is not the one the installed compiler builds cells
+    // against, and two versions cannot both be the default. A context of
+    // the session's own resolves the cells' runtime beside the cells and
+    // leaves the tool's alone. One context for the session rather than
+    // one per cell: a later cell references the earlier ones.
+    class SESSION_LOAD_CONTEXT: System.Runtime.Loader.AssemblyLoadContext is
+        _probe_directory: string?
+
+        init(probe_directory: string?) is
+            super.init("ghul-repl", false)
+
+            _probe_directory = probe_directory
+        si
+
+        load(name: System.Reflection.AssemblyName) -> Assembly? is
+            let directory = _probe_directory
+
+            if !directory? then
+                return null
+            fi
+
+            if let simple_name = name.name then
+                let candidate = IO.Path.join([directory, "{simple_name}.dll"])
+
+                if IO.File.exists(candidate) then
+                    return load_from_assembly_path(candidate)
+                fi
+            fi
+
+            return null
+        si
+    si
+
+    // The terminal's way of driving a session: compile by spawning the
+    // compiler, load what it wrote from disk, hand it to the session,
+    // and run it once it has been accepted.
+    class REPL_SESSION(_backend: SPAWN_BACKEND, _probe_directory: string?) is
+        _session: SESSION
+        _context: SESSION_LOAD_CONTEXT
+
+        init(..) is
+            _session = SESSION()
+            _context = SESSION_LOAD_CONTEXT(_probe_directory)
+        si
+
+        submit(source: string) -> SUBMIT_RESULT is
+            let request = _session.prepare(source)
+            let compiled = _backend.compile(request)
+
+            let loaded: LOADED_CELL? mut = null
+
+            if let assembly_path = compiled.assembly_path then
+                loaded = CELL_EXPORTS.read(
+                    _context.load_from_assembly_path(IO.Path.get_full_path(assembly_path)))
+            fi
+
+            let outcome = _session.accept(request, CELL_REPLY(compiled.diagnostics, loaded))
+
+            if !outcome.is_accepted \/ !loaded? then
+                return SUBMIT_RESULT(false, outcome.diagnostics, null, null)
+            fi
+
+            let run = CELL_ENTRY.run(loaded)
+
+            return SUBMIT_RESULT(true, outcome.diagnostics, run.value, run.error)
+        si
+    si
+si

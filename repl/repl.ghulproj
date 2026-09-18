@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <GhulCompiler>dotnet ghul-compiler</GhulCompiler>
+
+    <!-- The session core, published so that anything hosting a ghūl
+         session builds on the same one: the terminal in this repository,
+         the browser playground, a notebook kernel. -->
+    <PackageId>ghul.repl</PackageId>
+    <AssemblyName>ghul.repl</AssemblyName>
+
+    <Title>ghūl REPL session</Title>
+    <Authors>degory</Authors>
+    <Description>The session behind a ghūl read-eval-print loop: the accepted cells, the import prelude each new submission needs, and what a compiled cell exports. Compiles nothing and runs nothing itself, so a terminal, a browser page or a notebook kernel can host it.</Description>
+    <PackageDescription>The session behind a ghūl read-eval-print loop: the accepted cells, the import prelude each new submission needs, and what a compiled cell exports. Compiles nothing and runs nothing itself, so a terminal, a browser page or a notebook kernel can host it.</PackageDescription>
+    <PackageTags>ghul;ghūl;repl;session;notebook</PackageTags>
+    <PackageOutputPath>../nupkg</PackageOutputPath>
+    <PackageProjectUrl>https://ghul.dev</PackageProjectUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/degory/ghul-cli</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryBranch>main</RepositoryBranch>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="../LICENSE*" Pack="true" PackagePath="\" />
+
+    <GhulSources Include="src/**/*.ghul" />
+  </ItemGroup>
+</Project>

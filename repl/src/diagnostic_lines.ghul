@@ -1,4 +1,4 @@
-namespace Ghul.Cli.Repl is
+namespace Ghul.Repl is
     use System.Text.RegularExpressions.Regex
 
     // The compiler is given the generated prelude and the user's text as

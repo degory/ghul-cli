@@ -26,7 +26,7 @@ namespace Ghul.Cli.Repl is
     // report what happened. Everything it knows about a cell it learns
     // from SESSION, so a notebook or the playground can take its place
     // without any of this.
-    class TERMINAL(_make_session: () -> SESSION) is
+    class TERMINAL(_make_session: () -> REPL_SESSION) is
         _display: CELL_DISPLAY
 
         init(..) is
