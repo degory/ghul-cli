@@ -61,8 +61,6 @@ namespace Ghul.Cli.Tests is
             return COMPILE_RESULT("spawned", LIST[Ghul.Repl.CELL_DIAGNOSTIC]())
         si
 
-        check(text: string) -> Completeness? => null
-
         close() is
             is_closed = true
         si
@@ -297,6 +295,15 @@ namespace Ghul.Cli.Tests is
             backend.compile(_request(1));
 
             assert fallback.compiled.count == 1;
+        si
+
+        // A backend written elsewhere need not answer: the default leaves
+        // the check to the session.
+        @Test()
+        check__defaults_to_no_answer_for_a_backend_written_elsewhere() is
+            let backend: CompileBackend = FAKE_BACKEND()
+
+            assert !backend.check("x\n")?;
         si
 
         @Test()

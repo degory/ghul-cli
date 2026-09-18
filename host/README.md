@@ -46,7 +46,10 @@ process each time and a few hundred milliseconds.
 The parts `HOST_SESSIONS.start` assembles - `SPAWN_BACKEND`,
 `SERVER_BACKEND`, `SERVER_PROCESS`, `SESSION_FILES`,
 `SESSION_LOAD_CONTEXT` and `HOSTED_SESSION` - are public, and
-`CompileBackend` (whose `check` may answer null) and `ServerConnection` can
-be implemented elsewhere, for a host that wants them put together differently.
+`CompileBackend` (whose `check` defaults to leaving it to the session) and
+`ServerConnection` can be implemented elsewhere, for a host that wants them
+put together differently.
 
-The session needs `ghul.compiler` 59.8.0 or newer.
+The session compiles its cells with `ghul.compiler` 59.8.0 or newer. A host
+that builds its own `CompileBackend` needs 59.8.2 or newer to build it, for
+the default `check` to be inherited across the assembly boundary.

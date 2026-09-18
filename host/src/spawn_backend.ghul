@@ -21,7 +21,7 @@ namespace Ghul.Repl.Host is
 
         // Whether typed text is complete, for a backend that can say
         // cheaply; null leaves it to the session's own check.
-        check(text: string) -> Completeness?;
+        check(text: string) -> Completeness? => null
     si
 
     // Where a session keeps its cells. Every backend writes a cell to the
@@ -59,8 +59,6 @@ namespace Ghul.Repl.Host is
     // pack.
     class SPAWN_BACKEND(_compiler_shim: string, _files: SESSION_FILES): CompileBackend is
         close() is si
-
-        check(text: string) -> Completeness? => null
 
         compile(request: CELL_REQUEST) -> COMPILE_RESULT is
             _files.prepare()
