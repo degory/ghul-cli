@@ -115,6 +115,12 @@ so `let x = 41` followed later by `let x = "now a string"` is fine.
 A redefinition can read the value it replaces: after `let x = 10, y = 20`,
 `let x = x + y` makes `x` 30.
 
+At a terminal each line can be edited as it is typed: the arrow keys move
+along it and bring back earlier lines, Home and End (or Ctrl-A and Ctrl-E)
+go to either end, Tab completes the name being typed from everything the
+session has defined, and Ctrl-D on an empty line leaves. Input that is not a
+terminal, such as a script piped in, is read a line at a time as before.
+
 `:help` lists the commands, `:reset` starts a fresh session, and `:quit`
 leaves. `:complete TEXT` lists what could follow TEXT, and `:hover TEXT`
 says what the end of TEXT names, both taking in everything the session has

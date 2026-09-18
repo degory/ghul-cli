@@ -1,0 +1,116 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+
+    use Ghul.Cli.Repl.LINE_BUFFER
+    use Ghul.Cli.Repl.LINE_HISTORY
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    @TestClass()
+    class LINE_BUFFER_TESTS is
+        init() is si
+
+        _typed(text: string) -> LINE_BUFFER is
+            let buffer = LINE_BUFFER()
+
+            buffer.insert(text)
+
+            return buffer
+        si
+
+        @Test()
+        insert__writes_at_the_cursor() is
+            let buffer = _typed("lt x")
+
+            buffer.home()
+            buffer.right()
+            buffer.insert("e")
+
+            assert buffer.text =~ "let x";
+            assert buffer.cursor == 2;
+        si
+
+        @Test()
+        backspace_and_delete__remove_either_side_of_the_cursor() is
+            let buffer = _typed("abcd")
+
+            buffer.left()
+            buffer.left()
+            buffer.backspace()
+            buffer.delete()
+
+            assert buffer.text =~ "ad";
+            assert buffer.cursor == 1;
+        si
+
+        @Test()
+        moving__stops_at_either_end() is
+            let buffer = _typed("ab")
+
+            buffer.right()
+            assert buffer.cursor == 2;
+
+            buffer.home()
+            buffer.left()
+            buffer.backspace()
+            assert buffer.cursor == 0;
+            assert buffer.text =~ "ab";
+
+            buffer.end()
+            buffer.delete()
+            assert buffer.text =~ "ab";
+        si
+
+        @Test()
+        name_before_cursor__is_the_part_of_a_name_being_typed() is
+            assert _typed("let y = ans").name_before_cursor =~ "ans";
+            assert _typed("x.").name_before_cursor =~ "";
+            assert _typed("f(a_b1").name_before_cursor =~ "a_b1";
+        si
+
+        @Test()
+        extension__is_the_rest_of_the_only_name() is
+            assert LINE_BUFFER.extension("ans", LIST[string](["answer"])) =~ "wer";
+        si
+
+        @Test()
+        extension__is_as_far_as_the_names_agree() is
+            assert LINE_BUFFER.extension("va", LIST[string](["value1", "value2", "values"])) =~ "lue";
+            assert LINE_BUFFER.extension("x", LIST[string](["xa", "xb"])) =~ "";
+            assert LINE_BUFFER.extension("x", LIST[string]()) =~ "";
+        si
+    si
+
+    @TestClass()
+    class LINE_HISTORY_TESTS is
+        init() is si
+
+        @Test()
+        previous_and_next__walk_the_lines_entered() is
+            let history = LINE_HISTORY()
+
+            history.add("one")
+            history.add("two")
+
+            assert history.previous() =~ "two";
+            assert history.previous() =~ "one";
+            assert !history.previous()?;
+            assert history.next() =~ "two";
+            assert history.next() =~ "";
+            assert !history.next()?;
+        si
+
+        @Test()
+        add__keeps_no_blank_line_or_immediate_repeat() is
+            let history = LINE_HISTORY()
+
+            history.add("one")
+            history.add("  ")
+            history.add("one")
+
+            assert history.previous() =~ "one";
+            assert !history.previous()?;
+        si
+    si
+si
