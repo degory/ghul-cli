@@ -1,0 +1,97 @@
+namespace Ghul.Cli.Repl is
+    use Collections.LIST
+
+    // One line for the value a cell ended on, or null where there is
+    // nothing to show. Everything the terminal knows about rendering a
+    // value is here, so a notebook wanting a richer display - a MIME
+    // bundle, a table - replaces this and nothing else.
+    class CELL_DISPLAY is
+        init() is si
+
+        // How many of a collection's elements are worth a line, before
+        // saying how many more there are.
+        _LIMIT: int static => 20
+
+        format(value: object?) -> string? is
+            if !value? then
+                return null
+            fi
+
+            return _render(value, true)
+        si
+
+        _render(value: object?, want_elements: bool) -> string is
+            if !value? then
+                return "null"
+            fi
+
+            // A string is a sequence of characters, and rendering it as
+            // one would be nobody's idea of an answer.
+            if let text: string = value then
+                return text
+            fi
+
+            if want_elements then
+                if let elements = _try_elements(value) then
+                    return elements
+                fi
+            fi
+
+            return "{value}"
+        si
+
+        // Whatever the value holds, where it holds a sequence of things.
+        // Asked of the value rather than of a type it might implement:
+        // the non-generic enumerable interface has no name in ghūl, and
+        // the generic one cannot be named without knowing the element
+        // type, which is the thing being discovered.
+        _try_elements(value: object) -> string? is
+            let flags =
+                cast System.Reflection.BindingFlags(
+                    cast int(System.Reflection.BindingFlags.PUBLIC) |
+                    cast int(System.Reflection.BindingFlags.INSTANCE))
+
+            let get_enumerator = value.get_type().get_method("GetEnumerator", flags)
+
+            if !get_enumerator? \/ get_enumerator.get_parameters().count > 0 then
+                return null
+            fi
+
+            let enumerator = get_enumerator.invoke(value, System.Array.empty[object]())
+
+            if !enumerator? then
+                return null
+            fi
+
+            let enumerator_type = enumerator.get_type()
+            let move_next = enumerator_type.get_method("MoveNext", flags)
+            let current = enumerator_type.get_property("Current", flags)
+
+            if !move_next? \/ !current? then
+                return null
+            fi
+
+            let rendered = LIST[string]()
+            let extra mut = 0
+
+            while cast bool(move_next.invoke(enumerator, System.Array.empty[object]())!) do
+                if rendered.count < _LIMIT then
+                    // One level deep: a list of lists says what its
+                    // elements are, and no further, since a line is what
+                    // there is room for.
+                    rendered.add(_render(current.get_value(enumerator), false))
+                else
+                    extra = extra + 1
+                fi
+            od
+
+            let body = rendered |> Ghul.Pipes.join(", ")
+
+            if extra > 0 then
+                return "[{body}, and {extra} more]"
+            fi
+
+            return "[{body}]"
+        si
+    si
+si

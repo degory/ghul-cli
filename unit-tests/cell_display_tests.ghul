@@ -1,0 +1,83 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+
+    use Ghul.Cli.Repl.CELL_DISPLAY
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    // What a cell's value looks like on one line. A cell that ends on a
+    // statement has no value, and nothing is printed for it.
+    @TestClass()
+    class CELL_DISPLAY_TESTS is
+        init() is si
+
+        _display() -> CELL_DISPLAY => CELL_DISPLAY()
+
+        @Test()
+        format__of_nothing__is_nothing() is
+            assert !_display().format(null)?;
+        si
+
+        @Test()
+        format__of_a_number__is_the_number() is
+            assert _display().format(cast object(41)) =~ "41";
+        si
+
+        // A string is shown as it is: rendering it as the sequence of
+        // characters it also is would be nobody's idea of an answer.
+        @Test()
+        format__of_a_string__is_the_string() is
+            assert _display().format(cast object("now a string")) =~ "now a string";
+        si
+
+        @Test()
+        format__of_a_tuple__is_its_elements() is
+            assert _display().format(cast object((left = 3, right = 4))) =~ "(3, 4)";
+        si
+
+        // A collection says what is in it rather than what type it is.
+        @Test()
+        format__of_a_list__is_its_elements() is
+            assert _display().format(cast object(LIST[int]([1, 2, 3]))) =~ "[1, 2, 3]";
+        si
+
+        @Test()
+        format__of_an_empty_list__is_an_empty_list() is
+            assert _display().format(cast object(LIST[int]())) =~ "[]";
+        si
+
+        @Test()
+        format__of_a_list_of_strings__is_its_elements() is
+            assert _display().format(cast object(LIST[string](["a", "b"]))) =~ "[a, b]";
+        si
+
+        // A line is what there is room for, so a long collection says
+        // how much more of it there is.
+        @Test()
+        format__of_a_long_list__stops_and_says_how_many_more() is
+            let numbers = LIST[int]()
+
+            for i in 0..25 do
+                numbers.add(i)
+            od
+
+            let formatted = _display().format(cast object(numbers))!
+
+            assert formatted.starts_with("[0, 1, 2,");
+            assert formatted.ends_with(", 19, and 5 more]");
+        si
+
+        // One level deep: a list of lists says what its elements are and
+        // no further.
+        @Test()
+        format__of_a_list_of_lists__renders_each_element() is
+            let lists = LIST[LIST[int]]()
+
+            lists.add(LIST[int]([1, 2]))
+            lists.add(LIST[int]([3]))
+
+            assert _display().format(cast object(lists))?;
+        si
+    si
+si
