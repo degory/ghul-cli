@@ -9,9 +9,25 @@
     <IsTool>true</IsTool>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>ghul-jupyter</ToolCommandName>
+
+    <Title>ghūl Jupyter kernel</Title>
+    <Authors>degory</Authors>
+    <Description>A Jupyter kernel for ghūl: notebook cells compiled and run as a ghul.repl session, for Jupyter and for notebooks in VS Code.</Description>
+    <PackageDescription>A Jupyter kernel for ghūl: notebook cells compiled and run as a ghul.repl session, for Jupyter and for notebooks in VS Code.</PackageDescription>
+    <PackageTags>ghul;ghūl;jupyter;kernel;notebook;repl</PackageTags>
+    <PackageOutputPath>../nupkg</PackageOutputPath>
+    <PackageProjectUrl>https://ghul.dev</PackageProjectUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/degory/ghul-cli</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryBranch>main</RepositoryBranch>
   </PropertyGroup>
 
   <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="../LICENSE*" Pack="true" PackagePath="\" />
+
     <PackageReference Include="NetMQ" />
 
     <ProjectReference Include="../repl/repl.ghulproj" />
