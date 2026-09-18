@@ -141,7 +141,11 @@ The session itself - the accepted cells, the import prelude each new
 submission needs, and what a compiled cell exports - is published
 separately as `ghul.repl`, so a browser page or a notebook kernel can host
 the same session over whatever compiles for it. It compiles nothing and
-runs nothing itself; see `repl/README.md`.
+runs nothing itself; see `repl/README.md`. What this tool puts around it -
+compiling cells with the installed compiler, the compile server and its
+fallback, loading and running what they produce - is published as
+`ghul.repl.host`, for another host running cells in its own process; see
+`host/README.md`.
 
 ## Installing
 

@@ -1,4 +1,4 @@
-namespace Ghul.Cli.Repl is
+namespace Ghul.Repl.Host is
     use Collections.LIST
     use Ghul.Repl.CELL_DIAGNOSTIC
     use Ghul.Repl.CELL_LOCATION
@@ -189,9 +189,11 @@ namespace Ghul.Cli.Repl is
                 // user's. It is what a compile server does when it cannot
                 // import a type from an earlier cell that a compiler started
                 // afresh can, so the cell is compiled that way instead.
-                if reply.error_lines |> Ghul.Pipes.any(line => line <= request.prelude_line_count) then
-                    return null
-                fi
+                for line in reply.error_lines do
+                    if line <= request.prelude_line_count then
+                        return null
+                    fi
+                od
 
                 return COMPILE_RESULT(null, reply.diagnostics)
             else

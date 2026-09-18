@@ -2,12 +2,12 @@ namespace Ghul.Cli.Tests is
     use Collections.LIST
 
     use Ghul.Cli.REPL_OPTIONS
-    use Ghul.Cli.Repl.COMPILE_RESULT
-    use Ghul.Cli.Repl.COMPILE_SERVER_REPLY
-    use Ghul.Cli.Repl.CompileBackend
-    use Ghul.Cli.Repl.SERVER_BACKEND
-    use Ghul.Cli.Repl.ServerConnection
-    use Ghul.Cli.Repl.SESSION_FILES
+    use Ghul.Repl.Host.COMPILE_RESULT
+    use Ghul.Repl.Host.COMPILE_SERVER_REPLY
+    use Ghul.Repl.Host.CompileBackend
+    use Ghul.Repl.Host.SERVER_BACKEND
+    use Ghul.Repl.Host.ServerConnection
+    use Ghul.Repl.Host.SESSION_FILES
 
     use Ghul.Repl.CELL_REQUEST
 

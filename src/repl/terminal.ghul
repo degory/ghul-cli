@@ -2,6 +2,9 @@ namespace Ghul.Cli.Repl is
     use Collections.LIST
     use Ghul.Repl.CELL_DISPLAY
     use IO.Std
+    use Ghul.Repl.Host.Completeness
+    use Ghul.Repl.Host.HOSTED_SESSION
+    use Ghul.Repl.Host.SUBMIT_RESULT
 
     // Whether the lines typed so far are a submission, asked of the
     // compiler each time a line is entered. Text it calls unfinished - an
@@ -10,7 +13,7 @@ namespace Ghul.Cli.Repl is
     // that can never be finished, so its errors are reported straight
     // away rather than after a blank line. A blank line submits whatever
     // there is regardless.
-    class SUBMISSION_END(_is_unfinished: (string) -> bool) is
+    class SUBMISSION_END(_check: (string) -> Completeness) is
         // Whether a blank line was entered after something was typed,
         // which submits what is there without asking.
         is_forced(lines: Collections.List[string], latest: string) -> bool =>
@@ -24,7 +27,7 @@ namespace Ghul.Cli.Repl is
 
             let text = "{lines |> Ghul.Pipes.cat([latest]) |> Ghul.Pipes.join("\n")}\n"
 
-            return !_is_unfinished(text)
+            return _check(text) != Completeness.INCOMPLETE
         si
 
         _is_blank(lines: Collections.List[string]) -> bool is
@@ -38,54 +41,13 @@ namespace Ghul.Cli.Repl is
         si
     si
 
-    // `ghul-compiler --check-complete`, which answers `complete`,
-    // `incomplete` or `invalid` for a file. Anything it cannot answer -
-    // the compiler not starting, an answer it does not recognise - counts
-    // as finished, so the submission goes to the compiler and whatever is
-    // wrong is reported from there.
-    class COMPLETENESS_CHECK(_compiler_shim: string, _directory: string) is
-        is_unfinished(text: string) -> bool is
-            try
-                IO.Directory.create_directory(_directory)
-
-                let path = IO.Path.join([_directory, "check.ghul"])
-
-                IO.File.write_all_text(path, text)
-
-                let start_info = System.Diagnostics.ProcessStartInfo()
-
-                start_info.file_name = _compiler_shim
-                start_info.use_shell_execute = false
-                start_info.redirect_standard_output = true
-                start_info.redirect_standard_error = true
-                start_info.working_directory = _directory
-                start_info.argument_list.add("--check-complete")
-                start_info.argument_list.add(path)
-
-                if let process = System.Diagnostics.Process.start(start_info) then
-                    let out_task = process.standard_output.read_to_end_async()
-                    let err_task = process.standard_error.read_to_end_async()
-
-                    process.wait_for_exit()
-
-                    let _ = err_task.result
-
-                    return out_task.result.trim() =~ "incomplete"
-                fi
-            catch e: System.Exception
-            yrt
-
-            return false
-        si
-    si
-
     // The terminal front end: read a submission, hand it to the session,
     // report what happened. Everything it knows about a cell it learns
     // from SESSION, so a notebook or the playground can take its place
     // without any of this.
-    class TERMINAL(_make_session: () -> REPL_SESSION, _submission_end: SUBMISSION_END, _want_default_use: bool) is
+    class TERMINAL(_make_session: () -> HOSTED_SESSION, _submission_end: SUBMISSION_END, _want_default_use: bool) is
         _display: CELL_DISPLAY
-        _current: REPL_SESSION?
+        _current: HOSTED_SESSION?
 
         init(..) is
             _display = CELL_DISPLAY()

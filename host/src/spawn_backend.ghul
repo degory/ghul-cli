@@ -1,4 +1,4 @@
-namespace Ghul.Cli.Repl is
+namespace Ghul.Repl.Host is
     use Collections.LIST
     use Ghul.Repl.CELL_DIAGNOSTIC
     use Ghul.Repl.CELL_REQUEST
@@ -131,7 +131,6 @@ namespace Ghul.Cli.Repl is
         si
     si
 
-    // Every session directory starts with this, so the namespace the
-    // compiler derives from a cell's path is a plain identifier.
+    // Every session directory starts with this.
     REPL_SESSION_PREFIX: string => "ghulrepl_"
 si

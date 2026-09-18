@@ -1,5 +1,6 @@
 namespace Ghul.Cli is
     use Ghul.Cli.Repl
+    use Host = Ghul.Repl.Host
 
     use IO.Std
     use IO.File
@@ -563,19 +564,6 @@ namespace Ghul.Cli is
         return (items = list, no_cache = false)
     si
 
-    // Each session gets a directory of its own, named so that the
-    // namespace the compiler derives from a cell's path is a plain
-    // identifier: the compiler stops at the folder holding a
-    // `ghul.json`, so the namespace is this directory's name, two
-    // underscores and the cell's file stem. Isolated here because a
-    // compiler flag naming the namespace directly is coming, and then
-    // only this has to change.
-    session_directory() -> string is
-        let unique = System.Guid.new_guid().to_string("N")
-
-        return Path.join([Path.get_temp_path(), "{REPL_SESSION_PREFIX}{unique}"])
-    si
-
     // The oldest compiler the session can be built on: `--submission`,
     // which names the cell's namespace and answers with the value it
     // ended on, `--check-complete`, which says whether what has been
@@ -649,36 +637,22 @@ namespace Ghul.Cli is
             let runtime_assembly =
                 "{tools_dir}/.store/ghul.compiler/{compiler_version}/ghul.compiler/{compiler_version}/tools/net10.0/any/ghul-runtime.dll"
 
-            let checks = session_directory()
+            let say = (line: string) -> void => Std.error.write_line(line)
 
-            let make_session = () -> Repl.REPL_SESSION is
-                // A directory for each session, since a reset starts the
-                // cell numbering again and a new cell must not replace
-                // one an earlier session's compiler still holds.
-                let directory = session_directory()
-                let files = Repl.SESSION_FILES(directory, runtime_assembly)
-                let spawn = Repl.SPAWN_BACKEND(compiler_shim, files)
+            let make_session = () -> Host.HOSTED_SESSION =>
+                Host.HOST_SESSIONS.start(
+                    compiler_shim,
+                    runtime_assembly,
+                    options.want_server,
+                    options.want_default_use,
+                    say)
 
-                let backend: Repl.CompileBackend =
-                    if options.want_server then
-                        Repl.SERVER_BACKEND(
-                            start_compile_server(compiler_shim, files),
-                            spawn,
-                            files,
-                            (line: string) -> void => Std.error.write_line(line))
-                    else
-                        spawn
-                    fi
-
-                return Repl.REPL_SESSION(backend, directory, options.want_default_use)
-            si
-
-            let check = Repl.COMPLETENESS_CHECK(compiler_shim, checks)
+            let check = Host.COMPLETENESS_CHECK(compiler_shim, Host.HOST_SESSIONS.new_session_directory())
 
             let terminal =
                 Repl.TERMINAL(
                     make_session,
-                    Repl.SUBMISSION_END(text => check.is_unfinished(text)),
+                    Repl.SUBMISSION_END(text => check.check(text)),
                     options.want_default_use)
 
             return run_closing_on_signal(terminal)
@@ -703,19 +677,6 @@ namespace Ghul.Cli is
             System.Runtime.InteropServices.PosixSignal.SIGHUP, on_signal)
 
         return terminal.run()
-    si
-
-    // Started straight away, so it warms up while the first cell is being
-    // typed. Null when it cannot be started at all, which the backend
-    // reports once and then compiles without it.
-    start_compile_server(compiler_shim: string, files: Repl.SESSION_FILES) -> Repl.ServerConnection? is
-        try
-            files.prepare()
-
-            return Repl.SERVER_PROCESS(compiler_shim, files.directory)
-        catch e: System.Exception
-            return null
-        yrt
     si
 
     entry(args: string[]) -> int is
