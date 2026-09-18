@@ -46,8 +46,7 @@ process each time and a few hundred milliseconds.
 The parts `HOST_SESSIONS.start` assembles - `SPAWN_BACKEND`,
 `SERVER_BACKEND`, `SERVER_PROCESS`, `SESSION_FILES`,
 `SESSION_LOAD_CONTEXT` and `HOSTED_SESSION` - are public, and
-`CompileBackend` (whose `check` may answer null) and `ServerConnection`
-can be implemented elsewhere, for a
-host that wants them put together differently.
+`CompileBackend` (whose `check` may answer null) and `ServerConnection` can
+be implemented elsewhere, for a host that wants them put together differently.
 
 The session needs `ghul.compiler` 59.8.0 or newer.
