@@ -76,6 +76,9 @@ jobs:
     - name: Run smoke test
       run: ./tests/smoke.sh
 
+    - name: Run the Jupyter kernel test
+      run: ./tests/jupyter.sh
+
     # Every package carries the run's version: they are released together
     # from one repository, and the tool bundles the library it references.
     - name: Create packages
@@ -83,6 +86,7 @@ jobs:
         dotnet pack -nologo ghul-cli.ghulproj -p:Version=${{ needs.version.outputs.package }}
         dotnet pack -nologo repl/repl.ghulproj -p:Version=${{ needs.version.outputs.package }}
         dotnet pack -nologo host/host.ghulproj -p:Version=${{ needs.version.outputs.package }}
+        dotnet pack -nologo jupyter/jupyter.ghulproj -p:Version=${{ needs.version.outputs.package }}
 
     - uses: actions/upload-artifact@v7
       with:
@@ -165,6 +169,7 @@ jobs:
           ./nupkg/ghul.cli.${{ needs.version.outputs.package }}.nupkg \
           ./nupkg/ghul.repl.${{ needs.version.outputs.package }}.nupkg \
           ./nupkg/ghul.repl.host.${{ needs.version.outputs.package }}.nupkg \
+          ./nupkg/ghul.jupyter.${{ needs.version.outputs.package }}.nupkg \
           --title "${{ needs.version.outputs.tag }}" \
           --notes-file changelog.txt
 

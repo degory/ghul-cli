@@ -1,0 +1,84 @@
+namespace Ghul.Jupyter is
+    use IO.Directory
+    use IO.File
+    use IO.Path
+
+    // Where the compiler is, and the runtime beside it that a cell's
+    // assembly needs to load.
+    class COMPILER_LOCATION(shim: string, runtime_assembly: string?) is
+        // `GHUL_COMPILER` first, for a machine that keeps its compiler
+        // somewhere of its own; then the private copy `ghul.cli`
+        // installs, which is the usual answer on a machine with the tool;
+        // then whatever `ghul-compiler` is on the path.
+        find() -> COMPILER_LOCATION? static is
+            if let named = System.Environment.get_environment_variable("GHUL_COMPILER") /\
+                named.trim().length > 0
+            then
+                return COMPILER_LOCATION(named, _runtime_beside(named))
+            fi
+
+            let tools = Path.join([_home(), ".local", "share", "ghul-cli", "tools"])
+            let shim = Path.join([tools, "ghul-compiler"])
+
+            if File.exists(shim) then
+                return COMPILER_LOCATION(shim, _runtime_under(tools))
+            fi
+
+            if let on_path = _on_path("ghul-compiler") then
+                return COMPILER_LOCATION(on_path, _runtime_beside(on_path))
+            fi
+
+            return null
+        si
+
+        _home() -> string static =>
+            System.Environment.get_folder_path(System.Environment_SpecialFolder.USER_PROFILE)
+
+        _runtime_beside(shim: string) -> string? static is
+            if let directory = Path.get_directory_name(shim) then
+                let candidate = Path.join([directory, "ghul-runtime.dll"])
+
+                if File.exists(candidate) then
+                    return candidate
+                fi
+            fi
+
+            return null
+        si
+
+        // A .NET tool installs under `.store/<id>/<version>/...`, so the
+        // runtime the compiler was packed with is somewhere below the
+        // tools directory rather than beside the shim.
+        _runtime_under(tools: string) -> string? static is
+            let store = Path.join([tools, ".store"])
+
+            if !Directory.exists(store) then
+                return null
+            fi
+
+            try
+                for found in Directory.enumerate_files(store, "ghul-runtime.dll", IO.SearchOption.ALL_DIRECTORIES) do
+                    return found
+                od
+            catch e: System.Exception
+                return null
+            yrt
+
+            return null
+        si
+
+        _on_path(command: string) -> string? static is
+            if let path = System.Environment.get_environment_variable("PATH") then
+                for directory in path.split([IO.Path.path_separator]) do
+                    let candidate = Path.join([directory, command])
+
+                    if File.exists(candidate) then
+                        return candidate
+                    fi
+                od
+            fi
+
+            return null
+        si
+    si
+si

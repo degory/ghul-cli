@@ -11,6 +11,7 @@
     <PackageReference Include="MSTest.TestFramework" />
 
     <ProjectReference Include="../ghul-cli.ghulproj" />
+    <ProjectReference Include="../jupyter/jupyter.ghulproj" />
 
     <GhulSources Include="**/*.ghul" />
   </ItemGroup>

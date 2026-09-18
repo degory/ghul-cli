@@ -1,0 +1,205 @@
+namespace Ghul.Jupyter is
+    use Collections.LIST
+
+    // Building the messages the kernel sends. A reply carries the
+    // request's identities and its header as parent_header, which is
+    // how a front end pairs an answer with what it asked.
+    class MESSAGES(_session: string) is
+        // A reply on the channel the request arrived on.
+        reply(request: MESSAGE, msg_type: string, content: string) -> MESSAGE =>
+            MESSAGE(
+                request.identities,
+                _header(msg_type),
+                request.header,
+                JSON.EMPTY_OBJECT,
+                content)
+
+        // Something published on iopub. The first frame is the topic a
+        // subscriber filters on, which is the message type for
+        // everything this kernel publishes.
+        published(parent: MESSAGE?, msg_type: string, content: string) -> MESSAGE is
+            let identities = LIST[ubyte[]]()
+
+            identities.add(System.Text.Encoding.utf8.get_bytes(msg_type))
+
+            return MESSAGE(
+                identities,
+                _header(msg_type),
+                if parent? then parent.header else JSON.EMPTY_OBJECT fi,
+                JSON.EMPTY_OBJECT,
+                content)
+        si
+
+        _header(msg_type: string) -> string is
+            let members = LIST[(name: string, value: string)]()
+
+            members.add((name = "msg_id", value = JSON.quote("{System.Guid.new_guid()}")))
+            members.add((name = "session", value = JSON.quote(_session)))
+            members.add((name = "username", value = JSON.quote("kernel")))
+            members.add((
+                name = "date",
+                value = JSON.quote(System.DateTime.utc_now.to_string("yyyy-MM-ddTHH:mm:ss.fffffffZ"))))
+            members.add((name = "msg_type", value = JSON.quote(msg_type)))
+            members.add((name = "version", value = JSON.quote(PROTOCOL_VERSION)))
+
+            return JSON.object(members)
+        si
+    si
+
+    // The contents the kernel sends, each shaped as the protocol
+    // describes it.
+    class CONTENT is
+        status(state: string) -> string static =>
+            _one("execution_state", JSON.quote(state))
+
+        stream(name: string, text: string) -> string static is
+            let members = LIST[(name: string, value: string)]()
+
+            members.add((name = "name", value = JSON.quote(name)))
+            members.add((name = "text", value = JSON.quote(text)))
+
+            return JSON.object(members)
+        si
+
+        execute_input(code: string, execution_count: int) -> string static is
+            let members = LIST[(name: string, value: string)]()
+
+            members.add((name = "code", value = JSON.quote(code)))
+            members.add((name = "execution_count", value = "{execution_count}"))
+
+            return JSON.object(members)
+        si
+
+        execute_result(text: string, execution_count: int) -> string static is
+            let members = LIST[(name: string, value: string)]()
+
+            members.add((name = "execution_count", value = "{execution_count}"))
+            members.add((name = "data", value = _one("text/plain", JSON.quote(text))))
+            members.add((name = "metadata", value = JSON.EMPTY_OBJECT))
+
+            return JSON.object(members)
+        si
+
+        // A cell that did not compile, or that threw. The traceback is
+        // what a front end shows in full, so the diagnostics go there a
+        // line each.
+        error(name: string, value: string, traceback: Collections.List[string]) -> string static is
+            let lines = LIST[string]()
+
+            for line in traceback do
+                lines.add(JSON.quote(line))
+            od
+
+            let members = LIST[(name: string, value: string)]()
+
+            members.add((name = "ename", value = JSON.quote(name)))
+            members.add((name = "evalue", value = JSON.quote(value)))
+            members.add((name = "traceback", value = JSON.array(lines)))
+
+            return JSON.object(members)
+        si
+
+        execute_reply_ok(execution_count: int) -> string static is
+            let members = LIST[(name: string, value: string)]()
+
+            members.add((name = "status", value = JSON.quote("ok")))
+            members.add((name = "execution_count", value = "{execution_count}"))
+            members.add((name = "user_expressions", value = JSON.EMPTY_OBJECT))
+
+            return JSON.object(members)
+        si
+
+        execute_reply_error(execution_count: int, name: string, value: string) -> string static is
+            let members = LIST[(name: string, value: string)]()
+
+            members.add((name = "status", value = JSON.quote("error")))
+            members.add((name = "execution_count", value = "{execution_count}"))
+            members.add((name = "ename", value = JSON.quote(name)))
+            members.add((name = "evalue", value = JSON.quote(value)))
+            members.add((name = "traceback", value = "[]"))
+
+            return JSON.object(members)
+        si
+
+        kernel_info(version: string) -> string static is
+            let language = LIST[(name: string, value: string)]()
+
+            language.add((name = "name", value = JSON.quote("ghul")))
+            language.add((name = "version", value = JSON.quote(version)))
+            language.add((name = "mimetype", value = JSON.quote("text/x-ghul")))
+            language.add((name = "file_extension", value = JSON.quote(".ghul")))
+
+            let members = LIST[(name: string, value: string)]()
+
+            members.add((name = "status", value = JSON.quote("ok")))
+            members.add((name = "protocol_version", value = JSON.quote(PROTOCOL_VERSION)))
+            members.add((name = "implementation", value = JSON.quote("ghul")))
+            members.add((name = "implementation_version", value = JSON.quote(version)))
+            members.add((name = "language_info", value = JSON.object(language)))
+            members.add((
+                name = "banner",
+                value = JSON.quote("ghūl {version}")))
+            members.add((name = "help_links", value = "[]"))
+
+            return JSON.object(members)
+        si
+
+        // `incomplete` carries the indentation the front end should put
+        // in front of the next line; the other answers carry nothing.
+        is_complete(status: string, indent: string) -> string static is
+            let members = LIST[(name: string, value: string)]()
+
+            members.add((name = "status", value = JSON.quote(status)))
+
+            if status =~ "incomplete" then
+                members.add((name = "indent", value = JSON.quote(indent)))
+            fi
+
+            return JSON.object(members)
+        si
+
+        // Nothing to offer yet, shaped so that an answer from analysis
+        // mode drops into the same reply.
+        no_completions(code: string, cursor_pos: int) -> string static is
+            let members = LIST[(name: string, value: string)]()
+
+            members.add((name = "status", value = JSON.quote("ok")))
+            members.add((name = "matches", value = "[]"))
+            members.add((name = "cursor_start", value = "{cursor_pos}"))
+            members.add((name = "cursor_end", value = "{cursor_pos}"))
+            members.add((name = "metadata", value = JSON.EMPTY_OBJECT))
+
+            return JSON.object(members)
+        si
+
+        nothing_found() -> string static is
+            let members = LIST[(name: string, value: string)]()
+
+            members.add((name = "status", value = JSON.quote("ok")))
+            members.add((name = "found", value = "false"))
+            members.add((name = "data", value = JSON.EMPTY_OBJECT))
+            members.add((name = "metadata", value = JSON.EMPTY_OBJECT))
+
+            return JSON.object(members)
+        si
+
+        shutdown(restart: bool) -> string static is
+            let members = LIST[(name: string, value: string)]()
+
+            members.add((name = "status", value = JSON.quote("ok")))
+            members.add((name = "restart", value = if restart then "true" else "false" fi))
+
+            return JSON.object(members)
+        si
+
+        ok() -> string static => _one("status", JSON.quote("ok"))
+
+        _one(name: string, value: string) -> string static is
+            let members = LIST[(name: string, value: string)]()
+
+            members.add((name = name, value = value))
+
+            return JSON.object(members)
+        si
+    si
+si

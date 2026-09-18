@@ -1,0 +1,173 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+
+    use Ghul.Jupyter.CHANNEL
+    use Ghul.Jupyter.CONNECTION
+    use Ghul.Jupyter.CONTENT
+    use Ghul.Jupyter.DELIMITER
+    use Ghul.Jupyter.JSON
+    use Ghul.Jupyter.MESSAGE
+    use Ghul.Jupyter.MESSAGES
+    use Ghul.Jupyter.SIGNER
+
+    use System.Text.Encoding
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    @TestClass()
+    class JUPYTER_WIRE_TESTS is
+        init() is si
+
+        _bytes(text: string) -> ubyte[] => Encoding.utf8.get_bytes(text)
+
+        // The frames a front end sends: routing, the delimiter, the
+        // signature, then the four JSON parts.
+        _frames(key: string, identity: string, header: string, content: string) -> LIST[ubyte[]] is
+            let signer = SIGNER(key)
+            let frames = LIST[ubyte[]]()
+
+            frames.add(_bytes(identity))
+            frames.add(_bytes(DELIMITER))
+            frames.add(_bytes(signer.sign(header, "{{}}", "{{}}", content)))
+            frames.add(_bytes(header))
+            frames.add(_bytes("{{}}"))
+            frames.add(_bytes("{{}}"))
+            frames.add(_bytes(content))
+
+            return frames
+        si
+
+        @Test()
+        decode__reads_the_parts_after_the_delimiter() is
+            let header = "{{\"msg_type\":\"execute_request\",\"msg_id\":\"abc\"}}"
+            let frames = _frames("secret", "client-1", header, "{{\"code\":\"1 + 1\"}}")
+
+            let message = CHANNEL.decode(frames, SIGNER("secret"))
+
+            assert message?;
+            assert message.msg_type =~ "execute_request";
+            assert message.msg_id =~ "abc";
+            assert message.identities.count == 1;
+            assert Encoding.utf8.get_string(message.identities[0]) =~ "client-1";
+            assert JSON.string_member(message.content, "code") =~ "1 + 1";
+        si
+
+        // A message signed with another key is not answered: holding the
+        // key is what entitles a front end to ask.
+        @Test()
+        decode__refuses_a_message_signed_with_another_key() is
+            let frames = _frames("other", "client-1", "{{\"msg_type\":\"execute_request\"}}", "{{}}")
+
+            assert !CHANNEL.decode(frames, SIGNER("secret"))?;
+        si
+
+        // An empty key is a front end asking for no signing at all.
+        @Test()
+        decode__accepts_anything_when_no_key_was_agreed() is
+            let frames = _frames("", "client-1", "{{\"msg_type\":\"kernel_info_request\"}}", "{{}}")
+
+            assert CHANNEL.decode(frames, SIGNER(""))?;
+        si
+
+        @Test()
+        decode__refuses_frames_with_no_delimiter() is
+            let frames = LIST[ubyte[]]()
+
+            frames.add(_bytes("client-1"))
+            frames.add(_bytes("{{}}"))
+
+            assert !CHANNEL.decode(frames, SIGNER(""))?;
+        si
+
+        @Test()
+        decode__refuses_frames_that_stop_short_after_the_delimiter() is
+            let frames = LIST[ubyte[]]()
+
+            frames.add(_bytes(DELIMITER))
+            frames.add(_bytes(""))
+            frames.add(_bytes("{{}}"))
+
+            assert !CHANNEL.decode(frames, SIGNER(""))?;
+        si
+
+        // The signature is the hex HMAC-SHA256 of the four parts in
+        // order, which is what every other kernel computes too.
+        @Test()
+        sign__is_the_hex_hmac_of_the_four_parts() is
+            let signature = SIGNER("key").sign("a", "b", "c", "d")
+
+            assert signature.length == 64;
+            assert signature =~ signature.to_lower();
+            assert !(signature =~ SIGNER("key").sign("a", "b", "c", "e"));
+        si
+
+        @Test()
+        sign__is_empty_when_no_key_was_agreed() is
+            assert SIGNER("").sign("a", "b", "c", "d") =~ "";
+        si
+
+        // A reply is paired with its request by carrying the request's
+        // header as its parent, and reaches the same client by carrying
+        // its identities.
+        @Test()
+        reply__carries_the_requests_identities_and_header() is
+            let identities = LIST[ubyte[]]()
+
+            identities.add(_bytes("client-1"))
+
+            let request = MESSAGE(identities, "{{\"msg_type\":\"kernel_info_request\"}}", "{{}}", "{{}}", "{{}}")
+
+            let reply = MESSAGES("session-1").reply(request, "kernel_info_reply", "{{}}")
+
+            assert reply.identities.count == 1;
+            assert Encoding.utf8.get_string(reply.identities[0]) =~ "client-1";
+            assert reply.parent_header =~ request.header;
+            assert reply.msg_type =~ "kernel_info_reply";
+            assert JSON.string_member(reply.header, "session") =~ "session-1";
+            assert JSON.string_member(reply.header, "version") =~ "5.3";
+        si
+
+        // What is published goes out with its type as the topic frame,
+        // which is what a subscriber filters on.
+        @Test()
+        published__leads_with_the_message_type_as_its_topic() is
+            let published = MESSAGES("session-1").published(null, "status", CONTENT.status("idle"))
+
+            assert published.identities.count == 1;
+            assert Encoding.utf8.get_string(published.identities[0]) =~ "status";
+            assert JSON.string_member(published.content, "execution_state") =~ "idle";
+        si
+    si
+
+    @TestClass()
+    class JUPYTER_CONNECTION_TESTS is
+        init() is si
+
+        @Test()
+        parse__reads_the_ports_and_the_key() is
+            let connection =
+                CONNECTION.parse(
+                    "{{\"transport\":\"tcp\",\"ip\":\"127.0.0.1\",\"shell_port\":1,\"iopub_port\":2,"
+                    "\"stdin_port\":3,\"control_port\":4,\"hb_port\":5,\"key\":\"k\","
+                    "\"signature_scheme\":\"hmac-sha256\"}}")
+
+            assert connection.shell_address =~ "tcp://127.0.0.1:1";
+            assert connection.iopub_address =~ "tcp://127.0.0.1:2";
+            assert connection.stdin_address =~ "tcp://127.0.0.1:3";
+            assert connection.control_address =~ "tcp://127.0.0.1:4";
+            assert connection.heartbeat_address =~ "tcp://127.0.0.1:5";
+            assert connection.key =~ "k";
+        si
+
+        // A connection file that leaves something out still has to
+        // produce a kernel that binds somewhere.
+        @Test()
+        parse__falls_back_where_a_member_is_missing() is
+            let connection = CONNECTION.parse("{{\"shell_port\":1}}")
+
+            assert connection.shell_address =~ "tcp://127.0.0.1:1";
+            assert connection.key =~ "";
+        si
+    si
+si

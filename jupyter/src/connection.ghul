@@ -1,0 +1,68 @@
+namespace Ghul.Jupyter is
+    use System.Text.Json.JsonDocument
+    use System.Text.Json.JsonElement
+
+    // What the front end wrote in the connection file it named on the
+    // command line: where to bind each socket, and the key every message
+    // is signed with.
+    class CONNECTION(
+        transport: string,
+        ip: string,
+        shell_port: int,
+        iopub_port: int,
+        stdin_port: int,
+        control_port: int,
+        heartbeat_port: int,
+        key: string,
+        signature_scheme: string
+    ) is
+        address(port: int) -> string => "{transport}://{ip}:{port}"
+
+        shell_address: string => address(shell_port)
+        iopub_address: string => address(iopub_port)
+        stdin_address: string => address(stdin_port)
+        control_address: string => address(control_port)
+        heartbeat_address: string => address(heartbeat_port)
+
+        read(path: string) -> CONNECTION static =>
+            parse(IO.File.read_all_text(path))
+
+        parse(text: string) -> CONNECTION static is
+            let document = JsonDocument.parse(text, _)
+            let root = document.root_element
+
+            return CONNECTION(
+                _string(root, "transport", "tcp"),
+                _string(root, "ip", "127.0.0.1"),
+                _int(root, "shell_port"),
+                _int(root, "iopub_port"),
+                _int(root, "stdin_port"),
+                _int(root, "control_port"),
+                _int(root, "hb_port"),
+                _string(root, "key", ""),
+                _string(root, "signature_scheme", "hmac-sha256"))
+        si
+
+        _string(root: JsonElement, name: string, fallback: string) -> string static is
+            let value: JsonElement mut
+
+            if root.try_get_property(name, value ref) then
+                if let text = value.get_string() then
+                    return text
+                fi
+            fi
+
+            return fallback
+        si
+
+        _int(root: JsonElement, name: string) -> int static is
+            let value: JsonElement mut
+
+            if root.try_get_property(name, value ref) then
+                return value.get_int32()
+            fi
+
+            return 0
+        si
+    si
+si

@@ -1,0 +1,121 @@
+namespace Ghul.Jupyter.Tests is
+    use Collections.LIST
+    use Ghul.Jupyter.CHANNEL
+    use Ghul.Jupyter.CONNECTION
+    use Ghul.Jupyter.JSON
+    use Ghul.Jupyter.MESSAGE
+    use Ghul.Jupyter.MESSAGES
+    use Ghul.Jupyter.SIGNER
+    use IO.Std
+    use System.Text.Encoding
+
+    // A Jupyter front end, enough of one to put the kernel through what
+    // a notebook does: ask what it is, run some cells, break one, and
+    // shut it down. Written as a program rather than a unit test because
+    // it needs a kernel process and a compiler, which a unit test should
+    // not wait for.
+    class CLIENT(_connection: CONNECTION) is
+        _signer: SIGNER
+        _messages: MESSAGES
+        _shell: CHANNEL
+        _iopub: NetMQ.Sockets.SubscriberSocket
+        _failures: LIST[string]
+
+        init(..) is
+            _signer = SIGNER(_connection.key)
+            _messages = MESSAGES("test-session")
+            _failures = LIST[string]()
+
+            _shell = CHANNEL(NetMQ.Sockets.DealerSocket(">{_connection.shell_address}"), _signer)
+
+            _iopub = NetMQ.Sockets.SubscriberSocket(">{_connection.iopub_address}")
+
+            _iopub.subscribe_to_any_topic()
+        si
+
+        failures: Collections.List[string] => _failures
+
+        check(condition: bool, what: string) is
+            if condition then
+                Std.write_line("  ok: {what}")
+            else
+                Std.write_line("  FAILED: {what}")
+
+                _failures.add(what)
+            fi
+        si
+
+        // A request with no parent: the client is where these start.
+        request(msg_type: string, content: string) -> MESSAGE is
+            let members = LIST[(name: string, value: string)]()
+
+            members.add((name = "msg_id", value = JSON.quote("{System.Guid.new_guid()}")))
+            members.add((name = "session", value = JSON.quote("test-session")))
+            members.add((name = "username", value = JSON.quote("test")))
+            members.add((name = "date", value = JSON.quote("2026-01-01T00:00:00.0000000Z")))
+            members.add((name = "msg_type", value = JSON.quote(msg_type)))
+            members.add((name = "version", value = JSON.quote(Ghul.Jupyter.PROTOCOL_VERSION)))
+
+            return MESSAGE(
+                LIST[ubyte[]](),
+                JSON.object(members),
+                JSON.EMPTY_OBJECT,
+                JSON.EMPTY_OBJECT,
+                content)
+        si
+
+        send(msg_type: string, content: string) is
+            _shell.send(request(msg_type, content))
+        si
+
+        // The next reply on shell, or nothing if the kernel says nothing
+        // for long enough that it is not going to.
+        reply() -> MESSAGE? is
+            let deadline = System.DateTime.utc_now.add_seconds(60.0)
+
+            while System.DateTime.utc_now < deadline do
+                if let message = _shell.try_receive(System.TimeSpan.from_milliseconds(200L)) then
+                    return message
+                fi
+            od
+
+            return null
+        si
+
+        // Everything published while a cell ran, up to its idle status.
+        published_until_idle() -> Collections.List[MESSAGE] is
+            let seen = LIST[MESSAGE]()
+            let deadline = System.DateTime.utc_now.add_seconds(60.0)
+
+            while System.DateTime.utc_now < deadline do
+                let frames = Collections.LIST[ubyte[]]()
+
+                if !NetMQ.ReceivingSocketExtensions.try_receive_multipart_bytes(
+                    _iopub,
+                    System.TimeSpan.from_milliseconds(200L),
+                    frames ref,
+                    8)
+                then
+                    continue
+                fi
+
+                if let message = CHANNEL.decode(frames, _signer) then
+                    seen.add(message)
+
+                    if message.msg_type =~ "status" /\
+                        JSON.string_member(message.content, "execution_state") =~ "idle"
+                    then
+                        return seen
+                    fi
+                fi
+            od
+
+            return seen
+        si
+
+        close() is
+            _shell.socket.dispose()
+            _iopub.dispose()
+        si
+    si
+si

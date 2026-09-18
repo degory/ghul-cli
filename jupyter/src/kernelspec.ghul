@@ -1,0 +1,89 @@
+namespace Ghul.Jupyter is
+    use Collections.LIST
+    use IO.Path
+
+    // Writing and removing the kernelspec, which is how a front end
+    // finds a kernel at all: a directory named for the kernel under the
+    // Jupyter data directory, holding a `kernel.json` saying what to run.
+    class KERNELSPEC is
+        // Where Jupyter looks. `JUPYTER_DATA_DIR` wins where it is set,
+        // which is what a virtual environment or a test uses to keep its
+        // kernels out of the real one.
+        data_directory() -> string static is
+            if let from_environment = System.Environment.get_environment_variable("JUPYTER_DATA_DIR") /\
+                from_environment.trim().length > 0
+            then
+                return from_environment
+            fi
+
+            let home =
+                System.Environment.get_folder_path(
+                    System.Environment_SpecialFolder.USER_PROFILE)
+
+            if System.OperatingSystem.is_windows() then
+                let app_data =
+                    System.Environment.get_folder_path(
+                        System.Environment_SpecialFolder.APPLICATION_DATA)
+
+                return Path.join([app_data, "jupyter"])
+            fi
+
+            if System.OperatingSystem.is_mac_o_s() then
+                return Path.join([home, "Library", "Jupyter"])
+            fi
+
+            return Path.join([home, ".local", "share", "jupyter"])
+        si
+
+        directory() -> string static =>
+            Path.join([data_directory(), "kernels", KERNEL_NAME])
+
+        // The kernelspec itself. `{connection_file}` is Jupyter's own
+        // placeholder, and it substitutes the path before running this.
+        contents() -> string static is
+            let argv = LIST[string]()
+
+            argv.add(JSON.quote(TOOL_COMMAND))
+            argv.add(JSON.quote("kernel"))
+            argv.add(JSON.quote("{{connection_file}}"))
+
+            let members = LIST[(name: string, value: string)]()
+
+            members.add((name = "argv", value = JSON.array(argv)))
+            members.add((name = "display_name", value = JSON.quote(DISPLAY_NAME)))
+            members.add((name = "language", value = JSON.quote(LANGUAGE_NAME)))
+            members.add((name = "interrupt_mode", value = JSON.quote("message")))
+
+            return JSON.object(members)
+        si
+
+        install() -> string static is
+            let target = directory()
+
+            IO.Directory.create_directory(target)
+            IO.File.write_all_text(Path.join([target, "kernel.json"]), contents())
+
+            return target
+        si
+
+        uninstall() -> string? static is
+            let target = directory()
+
+            if !IO.Directory.exists(target) then
+                return null
+            fi
+
+            IO.Directory.delete(target, true)
+
+            return target
+        si
+    si
+
+    // What the kernel is called wherever a front end shows or looks for
+    // it. The language is the id the VS Code extension registers, so a
+    // notebook cell is highlighted as ghūl.
+    KERNEL_NAME: string => "ghul"
+    LANGUAGE_NAME: string => "ghul"
+    DISPLAY_NAME: string => "ghūl"
+    TOOL_COMMAND: string => "ghul-jupyter"
+si

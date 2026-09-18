@@ -1,0 +1,188 @@
+namespace Ghul.Jupyter is
+    use Collections.LIST
+    use System.Text.Encoding
+
+    // One message on the wire. The identities are the routing frames a
+    // ROUTER socket puts in front, and a reply carries back the ones its
+    // request arrived with. The four JSON parts are kept as text: what
+    // is signed is the bytes, so re-encoding a parsed form would risk
+    // signing something other than what was checked.
+    class MESSAGE(
+        identities: Collections.List[ubyte[]],
+        header: string,
+        parent_header: string,
+        metadata: string,
+        content: string
+    ) is
+        msg_type: string => JSON.string_member(header, "msg_type") ?? ""
+        msg_id: string => JSON.string_member(header, "msg_id") ?? ""
+        session: string => JSON.string_member(header, "session") ?? ""
+    si
+
+    // The delimiter between the routing frames and the message proper.
+    DELIMITER: string => "<IDS|MSG>"
+
+    PROTOCOL_VERSION: string => "5.3"
+
+    // Signs and verifies with the connection's key. An empty key means
+    // the front end asked for no signing, and then the signature frame
+    // is present but empty.
+    class SIGNER(_key: string) is
+        sign(header: string, parent_header: string, metadata: string, content: string) -> string is
+            if _key.length == 0 then
+                return ""
+            fi
+
+            let hmac = System.Security.Cryptography.HMACSHA256(Encoding.utf8.get_bytes(_key))
+
+            _write(hmac, header)
+            _write(hmac, parent_header)
+            _write(hmac, metadata)
+            _write(hmac, content)
+
+            hmac.transform_final_block(System.Array.empty[ubyte](), 0, 0)
+
+            let digest = hmac.hash
+
+            hmac.dispose()
+
+            if !digest? then
+                return ""
+            fi
+
+            return System.Convert.to_hex_string(digest).to_lower()
+        si
+
+        // Whether the signature frame matches what the four parts hash
+        // to. A message that fails this is not answered: a front end
+        // that holds the key is the only thing entitled to ask.
+        verify(signature: string, message: MESSAGE) -> bool is
+            if _key.length == 0 then
+                return true
+            fi
+
+            let expected =
+                sign(message.header, message.parent_header, message.metadata, message.content)
+
+            return _equals_in_constant_time(expected, signature)
+        si
+
+        _write(hmac: System.Security.Cryptography.HMACSHA256, part: string) is
+            let bytes = Encoding.utf8.get_bytes(part)
+
+            hmac.transform_block(bytes, 0, bytes.count, null, 0)
+        si
+
+        // Compared without stopping at the first difference, so that
+        // what a caller learns from the time taken is the length alone.
+        _equals_in_constant_time(a: string, b: string) -> bool static is
+            if a.length != b.length then
+                return false
+            fi
+
+            let differences mut = 0
+
+            for i in 0..a.length do
+                if a[i] != b[i] then
+                    differences = differences + 1
+                fi
+            od
+
+            return differences == 0
+        si
+    si
+
+    // Reading and writing messages on a socket. Every socket the kernel
+    // holds speaks the same framing, so the shell, control and stdin
+    // channels share this.
+    class CHANNEL(_socket: NetMQ.NetMQSocket, _signer: SIGNER) is
+        socket: NetMQ.NetMQSocket => _socket
+
+        // The next message, or nothing where none arrives inside the
+        // timeout, the frames do not make one, or the signature does not
+        // match.
+        try_receive(timeout: System.TimeSpan) -> MESSAGE? is
+            let frames mut = LIST[ubyte[]]()
+
+            if !NetMQ.ReceivingSocketExtensions.try_receive_multipart_bytes(
+                _socket,
+                timeout,
+                frames ref,
+                8)
+            then
+                return null
+            fi
+
+            return decode(frames, _signer)
+        si
+
+        send(message: MESSAGE) is
+            let frames = LIST[ubyte[]]()
+
+            for identity in message.identities do
+                frames.add(identity)
+            od
+
+            frames.add(Encoding.utf8.get_bytes(DELIMITER))
+
+            frames.add(
+                Encoding.utf8.get_bytes(
+                    _signer.sign(
+                        message.header,
+                        message.parent_header,
+                        message.metadata,
+                        message.content)))
+
+            frames.add(Encoding.utf8.get_bytes(message.header))
+            frames.add(Encoding.utf8.get_bytes(message.parent_header))
+            frames.add(Encoding.utf8.get_bytes(message.metadata))
+            frames.add(Encoding.utf8.get_bytes(message.content))
+
+            NetMQ.OutgoingSocketExtensions.send_multipart_bytes(_socket, frames)
+        si
+
+        // The frames of one message, split at the delimiter. Everything
+        // before it routes, and the six after it are the signature and
+        // the four JSON parts. Anything else is not a message this
+        // kernel can answer.
+        decode(frames: Collections.List[ubyte[]], signer: SIGNER) -> MESSAGE? static is
+            let delimiter_at = _index_of_delimiter(frames)
+
+            if delimiter_at < 0 \/ frames.count < delimiter_at + 6 then
+                return null
+            fi
+
+            let identities = LIST[ubyte[]]()
+
+            for i in 0..delimiter_at do
+                identities.add(frames[i])
+            od
+
+            let signature = Encoding.utf8.get_string(frames[delimiter_at + 1])
+
+            let message =
+                MESSAGE(
+                    identities,
+                    Encoding.utf8.get_string(frames[delimiter_at + 2]),
+                    Encoding.utf8.get_string(frames[delimiter_at + 3]),
+                    Encoding.utf8.get_string(frames[delimiter_at + 4]),
+                    Encoding.utf8.get_string(frames[delimiter_at + 5]))
+
+            if !signer.verify(signature, message) then
+                return null
+            fi
+
+            return message
+        si
+
+        _index_of_delimiter(frames: Collections.List[ubyte[]]) -> int static is
+            for i in 0..frames.count do
+                if Encoding.utf8.get_string(frames[i]) =~ DELIMITER then
+                    return i
+                fi
+            od
+
+            return -1
+        si
+    si
+si

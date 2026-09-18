@@ -1,0 +1,268 @@
+namespace Ghul.Jupyter is
+    use Collections.LIST
+    use Ghul.Repl.CELL_DISPLAY
+    use Ghul.Repl.Host.Completeness
+    use Ghul.Repl.Host.COMPLETENESS_CHECK
+    use Ghul.Repl.Host.HOSTED_SESSION
+
+    // The kernel: five sockets, one session, and a loop answering what
+    // the front end asks. Shell and control carry requests, iopub is
+    // what everyone watching sees, stdin is unused for now, and
+    // heartbeat echoes on a thread of its own so that a busy kernel
+    // still looks alive.
+    class KERNEL(
+        _connection: CONNECTION,
+        _session: HOSTED_SESSION,
+        _completeness: COMPLETENESS_CHECK,
+        _version: string
+    ) is
+        _messages: MESSAGES
+        _display: CELL_DISPLAY
+        _signer: SIGNER
+        _execution_count: int
+        _is_running: bool
+
+        _shell: CHANNEL
+        _control: CHANNEL
+        _iopub: CHANNEL
+        _stdin: CHANNEL
+
+        init(..) is
+            _messages = MESSAGES("{System.Guid.new_guid()}")
+            _display = CELL_DISPLAY()
+            _signer = SIGNER(_connection.key)
+            _execution_count = 0
+            _is_running = true
+
+            _shell = CHANNEL(NetMQ.Sockets.RouterSocket("@{_connection.shell_address}"), _signer)
+            _control = CHANNEL(NetMQ.Sockets.RouterSocket("@{_connection.control_address}"), _signer)
+            _iopub = CHANNEL(NetMQ.Sockets.PublisherSocket("@{_connection.iopub_address}"), _signer)
+            _stdin = CHANNEL(NetMQ.Sockets.RouterSocket("@{_connection.stdin_address}"), _signer)
+        si
+
+        run() -> int is
+            let heartbeat = HEARTBEAT(_connection.heartbeat_address)
+
+            heartbeat.start()
+
+            // A front end waits for this before it will send anything:
+            // until the kernel says it is idle, it is still starting.
+            _publish(null, "status", CONTENT.status("idle"))
+
+            // Control first on every turn: it carries shutdown and
+            // interrupt, which a front end sends precisely when the
+            // shell channel is busy.
+            let wait = System.TimeSpan.from_milliseconds(50L)
+
+            while _is_running do
+                _handle(_control, wait)
+
+                if _is_running then
+                    _handle(_shell, wait)
+                fi
+            od
+
+            heartbeat.stop()
+
+            _shell.socket.dispose()
+            _control.socket.dispose()
+            _iopub.socket.dispose()
+            _stdin.socket.dispose()
+
+            NetMQ.NetMQConfig.cleanup(false)
+
+            return 0
+        si
+
+        // One request. An unsigned or unreadable message is dropped, and
+        // a type this kernel does not implement is ignored rather than
+        // answered with an error: the protocol says a kernel may not
+        // implement everything.
+        _handle(channel: CHANNEL, wait: System.TimeSpan) is
+            let request = channel.try_receive(wait)
+
+            if !request? then
+                return
+            fi
+
+            case request.msg_type
+            when "kernel_info_request" then
+                channel.send(_messages.reply(request, "kernel_info_reply", CONTENT.kernel_info(_version)))
+            when "execute_request" then
+                _execute(channel, request)
+            when "is_complete_request" then
+                _is_complete(channel, request)
+            when "complete_request" then
+                channel.send(
+                    _messages.reply(
+                        request,
+                        "complete_reply",
+                        CONTENT.no_completions("", _int_member(request.content, "cursor_pos"))))
+            when "inspect_request" then
+                channel.send(_messages.reply(request, "inspect_reply", CONTENT.nothing_found()))
+            when "shutdown_request" then
+                let restart = JSON.bool_member(request.content, "restart", false)
+
+                channel.send(_messages.reply(request, "shutdown_reply", CONTENT.shutdown(restart)))
+
+                _is_running = false
+            when "interrupt_request" then
+                // Nothing to interrupt between cells, and a cell runs to
+                // the end on this thread. Answering keeps the front end
+                // from waiting for a reply that never comes.
+                channel.send(_messages.reply(request, "interrupt_reply", CONTENT.ok()))
+            else
+                // A kernel is not required to implement everything, and
+                // a front end asking for what this one does not do gets
+                // silence rather than an error it cannot act on.
+            esac
+        si
+
+        _execute(channel: CHANNEL, request: MESSAGE) is
+            let code = JSON.string_member(request.content, "code") ?? ""
+            let silent = JSON.bool_member(request.content, "silent", false)
+            let store_history = JSON.bool_member(request.content, "store_history", true)
+
+            _publish(request, "status", CONTENT.status("busy"))
+
+            if !silent /\ store_history then
+                _execution_count = _execution_count + 1
+            fi
+
+            if !silent then
+                _publish(request, "execute_input", CONTENT.execute_input(code, _execution_count))
+            fi
+
+            let out = STREAM_WRITER(line => _publish(request, "stream", CONTENT.stream("stdout", line)))
+            let err = STREAM_WRITER(line => _publish(request, "stream", CONTENT.stream("stderr", line)))
+
+            let previous_out = IO.Std.out
+            let previous_error = IO.Std.error
+
+            let result mut = Ghul.Repl.Host.SUBMIT_RESULT(false, LIST[string](), null, null)
+
+            try
+                IO.Std.set_out(out)
+                IO.Std.set_error(err)
+
+                result = _session.submit(code)
+            finally
+                out.flush()
+                err.flush()
+
+                IO.Std.set_out(previous_out)
+                IO.Std.set_error(previous_error)
+            yrt
+
+            if !result.is_accepted then
+                let name = "CompileError"
+                let value = "the cell did not compile"
+
+                if !silent then
+                    _publish(request, "error", CONTENT.error(name, value, result.diagnostics))
+                fi
+
+                channel.send(
+                    _messages.reply(
+                        request,
+                        "execute_reply",
+                        CONTENT.execute_reply_error(_execution_count, name, value)))
+
+                _publish(request, "status", CONTENT.status("idle"))
+
+                return
+            fi
+
+            // A cell that compiled with warnings is accepted, and the
+            // warnings are worth seeing.
+            if !silent /\ result.diagnostics.count > 0 then
+                _publish(
+                    request,
+                    "stream",
+                    CONTENT.stream("stderr", "{result.diagnostics |> Ghul.Pipes.join("\n")}\n"))
+            fi
+
+            if let error = result.run_error then
+                if !silent then
+                    _publish(request, "error", CONTENT.error("Exception", error, LIST[string]([error])))
+                fi
+
+                channel.send(
+                    _messages.reply(
+                        request,
+                        "execute_reply",
+                        CONTENT.execute_reply_error(_execution_count, "Exception", error)))
+
+                _publish(request, "status", CONTENT.status("idle"))
+
+                return
+            fi
+
+            if let shown = _display.format(result.value) /\ !silent then
+                _publish(request, "execute_result", CONTENT.execute_result(shown, _execution_count))
+            fi
+
+            channel.send(
+                _messages.reply(request, "execute_reply", CONTENT.execute_reply_ok(_execution_count)))
+
+            _publish(request, "status", CONTENT.status("idle"))
+        si
+
+        _is_complete(channel: CHANNEL, request: MESSAGE) is
+            let code = JSON.string_member(request.content, "code") ?? ""
+
+            let answer =
+                case _completeness.check(code)
+                when Completeness.INCOMPLETE then CONTENT.is_complete("incomplete", _indent_of(code))
+                when Completeness.INVALID then CONTENT.is_complete("invalid", "")
+                else CONTENT.is_complete("complete", "")
+                esac
+
+            channel.send(_messages.reply(request, "is_complete_reply", answer))
+        si
+
+        // What the front end puts in front of the next line: the
+        // indentation of the last line with anything on it, which keeps
+        // a block's body lined up with the line that opened it.
+        _indent_of(code: string) -> string static is
+            let lines = code.split(['\n'])
+
+            for i in 0..lines.count do
+                let line = lines[lines.count - 1 - i]
+
+                if line.trim().length == 0 then
+                    continue
+                fi
+
+                let spaces mut = 0
+
+                while spaces < line.length /\ (line[spaces] == ' ' \/ line[spaces] == '\t') do
+                    spaces = spaces + 1
+                od
+
+                return line[0..spaces]
+            od
+
+            return ""
+        si
+
+        _publish(parent: MESSAGE?, msg_type: string, content: string) is
+            _iopub.send(_messages.published(parent, msg_type, content))
+        si
+
+        _int_member(content: string, name: string) -> int static is
+            try
+                let document = System.Text.Json.JsonDocument.parse(content, _)
+                let value: System.Text.Json.JsonElement mut
+
+                if document.root_element.try_get_property(name, value ref) then
+                    return value.get_int32()
+                fi
+            catch e: System.Text.Json.JsonException
+                return 0
+            yrt
+
+            return 0
+        si
+    si
+si
