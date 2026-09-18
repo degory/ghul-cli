@@ -1,4 +1,6 @@
 namespace Ghul.Cli is
+    use Ghul.Cli.Repl
+
     use IO.Std
     use IO.File
     use IO.Directory
@@ -422,6 +424,7 @@ namespace Ghul.Cli is
         Std.error.write_line("       ghul compile [--no-cache] <script.ghul>")
         Std.error.write_line("       ghul install-compiler [version]")
         Std.error.write_line("       ghul cache clear")
+        Std.error.write_line("       ghul repl")
         Std.error.write_line("       ghul version")
         Std.error.write_line("       a `-` in place of <script> reads the source from stdin")
     si
@@ -560,6 +563,42 @@ namespace Ghul.Cli is
         return (items = list, no_cache = false)
     si
 
+    // Each session gets a directory of its own, named so that the
+    // namespace the compiler derives from a cell's path is a plain
+    // identifier: the compiler stops at the folder holding a
+    // `ghul.json`, so the namespace is this directory's name, two
+    // underscores and the cell's file stem. Isolated here because a
+    // compiler flag naming the namespace directly is coming, and then
+    // only this has to change.
+    session_directory() -> string is
+        let unique = System.Guid.new_guid().to_string("N")
+
+        return Path.join([Path.get_temp_path(), "{REPL_SESSION_PREFIX}{unique}"])
+    si
+
+    cmd_repl() -> int is
+        let tools_dir = tools_directory()
+
+        if let compiler_version: string = ensure_compiler_installed(tools_dir, null, false) then
+            let compiler_shim = "{tools_dir}/ghul-compiler"
+            let directory = session_directory()
+
+            let runtime_assembly =
+                "{tools_dir}/.store/ghul.compiler/{compiler_version}/ghul.compiler/{compiler_version}/tools/net10.0/any/ghul-runtime.dll"
+
+            let terminal =
+                Repl.TERMINAL(
+                    () -> Repl.SESSION =>
+                        Repl.SESSION(
+                            Repl.SPAWN_BACKEND(compiler_shim, directory, runtime_assembly),
+                            Repl.REFLECTION_CELL_HOST(directory)))
+
+            return terminal.run()
+        fi
+
+        return 1
+    si
+
     entry(args: string[]) -> int is
         if args.count < 1 then
             print_usage()
@@ -605,6 +644,10 @@ namespace Ghul.Cli is
 
         if verb =~ "cache" then
             return cmd_cache(rest)
+        fi
+
+        if verb =~ "repl" then
+            return cmd_repl()
         fi
 
         if verb =~ "version" \/ verb =~ "--version" then

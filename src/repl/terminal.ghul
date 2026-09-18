@@ -1,0 +1,103 @@
+namespace Ghul.Cli.Repl is
+    use Collections.LIST
+    use IO.Std
+
+    // Whether the lines typed so far are a submission. A blank line ends
+    // one, which is a stand-in: answering it properly means asking the
+    // compiler whether the text is complete or merely unfinished, which
+    // is a mode it does not have yet. Kept in one place so that when it
+    // does, only this changes.
+    class SUBMISSION_END is
+        is_complete(lines: Collections.List[string], latest: string) -> bool static =>
+            latest.trim().length == 0 /\ !_is_blank(lines)
+
+        _is_blank(lines: Collections.List[string]) -> bool static is
+            for line in lines do
+                if line.trim().length > 0 then
+                    return false
+                fi
+            od
+
+            return true
+        si
+    si
+
+    // The terminal front end: read a submission, hand it to the session,
+    // report what happened. Everything it knows about a cell it learns
+    // from SESSION, so a notebook or the playground can take its place
+    // without any of this.
+    class TERMINAL(_make_session: () -> SESSION) is
+        run() -> int is
+            Std.write_line("ghūl repl. :help for commands, a blank line to submit.")
+
+            let session mut = _make_session()
+            let lines = LIST[string]()
+
+            loop: do
+                Std.write(if lines.count == 0 then "> " else "| " fi)
+
+                let line = Std.read_line()
+
+                if !line? then
+                    Std.write_line("")
+
+                    break loop
+                fi
+
+                if lines.count == 0 /\ line.trim().starts_with(":") then
+                    case line.trim()
+                    when ":quit", ":q" then
+                        break loop
+                    when ":reset" then
+                        session = _make_session()
+
+                        Std.write_line("session reset")
+                    when ":help" then
+                        _write_help()
+                    else
+                        Std.write_line("unknown command {line.trim()}; :help for the list")
+                    esac
+
+                    continue
+                fi
+
+                if !SUBMISSION_END.is_complete(lines, line) then
+                    lines.add(line)
+
+                    continue
+                fi
+
+                let source = "{lines |> Ghul.Pipes.join("\n")}\n"
+
+                lines.clear()
+
+                _report(session.submit(source))
+            od
+
+            return 0
+        si
+
+        _report(result: SUBMIT_RESULT) is
+            for line in result.diagnostics do
+                Std.error.write_line(line)
+            od
+
+            if let error = result.run_error then
+                Std.error.write_line(error)
+
+                // It compiled, so what it declared is there for later
+                // cells whatever its own code then did.
+                Std.error.write_line("ghul: the cell was kept: it compiled, so its definitions are in the session")
+            fi
+        si
+
+        _write_help() is
+            Std.write_line(":help    this list")
+            Std.write_line(":reset   start a new session, forgetting every cell")
+            Std.write_line(":quit    leave")
+            Std.write_line("")
+            Std.write_line("a blank line submits what you have typed")
+            Std.write_line("write_line to see a value: a cell's last expression is not printed yet")
+        si
+    si
+si

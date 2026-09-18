@@ -1,0 +1,39 @@
+namespace Ghul.Cli.Repl is
+    use System.Text.RegularExpressions.Regex
+
+    // The compiler is given the generated prelude and the user's text as
+    // one file, so every line it reports is that many lines further down
+    // than what the user wrote. Subtracting the prelude puts the numbers
+    // back where the user can find them.
+    class DIAGNOSTIC_LINES is
+        // A compiler diagnostic reads `<path>: L,C..L,C: kind: message`.
+        // A line at or above the prelude is the session's own doing
+        // rather than the user's, and is left alone: it names the
+        // generated text, which the user did not write and cannot fix.
+        strip_prelude(line: string, prelude_lines: int) -> string static is
+            if prelude_lines <= 0 then
+                return line
+            fi
+
+            let m = Regex.match(line, "^(?<head>.*?): (?<sl>[0-9]+),(?<sc>[0-9]+)\\.\\.(?<el>[0-9]+),(?<ec>[0-9]+): (?<tail>.*)$")
+
+            if !m.success then
+                return line
+            fi
+
+            let start_line = int.parse(m.groups["sl"].value)
+            let end_line = int.parse(m.groups["el"].value)
+
+            if start_line <= prelude_lines then
+                return line
+            fi
+
+            let head = m.groups["head"].value
+            let start_column = m.groups["sc"].value
+            let end_column = m.groups["ec"].value
+            let tail = m.groups["tail"].value
+
+            "{head}: {start_line - prelude_lines},{start_column}..{end_line - prelude_lines},{end_column}: {tail}"
+        si
+    si
+si

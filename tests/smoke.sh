@@ -264,4 +264,66 @@ if [[ "$installed_versions" != "1" ]]; then
     exit 1
 fi
 
+echo "smoke: 'ghul repl' carries definitions and state from one cell to the next..." >&2
+repl_in="$scratch/repl-in.txt"
+cat > "$repl_in" <<'REPL'
+use Collections.LIST
+use IO.Std.write_line
+let x = 41
+let names mut = LIST[string]()
+names.add("first")
+inc(n: int) -> int => n + 1
+class POINT(px: int, py: int) is sum() -> int => px + py; si
+write_line("cell1: x is {x}")
+
+use IO.Std.write_line
+let x = "now a string"
+inc(n: int) -> int => n + 100
+names.add("second")
+
+use IO.Std.write_line
+write_line("{x} {inc(1)} {POINT(3, 4).sum()} {names.count}")
+
+:quit
+REPL
+repl_out="$(dotnet "$cli" repl < "$repl_in" 2>"$scratch/repl.err")" || {
+    echo "smoke: ghul repl exited non-zero:" >&2
+    cat "$scratch/repl.err" >&2
+    exit 1
+}
+# A redefined variable and function take effect for later cells, while the
+# list declared in the first and added to in the second keeps both entries.
+for expected in "cell1: x is 41" "now a string 101 7 2"; do
+    if [[ "$repl_out" != *"$expected"* ]]; then
+        echo "smoke: expected the repl to print '$expected', got:" >&2
+        echo "$repl_out" >&2
+        cat "$scratch/repl.err" >&2
+        exit 1
+    fi
+done
+
+echo "smoke: a cell that does not compile leaves the session unchanged..." >&2
+repl_bad_in="$scratch/repl-bad-in.txt"
+cat > "$repl_bad_in" <<'REPL'
+let y = 1
+
+let z = no_such_name
+
+use IO.Std.write_line
+write_line("{y}")
+
+:quit
+REPL
+repl_bad_out="$(dotnet "$cli" repl < "$repl_bad_in" 2>"$scratch/repl-bad.err")" || true
+if [[ "$repl_bad_out" != *"1"* ]]; then
+    echo "smoke: expected the repl to still know y after a failed cell, got:" >&2
+    echo "$repl_bad_out" >&2
+    exit 1
+fi
+if ! grep -q "no_such_name" "$scratch/repl-bad.err"; then
+    echo "smoke: expected the failed cell to be reported, stderr was:" >&2
+    cat "$scratch/repl-bad.err" >&2
+    exit 1
+fi
+
 echo "smoke: all checks passed" >&2
