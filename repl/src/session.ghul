@@ -119,6 +119,14 @@ namespace Ghul.Repl is
 
         cells: Collections.List[CELL] => _cells
 
+        // An import every cell gets until a cell defines the name itself,
+        // for a name the host supplies rather than a cell, such as
+        // display. A cell that defines the name replaces the import from
+        // then on, as a definition replaces any earlier one.
+        bind(name: string, directive: string) is
+            _bindings[name] = directive
+        si
+
         // Every name a new cell can see, and the cell that last defined
         // it. Later cells win, which is what makes a redefinition take
         // effect going forward without any lookup rule changing.

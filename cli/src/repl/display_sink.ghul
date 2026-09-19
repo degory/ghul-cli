@@ -1,0 +1,27 @@
+namespace Ghul.Cli.Repl is
+    use IO.Std
+
+    use Ghul.Repl.CELL_DISPLAY
+    use Ghul.Repl.Display.DisplaySink
+
+    // What display shows from a running cell, at a terminal: the line the
+    // cell's value would be shown as. A terminal cannot redraw a line
+    // above, so an update shows the new value as another line.
+    class TERMINAL_DISPLAY_SINK: DisplaySink is
+        _display: CELL_DISPLAY
+
+        init() is
+            _display = CELL_DISPLAY()
+        si
+
+        show(value: object?, id: string?) is
+            if let line = _display.format(value) then
+                Std.write_line(line)
+            fi
+        si
+
+        update(value: object?, id: string) is
+            show(value, id)
+        si
+    si
+si

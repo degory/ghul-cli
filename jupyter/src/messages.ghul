@@ -82,6 +82,22 @@ namespace Ghul.Jupyter is
             return JSON.object(members)
         si
 
+        // A value shown while a cell runs. An id goes in `transient`, where
+        // a front end keeps it to find what an update_display_data with
+        // the same id redraws.
+        display_data(bundle: Collections.List[(mime: string, payload: string)], id: string?) -> string static is
+            let members = LIST[(name: string, value: string)]()
+
+            members.add((name = "data", value = data(bundle)))
+            members.add((name = "metadata", value = JSON.EMPTY_OBJECT))
+
+            if let display_id = id then
+                members.add((name = "transient", value = _one("display_id", JSON.quote(display_id))))
+            fi
+
+            return JSON.object(members)
+        si
+
         data(bundle: Collections.List[(mime: string, payload: string)]) -> string static is
             let members = LIST[(name: string, value: string)]()
 

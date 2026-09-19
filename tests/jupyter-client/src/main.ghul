@@ -227,6 +227,22 @@ namespace Ghul.Jupyter.Tests is
             _result_html(table.published).contains("<th>`0</th><th>`1</th>"),
             "and a table beside it as text/html")
 
+        Std.write_line("a cell that calls display:")
+
+        let shown = _execute_raw(client, "display(41)\ndisplay(\"first\", \"progress\")\nupdate_display(\"second\", \"progress\")\n")
+
+        client.check(
+            _published_text(shown.published, "display_data") =~ "41|first",
+            "each display publishes display_data with the value as text/plain")
+
+        client.check(
+            _published_text(shown.published, "update_display_data") =~ "second",
+            "update_display publishes update_display_data")
+
+        client.check(
+            _display_ids(shown.published) =~ "progress|progress",
+            "under the display id it was given")
+
         Std.write_line("a cell that does not compile:")
 
         let broken = _execute_raw(client, "let y: int = \"not an int\"\n")
@@ -510,6 +526,41 @@ namespace Ghul.Jupyter.Tests is
         od
 
         return ""
+    si
+
+    // The text/plain of every message of one type, in order, joined by '|'.
+    _published_text(published: Collections.List[MESSAGE], msg_type: string) -> string is
+        let texts = LIST[string]()
+
+        for message in published do
+            if message.msg_type =~ msg_type then
+                texts.add(_plain_text(message.content))
+            fi
+        od
+
+        return texts |> Ghul.Pipes.join("|")
+    si
+
+    // The display id of every display_data and update_display_data that
+    // carries one, in order, joined by '|'.
+    _display_ids(published: Collections.List[MESSAGE]) -> string is
+        let ids = LIST[string]()
+
+        for message in published do
+            if message.msg_type =~ "display_data" \/ message.msg_type =~ "update_display_data" then
+                let document = System.Text.Json.JsonDocument.parse(message.content, _)
+                let transient: System.Text.Json.JsonElement mut
+                let id: System.Text.Json.JsonElement mut
+
+                if document.root_element.try_get_property("transient", transient ref) /\
+                    transient.try_get_property("display_id", id ref)
+                then
+                    ids.add(id.get_string() ?? "")
+                fi
+            fi
+        od
+
+        return ids |> Ghul.Pipes.join("|")
     si
 
     _result_html(published: Collections.List[MESSAGE]) -> string is

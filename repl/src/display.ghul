@@ -1,0 +1,74 @@
+namespace Ghul.Repl.Display is
+    // Where display() sends what a cell shows while it runs: the host the
+    // session runs in, which shows it the way that host shows a cell's
+    // value. `id` names a display that update_display can redraw, and is
+    // null for one that cannot be.
+    trait DisplaySink open is
+        show(value: object?, id: string?)
+
+        update(value: object?, id: string)
+    si
+
+    // The sink the running session's host installed, if any. One process
+    // runs one session at a time, so there is one sink; a host takes its
+    // own out again when its session ends, so a cell still running
+    // afterwards shows nothing rather than reaching a front end that has
+    // gone.
+    class DISPLAY_SINKS is
+        _current: DisplaySink? static
+        _lock: object static
+
+        init() static is
+            _lock = object()
+        si
+
+        current: DisplaySink? static is
+            System.Threading.Monitor.enter(_lock)
+
+            try
+                return _current
+            finally
+                System.Threading.Monitor.exit(_lock)
+            yrt
+        si
+
+        install(sink: DisplaySink) static is
+            System.Threading.Monitor.enter(_lock)
+
+            try
+                _current = sink
+            finally
+                System.Threading.Monitor.exit(_lock)
+            yrt
+        si
+
+        // Takes `sink` out, if it is still the one installed.
+        remove(sink: DisplaySink) static is
+            System.Threading.Monitor.enter(_lock)
+
+            try
+                if _current == sink then
+                    _current = null
+                fi
+            finally
+                System.Threading.Monitor.exit(_lock)
+            yrt
+        si
+    si
+
+    // Shows a value now, while the cell goes on running.
+    display(value: object?) is
+        DISPLAY_SINKS.current?.show(value, null)
+    si
+
+    // Shows a value now, under an id update_display can redraw it by.
+    display(value: object?, id: string) is
+        DISPLAY_SINKS.current?.show(value, id)
+    si
+
+    // Shows a value in place of what display(value, id) showed under the
+    // same id.
+    update_display(value: object?, id: string) is
+        DISPLAY_SINKS.current?.update(value, id)
+    si
+si
