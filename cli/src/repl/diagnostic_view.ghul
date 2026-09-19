@@ -1,0 +1,149 @@
+namespace Ghul.Cli.Repl is
+    use Collections.LIST
+
+    use Ghul.Repl.CELL_DIAGNOSTIC
+    use Ghul.Repl.CELL_LOCATION
+
+    // A cell's diagnostics as the terminal shows them: each one's line as
+    // the compiler wrote it, then the line of the cell it points at with
+    // carets under the part it means. A diagnostic repeating the one
+    // before it at another place on the same line adds its carets to that
+    // one's rather than being shown again, and one repeated word for word
+    // is shown once.
+    class DIAGNOSTIC_VIEW is
+        init() is si
+
+        lines(diagnostics: Collections.List[string], label: string, source: string, palette: PALETTE?) -> LIST[string] static is
+            let source_lines = source.trim_end().split(['\n'])
+            let groups = LIST[DIAGNOSTIC_GROUP]()
+            let seen = Collections.SET[string]()
+
+            for text in diagnostics do
+                if !seen.add(text) then
+                    continue
+                fi
+
+                let diagnostic = CELL_DIAGNOSTIC.parse(text)
+                let at = _single_line(diagnostic.location, label, source_lines.count)
+
+                if groups.count > 0 then
+                    let last = groups[groups.count - 1]
+
+                    if at? /\ last.joins(diagnostic, at) then
+                        last.spans.add(at)
+
+                        continue
+                    fi
+                fi
+
+                groups.add(DIAGNOSTIC_GROUP(text, diagnostic, at))
+            od
+
+            let result = LIST[string]()
+
+            for group in groups do
+                result.add(_header(group, palette))
+
+                if let at = group.at then
+                    _excerpt(source_lines[at.start_line - 1], at.start_line, group, palette, result)
+                fi
+            od
+
+            return result
+        si
+
+        // Where in the cell `location` points, if it is in this cell's
+        // text: a range running on past its first line is cut at the end
+        // of that line.
+        _single_line(location: CELL_LOCATION?, label: string, line_count: int) -> CELL_LOCATION? static is
+            if !location? \/ !(location.path =~ label) then
+                return null
+            fi
+
+            if location.start_line < 1 \/ location.start_line > line_count then
+                return null
+            fi
+
+            let end_column = if location.end_line == location.start_line then location.end_column else int.max_value fi
+
+            return CELL_LOCATION(location.path, location.start_line, location.start_column, location.start_line, end_column)
+        si
+
+        _header(group: DIAGNOSTIC_GROUP, palette: PALETTE?) -> string static is
+            let text = group.text
+            let severity = group.diagnostic.severity
+
+            if !palette? \/ severity.length == 0 then
+                return text
+            fi
+
+            let marker = ": {severity}: "
+            let at = text.index_of(marker, System.StringComparison.ORDINAL)
+
+            if at < 0 then
+                return text
+            fi
+
+            let start = at + 2
+
+            return "{text.substring(0, start)}{palette.severity(severity, severity)}{text.substring(start + severity.length)}"
+        si
+
+        _excerpt(line: string, number: int, group: DIAGNOSTIC_GROUP, palette: PALETTE?, result: LIST[string]) static is
+            let gutter = number.to_string()
+            let blank = string(' ', gutter.length)
+            let carets = System.Text.StringBuilder()
+
+            for span in group.spans do
+                let start = System.Math.clamp(span.start_column - 1, 0, line.length)
+                let end = System.Math.clamp(span.end_column - 1, start + 1, System.Math.max(line.length, start + 1))
+
+                if carets.length < start then
+                    carets.append(' ', start - carets.length)
+                fi
+
+                if carets.length < end then
+                    carets.append('^', end - carets.length)
+                fi
+            od
+
+            let shown_line = if let p = palette then p.paint(line, GHUL_LEXER.spans(line)) else line fi
+            let shown_carets = if let p = palette then p.severity(group.diagnostic.severity, carets.to_string()) else carets.to_string() fi
+
+            result.add(" {gutter} | {shown_line}".trim_end())
+            result.add(" {blank} | {shown_carets}")
+        si
+    si
+
+    // Diagnostics shown as one: the first as the compiler wrote it, and
+    // where on its line each of them points.
+    class DIAGNOSTIC_GROUP is
+        text: string
+        diagnostic: CELL_DIAGNOSTIC
+        at: CELL_LOCATION?
+        spans: LIST[CELL_LOCATION]
+
+        init(text: string, diagnostic: CELL_DIAGNOSTIC, at: CELL_LOCATION?) is
+            self.text = text
+            self.diagnostic = diagnostic
+            self.at = at
+            spans = LIST[CELL_LOCATION]()
+
+            if at? then
+                spans.add(at)
+            fi
+        si
+
+        // Whether `other`, pointing at `other_at`, says what this group
+        // says on the same line.
+        joins(other: CELL_DIAGNOSTIC, other_at: CELL_LOCATION) -> bool is
+            if let mine = at then
+                return mine.start_line == other_at.start_line /\
+                    diagnostic.severity =~ other.severity /\
+                    diagnostic.message =~ other.message
+            fi
+
+            return false
+        si
+    si
+si

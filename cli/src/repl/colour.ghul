@@ -27,10 +27,14 @@ namespace Ghul.Cli.Repl is
     class PALETTE is
         _colours: LIST[int]
         _depth: ColourDepth
+        _error: int
+        _warning: int
 
-        init(colours: LIST[int], depth: ColourDepth) is
+        init(colours: LIST[int], depth: ColourDepth, error: int, warning: int) is
             _colours = colours
             _depth = depth
+            _error = error
+            _warning = warning
         si
 
         // The colours as 0xRRGGBB, or -1 for the terminal's foreground,
@@ -39,18 +43,30 @@ namespace Ghul.Cli.Repl is
             PALETTE(_table([
                 -1, 0x0000FF, 0xAF00DB, 0x0000FF, 0x0000FF, 0x267F99, 0x001080,
                 0xA31515, 0xEE0000, 0x008000, 0x098658, -1, -1
-            ]), depth)
+            ]), depth, 0xCD3131, 0xBF8803)
 
         dark(depth: ColourDepth) -> PALETTE static =>
             PALETTE(_table([
                 -1, 0x569CD6, 0xC586C0, 0x569CD6, 0x569CD6, 0x4EC9B0, 0x9CDCFE,
                 0xCE9178, 0xD7BA7D, 0x6A9955, 0xB5CEA8, -1, -1
-            ]), depth)
+            ]), depth, 0xF14C4C, 0xCCA700)
 
         _table(colours: int[]) -> LIST[int] static => LIST[int](colours)
 
         colour(kind: TokenKind) -> int =>
             _colours[cast int(kind)]
+
+        // `text` in the colour for a diagnostic of `severity`: VS Code's
+        // error and warning colours, and the foreground for anything else.
+        severity(severity: string, text: string) -> string is
+            let colour = if severity =~ "error" then _error elif severity =~ "warn" then _warning else -1 fi
+
+            if colour < 0 then
+                return text
+            fi
+
+            return "{COLOUR_CODES.foreground(colour, _depth)}{text}{COLOUR_CODES.RESET}"
+        si
 
         // Text with the runs the lexer found in it coloured. Text outside
         // any run keeps the terminal's foreground.

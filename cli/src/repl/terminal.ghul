@@ -199,6 +199,9 @@ namespace Ghul.Cli.Repl is
         _display: CELL_DISPLAY
         _current: HOSTED_SESSION?
 
+        // What code and diagnostics are coloured with at a terminal.
+        _colours: PALETTE?
+
         // At a terminal the whole cell is edited in place; anything else
         // is read a line at a time and judged by CELL_INPUT as it comes.
         _editor: CELL_EDITOR?
@@ -226,7 +229,8 @@ namespace Ghul.Cli.Repl is
                         Ghul.Repl.Host.CHECK_ANSWER(Completeness.COMPLETE, null)
                     fi
 
-                _editor = CELL_EDITOR((text, line, column) => _names(text, line, column), _palette(), CELL_END(check_ending))
+                _colours = _palette()
+                _editor = CELL_EDITOR((text, line, column) => _names(text, line, column), _colours, CELL_END(check_ending))
             fi
         si
 
@@ -296,7 +300,9 @@ namespace Ghul.Cli.Repl is
                     continue
                 fi
 
-                _report(session.submit(read.source), read.step == CellStep.SUBMIT)
+                let number = session.next_cell_number
+
+                _report(session.submit(read.source), read.step == CellStep.SUBMIT, number, read.source)
             od
 
             session.close()
@@ -370,7 +376,7 @@ namespace Ghul.Cli.Repl is
                     return
                 fi
 
-                _report(result, true)
+                _report(result, true, new_number, cell.source)
 
                 if is_from /\ (!result.is_accepted \/ result.was_interrupted \/ result.run_error?) then
                     Std.write_line("ghul: stopped at cell {new_number}, the rerun of cell {cell.number}; later cells were not rerun")
@@ -454,8 +460,8 @@ namespace Ghul.Cli.Repl is
             _current?.close()
         si
 
-        _report(result: SUBMIT_RESULT, want_value: bool) is
-            for line in result.diagnostics do
+        _report(result: SUBMIT_RESULT, want_value: bool, number: int, source: string) is
+            for line in DIAGNOSTIC_VIEW.lines(result.diagnostics, "cell-{number}", source, if Std.is_error_redirected then null else _colours fi) do
                 Std.error.write_line(line)
             od
 

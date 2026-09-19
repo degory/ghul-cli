@@ -1,0 +1,74 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+
+    use Ghul.Cli.Repl.DIAGNOSTIC_VIEW
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    @TestClass()
+    class DIAGNOSTIC_VIEW_TESTS is
+        init() is si
+
+        _lines(diagnostics: string[], source: string) -> LIST[string] =>
+            DIAGNOSTIC_VIEW.lines(LIST[string](diagnostics), "cell-4", source, null)
+
+        @Test()
+        lines__show_the_line_pointed_at_with_carets_under_the_range() is
+            let lines = _lines(["cell-4: 2,5..2,8: error: symbol not found: bad"], "let a = 1\nlet bad = a\n")
+
+            assert lines.count == 3;
+            assert lines[0] =~ "cell-4: 2,5..2,8: error: symbol not found: bad";
+            assert lines[1] =~ " 2 | let bad = a";
+            assert lines[2] =~ "   |     ^^^";
+        si
+
+        @Test()
+        lines__put_a_repeat_on_the_same_line_under_the_first() is
+            let lines = _lines([
+                "cell-4: 1,9..1,11: error: symbol not found: xy",
+                "cell-4: 1,14..1,16: error: symbol not found: xy"
+            ], "let z = xy + xy")
+
+            assert lines.count == 3;
+            assert lines[2] =~ "   |         ^^   ^^";
+        si
+
+        @Test()
+        lines__show_a_diagnostic_repeated_word_for_word_once() is
+            let text = "cell-4: 1,1..1,2: warn: [slug] odd"
+            let lines = _lines([text, text], "x")
+
+            assert lines.count == 3;
+        si
+
+        @Test()
+        lines__keep_different_messages_apart() is
+            let lines = _lines([
+                "cell-4: 1,1..1,2: error: one",
+                "cell-4: 1,3..1,4: error: two"
+            ], "a b")
+
+            assert lines.count == 6;
+        si
+
+        @Test()
+        lines__show_no_excerpt_for_another_file_or_no_location() is
+            let lines = _lines([
+                "cell-3: 1,1..1,2: error: elsewhere",
+                "ghul: dropped an import"
+            ], "x")
+
+            assert lines.count == 2;
+            assert lines[1] =~ "ghul: dropped an import";
+        si
+
+        @Test()
+        lines__cut_a_range_over_several_lines_at_the_end_of_the_first() is
+            let lines = _lines(["cell-4: 1,5..3,2: error: long"], "let x = (\n1,\n2)")
+
+            assert lines[1] =~ " 1 | let x = (";
+            assert lines[2] =~ "   |     ^^^^^";
+        si
+    si
+si
