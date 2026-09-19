@@ -1,0 +1,85 @@
+namespace Ghul.Cli.Repl is
+    use Collections.LIST
+    use Ghul.Repl.Host.CELL_RECORD
+    use Ghul.Repl.Host.CellStatus
+
+    // What `:cells` shows: the cells submitted so far, or one of them.
+    class CELL_LISTING is
+        init() is si
+
+        // The newest `limit` cells, oldest first: each one's number, how
+        // it ended, its first line, and how many lines it has when it has
+        // more than one.
+        summary(cells: Collections.List[CELL_RECORD], limit: int) -> LIST[string] static is
+            let lines = LIST[string]()
+
+            if cells.count == 0 then
+                lines.add("no cells yet")
+
+                return lines
+            fi
+
+            let first = System.Math.max(0, cells.count - limit)
+
+            if first > 0 then
+                lines.add("{first} earlier cells not shown")
+            fi
+
+            let width = "{cells[cells.count - 1].number}".length
+
+            for i in first..cells.count do
+                let cell = cells[i]
+                let source_lines = _lines_of(cell.source)
+                let more = if source_lines.count > 1 then "  ({source_lines.count} lines)" else "" fi
+
+                lines.add("{"{cell.number}".pad_left(width)}  {status_name(cell.status).pad_right(11)} {source_lines[0].trim_end()}{more}")
+            od
+
+            return lines
+        si
+
+        // The whole of the cell numbered `number`, under a line saying how
+        // it ended.
+        cell(cells: Collections.List[CELL_RECORD], number: string) -> LIST[string] static is
+            let lines = LIST[string]()
+            let wanted mut = 0
+
+            if !int.try_parse(number, wanted ref) then
+                lines.add("usage: :cells N")
+
+                return lines
+            fi
+
+            for cell in cells do
+                if cell.number == wanted then
+                    lines.add("cell {cell.number}: {status_name(cell.status)}")
+                    lines.add_range(_lines_of(cell.source))
+
+                    return lines
+                fi
+            od
+
+            lines.add("no cell {wanted}")
+
+            return lines
+        si
+
+        status_name(status: CellStatus) -> string static =>
+            case status
+            when CellStatus.OK then "ok"
+            when CellStatus.FAILED then "failed"
+            when CellStatus.THREW then "threw"
+            when CellStatus.INTERRUPTED then "interrupted"
+            esac
+
+        _lines_of(source: string) -> LIST[string] static is
+            let lines = LIST[string](source.trim_end(['\n']).split(['\n']))
+
+            if lines.count == 0 then
+                lines.add("")
+            fi
+
+            return lines
+        si
+    si
+si

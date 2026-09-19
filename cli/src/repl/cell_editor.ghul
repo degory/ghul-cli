@@ -36,6 +36,8 @@ namespace Ghul.Cli.Repl is
         _top: int
 
         init(..) is
+            _prompt = "> "
+            _continuation = "| "
             _history = LINE_HISTORY(HISTORY_STORE(HISTORY_STORE.default_path(), 1000))
             _buffer = CELL_BUFFER()
 
@@ -52,6 +54,20 @@ namespace Ghul.Cli.Repl is
         si
 
         // The next cell, or null when the input has ended.
+        // The prompt for a cell's first line, and for the lines after it,
+        // aligned so the code starts in the same column on both.
+        _prompt: string
+        _continuation: string
+
+        // The next cell, numbered `number` at its prompt, or null when the
+        // input has ended.
+        read_cell(number: int) -> CELL_READ? is
+            _prompt = "{number}> "
+            _continuation = "{string(' ', _prompt.length - 2)}| "
+
+            return read_cell()
+        si
+
         read_cell() -> CELL_READ? is
             // Ctrl-C is read as a key while a cell is edited, rather than
             // ending the process.
@@ -252,7 +268,7 @@ namespace Ghul.Cli.Repl is
         _draw() is
             let lines = _buffer.lines
             let width = _width
-            let layout = CELL_LAYOUT(width, 2)
+            let layout = CELL_LAYOUT(width, _prompt.length)
 
             _top = layout.top(lines, _buffer.row, _top, _height - 1)
 
@@ -279,7 +295,7 @@ namespace Ghul.Cli.Repl is
                     output.append("\r\n")
                 fi
 
-                output.append(if i == 0 then "> " else "| " fi)
+                output.append(if i == 0 then _prompt else _continuation fi)
                 output.append(_painted(lines[i], context))
 
                 context.add(lines[i])

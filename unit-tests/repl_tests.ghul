@@ -49,6 +49,31 @@ namespace Ghul.Cli.Tests is
             assert session.prepare("let y = 2\n").name =~ "cell2";
         si
 
+        // A cell that fails to compile still takes its number, so the next
+        // one is numbered after it: the numbers count what was submitted.
+        @Test()
+        accept__spends_the_number_of_a_cell_that_failed() is
+            let session = SESSION(false)
+            let failed = session.prepare("let = \n")
+
+            assert session.next_index == 1;
+
+            session.accept(failed, CELL_REPLY(LIST[string](["cell1.ghul: 1,5..1,6: error: expected identifier"]), null));
+
+            assert session.next_index == 2;
+            assert session.prepare("let y = 2\n").name =~ "cell2";
+        si
+
+        // Preparing the same submission again before it is accepted keeps
+        // its number.
+        @Test()
+        prepare__twice_before_accepting_keeps_the_number() is
+            let session = SESSION(false)
+
+            assert session.prepare("let x = 1\n").index == 1;
+            assert session.prepare("let x = 1\n").index == 1;
+        si
+
         @Test()
         prelude__imports_every_name_an_accepted_cell_exported() is
             let session = SESSION(false)

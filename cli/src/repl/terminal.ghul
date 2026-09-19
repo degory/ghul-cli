@@ -264,7 +264,11 @@ namespace Ghul.Cli.Repl is
                     when ":help" then
                         _write_help()
                     else
-                        if command.starts_with(":complete ") then
+                        if command =~ ":cells" then
+                            _write_lines(CELL_LISTING.summary(session.submissions, 20))
+                        elif command.starts_with(":cells ") then
+                            _write_lines(CELL_LISTING.cell(session.submissions, command.substring(":cells ".length).trim()))
+                        elif command.starts_with(":complete ") then
                             _complete(session, command.substring(":complete ".length))
                         elif command.starts_with(":hover ") then
                             _hover(session, command.substring(":hover ".length))
@@ -289,10 +293,16 @@ namespace Ghul.Cli.Repl is
             return 0
         si
 
+        _write_lines(lines: Collections.Iterable[string]) is
+            for line in lines do
+                Std.write_line(line)
+            od
+        si
+
         // The next cell, or null when the input has ended.
         _read() -> CELL_READ? is
             if let editor = _editor then
-                return editor.read_cell()
+                return editor.read_cell(_current?.next_cell_number ?? 1)
             fi
 
             do
@@ -421,6 +431,8 @@ namespace Ghul.Cli.Repl is
         _write_help() is
             Std.write_line(":help            this list")
             Std.write_line(":reset           start a new session, forgetting every cell")
+            Std.write_line(":cells           the cells so far: number, how each ended, its first line")
+            Std.write_line(":cells N         the whole of cell N")
             Std.write_line(":complete TEXT   what could follow TEXT")
             Std.write_line(":hover TEXT      what the end of TEXT names")
             Std.write_line(":quit            leave")
