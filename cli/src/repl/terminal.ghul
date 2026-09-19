@@ -230,7 +230,11 @@ namespace Ghul.Cli.Repl is
                     fi
 
                 _colours = _palette()
-                _editor = CELL_EDITOR((text, line, column) => _names(text, line, column), _colours, CELL_END(check_ending))
+                _editor = CELL_EDITOR(
+                    (text, line, column) => _names(text, line, column),
+                    (text, line, column) => _current?.hover(text, line, column),
+                    _colours,
+                    CELL_END(check_ending))
             fi
         si
 
@@ -646,7 +650,8 @@ namespace Ghul.Cli.Repl is
             Std.write_line("empty submission leaves")
             Std.write_line("Ctrl-Left and Ctrl-Right (or Alt-B and Alt-F) move by a word; Ctrl-U and")
             Std.write_line("Ctrl-K delete to the start or end of the line, Ctrl-W the word before the")
-            Std.write_line("cursor; Ctrl-L clears the screen; Tab completes, listing the names on offer")
+            Std.write_line("cursor; Ctrl-L clears the screen; Tab completes, listing the names on offer;")
+            Std.write_line("Shift-Tab shows what the name at the cursor is")
             Std.write_line("Ctrl-C while a submission runs interrupts it; the session carries on")
             Std.write_line("what you end on is shown, unless you end on a statement or with a blank line")
             Std.write_line("messages call a cell cell-3; in code it is cell3, as in cell3.x")

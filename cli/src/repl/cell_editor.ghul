@@ -17,10 +17,12 @@ namespace Ghul.Cli.Repl is
     // end of a line, Ctrl-Left and Ctrl-Right (or Alt-B and Alt-F) move by
     // a word, Ctrl-U and Ctrl-K delete to either end of the line, Ctrl-W
     // deletes the word before the cursor, Ctrl-L clears the screen, Tab
-    // completes, a paste is taken as it is, and Ctrl-D in an empty cell
-    // ends the input. Ctrl-C does nothing here.
+    // completes, Shift-Tab shows what the name at the cursor is, a paste
+    // is taken as it is, and Ctrl-D in an empty cell ends the input.
+    // Ctrl-C does nothing here.
     class CELL_EDITOR(
         _complete: (string, int, int) -> Collections.List[string]?,
+        _hover: (string, int, int) -> string?,
         _palette: PALETTE?,
         _end: CELL_END
     ) is
@@ -219,7 +221,11 @@ namespace Ghul.Cli.Repl is
                         fi
                     fi
                 when System.ConsoleKey.TAB then
-                    _complete_at()
+                    if (modifiers & System.ConsoleModifiers.SHIFT) == System.ConsoleModifiers.SHIFT then
+                        _hover_at()
+                    else
+                        _complete_at()
+                    fi
                 else
                     if is_control /\ key.key == System.ConsoleKey.A then
                         _buffer.home()
@@ -297,20 +303,39 @@ namespace Ghul.Cli.Repl is
             fi
 
             if offered.count > 1 then
-                let row = _buffer.row
-                let column = _buffer.column
-
-                _buffer.to_end()
-                _draw()
-                Std.write("\r\n")
-
-                for line in COMPLETION_QUERY.columns(offered, _width, 6) do
-                    Std.write_line(line)
-                od
-
-                _buffer.move_to(row, column)
-                _cursor_screen_row = 0
+                _show_below(COMPLETION_QUERY.columns(offered, _width, 6))
             fi
+        si
+
+        // What the name at the cursor is, shown below the cell.
+        _hover_at() is
+            let column = _buffer.hover_column
+
+            if column < 1 then
+                return
+            fi
+
+            if let shown = _hover(_buffer.text, _buffer.row + 1, column) then
+                _show_below(LIST[string]([shown]))
+            fi
+        si
+
+        // Lines written below the cell, leaving the cursor where it was
+        // for the redraw that follows to draw the cell again under them.
+        _show_below(lines: Collections.List[string]) is
+            let row = _buffer.row
+            let column = _buffer.column
+
+            _buffer.to_end()
+            _draw()
+            Std.write("\r\n")
+
+            for line in lines do
+                Std.write_line(line)
+            od
+
+            _buffer.move_to(row, column)
+            _cursor_screen_row = 0
         si
 
         // The cell drawn with the cursor at its end, then a line break, so
