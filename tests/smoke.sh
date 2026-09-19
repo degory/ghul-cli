@@ -339,6 +339,42 @@ if [[ "$repl_values_out" == *"held"* ]]; then
     exit 1
 fi
 
+echo "smoke: 'ghul repl' keeps going after cells whose compiled form holds generated names..." >&2
+repl_generated_in="$scratch/repl-generated-in.txt"
+cat > "$repl_generated_in" <<'REPL'
+let up = ["ann"] |> map(n => n.to_upper()) |> collect_list()
+
+count_async() -> Tasks.TASK[int] is
+    await Tasks.TASK.delay(1)
+    return 7
+si
+
+struct V(x: int)
+
++(a: V, b: V) -> V => V(a.x + b.x)
+
+union Tree is LEAF(value: int); NODE(left: Tree, right: Tree); si
+
+total(t: Tree) -> int => case t when l: Tree.LEAF then l.value when n: Tree.NODE then total(n.left) + total(n.right) esac
+
+"after {count_async().result} {(V(1) + V(2)).x} {total(Tree.NODE(Tree.LEAF(2), Tree.LEAF(3)))} {up[0]}"
+
+:quit
+REPL
+repl_generated_out="$(dotnet "$cli" repl < "$repl_generated_in" 2>"$scratch/repl-generated.err")" || {
+    echo "smoke: ghul repl exited non-zero:" >&2
+    cat "$scratch/repl-generated.err" >&2
+    exit 1
+}
+# A lambda, an async function, an operator and a union each compile to names
+# no later cell may import; the last cell uses what each defined.
+if [[ "$repl_generated_out" != *"after 7 3 5 ANN"* ]]; then
+    echo "smoke: expected the repl to show 'after 7 3 5 ANN', got:" >&2
+    echo "$repl_generated_out" >&2
+    cat "$scratch/repl-generated.err" >&2
+    exit 1
+fi
+
 echo "smoke: 'ghul repl' extends a class declared in an earlier submission..." >&2
 repl_extend_in="$scratch/repl-extend-in.txt"
 cat > "$repl_extend_in" <<'REPL'

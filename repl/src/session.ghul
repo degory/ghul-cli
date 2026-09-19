@@ -218,7 +218,7 @@ namespace Ghul.Repl is
                 _carry_imports(_user_text(request))
 
                 for name in loaded.exports do
-                    _bindings[name] = "use {cell.name}.{name}"
+                    _bindings[name] = import_of(cell.name, name)
                 od
 
                 return SUBMIT_OUTCOME(true, diagnostics, cell)
@@ -249,6 +249,57 @@ namespace Ghul.Repl is
             spans[file] = CELL_SPAN(request.index, request.prelude_line_count)
 
             return DIAGNOSTIC_LINES.for_display(diagnostic, spans)
+        si
+
+        // A generated import names what it imports escaped, so an
+        // operator or a name that is also a keyword reads as a name.
+        import_of(cell_name: string, name: string) -> string static => "use {cell_name}.`{name}"
+
+        // Drops each generated import that a failed compile of the
+        // request reports an error in, so a name that cannot be imported
+        // costs the session that one name rather than every later cell.
+        // Returns what was dropped; a caller that gets anything back
+        // prepares the cell again.
+        drop_failed_imports(
+            request: CELL_REQUEST,
+            diagnostics: Collections.List[CELL_DIAGNOSTIC]
+        ) -> Collections.List[string] is
+            let lines = request.source.split(['\n'])
+            let dropped = LIST[string]()
+
+            for diagnostic in diagnostics do
+                let location = diagnostic.location
+
+                if
+                    location? /\ diagnostic.severity =~ "error" /\
+                    (IO.Path.get_file_name_without_extension(location.path) ?? "") =~ request.name /\
+                    location.start_line >= 1 /\ location.start_line <= request.prelude_line_count
+                then
+                    let directive = lines[location.start_line - 1].trim()
+
+                    if !dropped.contains(directive) /\ _drop_import(directive) then
+                        dropped.add(directive)
+                    fi
+                fi
+            od
+
+            return dropped
+        si
+
+        _drop_import(directive: string) -> bool is
+            let names = LIST[string]()
+
+            for entry in _bindings do
+                if entry.value =~ directive then
+                    names.add(entry.key)
+                fi
+            od
+
+            for name in names do
+                _bindings.remove(name)
+            od
+
+            return _wildcards.remove(directive) \/ names.count > 0
         si
 
         _carry_imports(source: string) is

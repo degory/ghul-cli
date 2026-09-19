@@ -19,23 +19,34 @@ namespace Ghul.Repl is
     // browser page loads bytes it was sent into a context it shares with
     // the earlier cells, and neither wants the other's answer.
     class CELL_EXPORTS is
-        // Everything public and static on the namespace's globals type,
-        // less the two entry points a host calls itself, plus every
-        // public type in the namespace. The spelling is already ghūl's,
-        // so a name goes into a generated `use` as it is read here.
+        // What a user could have written and a later cell can import: the
+        // public static functions, variables and properties on the
+        // namespace's globals type, less the two entry points a host
+        // calls itself, plus the public types declared directly in the
+        // namespace. A union's variants sit in a namespace of their own
+        // and are reached through the union, and anything the compiler
+        // generated - closures, caches, state machines, backing fields,
+        // accessors - is left out. The spelling is already ghūl's.
         read(assembly: Assembly) -> LOADED_CELL static is
             let exports = LIST[string]()
 
+            let types = assembly.get_types()
             let globals: System.Type? mut = null
 
-            for type in assembly.get_types() do
-                if !type.is_public then
-                    continue
-                fi
-
-                if type.name =~ GLOBALS_TYPE_NAME then
+            for type in types do
+                if type.is_public /\ type.name =~ GLOBALS_TYPE_NAME then
                     globals = type
-                else
+                fi
+            od
+
+            let cell_namespace = globals?.`namespace
+
+            for type in types do
+                if
+                    type.is_public /\ !(type.name =~ GLOBALS_TYPE_NAME) /\
+                    (!cell_namespace? \/ type.`namespace =~ cell_namespace) /\ !_is_variant(type) /\
+                    is_user_name(type.name)
+                then
                     exports.add(type.name)
                 fi
             od
@@ -44,15 +55,17 @@ namespace Ghul.Repl is
                 let flags = static_flags(false)
 
                 for method in globals_type.get_methods(flags) do
-                    if !_is_entry_point_name(method.name) /\ !exports.contains(method.name) then
-                        exports.add(method.name)
+                    if !method.is_special_name /\ !_is_entry_point_name(method.name) then
+                        _add_once(exports, method.name)
                     fi
                 od
 
                 for member in globals_type.get_fields(flags) do
-                    if !exports.contains(member.name) then
-                        exports.add(member.name)
-                    fi
+                    _add_once(exports, member.name)
+                od
+
+                for property in globals_type.get_properties(flags) do
+                    _add_once(exports, property.name)
                 od
             fi
 
@@ -73,6 +86,20 @@ namespace Ghul.Repl is
 
         _is_entry_point_name(name: string) -> bool static =>
             name =~ MAIN_ENTRY_NAME \/ name =~ USER_ENTRY_NAME
+
+        // A name the compiler did not make up. Everything it generates
+        // carries a `$`, which no ghūl identifier can.
+        is_user_name(name: string) -> bool static => name.length > 0 /\ !name.contains('$')
+
+        _add_once(exports: LIST[string], name: string) static is
+            if is_user_name(name) /\ !exports.contains(name) then
+                exports.add(name)
+            fi
+        si
+
+        // A union variant, marked as one in the assembly's metadata.
+        _is_variant(type: System.Type) -> bool static =>
+            type.get_custom_attributes(false) |> Ghul.Pipes.any(a => a.get_type().full_name =~ VARIANT_ATTRIBUTE_NAME)
     si
 
     // Invoking a cell once it is part of the session. A cell that throws
@@ -227,6 +254,8 @@ namespace Ghul.Repl is
     si
 
     GLOBALS_TYPE_NAME: string => "$globals"
+
+    VARIANT_ATTRIBUTE_NAME: string => "Ghul.Internal.VARIANT_ATTRIBUTE"
     MAIN_ENTRY_NAME: string => "_entry"
     USER_ENTRY_NAME: string => "entry"
 

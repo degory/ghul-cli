@@ -55,7 +55,7 @@ namespace Ghul.Cli.Tests is
 
             _accept(session, "let x = 1\n", LIST[string](["x", "inc"]));
 
-            assert session.prelude() =~ "use cell1.inc\nuse cell1.x\n";
+            assert session.prelude() =~ "use cell1.`inc\nuse cell1.`x\n";
         si
 
         // The newest definer wins, which is what makes a redefinition
@@ -67,7 +67,7 @@ namespace Ghul.Cli.Tests is
             _accept(session, "let x = 1\n", LIST[string](["x", "inc"]));
             _accept(session, "let x = 2\n", LIST[string](["x"]));
 
-            assert session.prelude() =~ "use cell1.inc\nuse cell2.x\n";
+            assert session.prelude() =~ "use cell1.`inc\nuse cell2.`x\n";
         si
 
         @Test()
@@ -76,7 +76,7 @@ namespace Ghul.Cli.Tests is
 
             _accept(session, "let x = 1\n", LIST[string](["x"]));
 
-            assert session.prepare("write_line(x)\n").source =~ "use cell1.x\nwrite_line(x)\n";
+            assert session.prepare("write_line(x)\n").source =~ "use cell1.`x\nwrite_line(x)\n";
         si
 
         // How far the diagnostics have to move back to name the lines
