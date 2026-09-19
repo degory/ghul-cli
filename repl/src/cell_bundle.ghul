@@ -1,0 +1,195 @@
+namespace Ghul.Repl is
+    use Collections.LIST
+
+    // The MIME bundle a notebook shows for a value: text/plain always,
+    // and exactly what CELL_DISPLAY writes, so a front end that renders
+    // nothing else shows what the terminal shows; text/html beside it
+    // where a table says more than a line does.
+    //
+    // No text/markdown: every Jupyter front end renders text/html, so a
+    // markdown alternative would restate the table in a form no front
+    // end would reach for.
+    class CELL_BUNDLE is
+        _display: CELL_DISPLAY
+
+        init() is
+            _display = CELL_DISPLAY()
+        si
+
+        // How many rows a table is worth before it says how many more
+        // there are.
+        _ROWS: int static => 20
+
+        // Null where there is nothing to show, as CELL_DISPLAY.format
+        // answers null.
+        of(value: object?) -> LIST[(mime: string, payload: string)]? is
+            let plain = _display.format(value)
+
+            if !plain? then
+                return null
+            fi
+
+            let parts = LIST[(mime: string, payload: string)]()
+
+            parts.add((mime = "text/plain", payload = plain))
+
+            if let html = table(value) then
+                parts.add((mime = "text/html", payload = html))
+            fi
+
+            return parts
+        si
+
+        // A table, where the value is a sequence of things that share a
+        // shape: a row each, and a column for each name that shape gives
+        // its parts. A sequence of scalars has one unnamed column, which
+        // is still worth a table - it is what makes a long list readable.
+        // A string is text rather than a sequence of characters, and gets
+        // no table.
+        table(value: object?) -> string? is
+            if !value? \/ isa string(value) then
+                return null
+            fi
+
+            let found = CELL_DISPLAY.elements(value, _ROWS)
+
+            if !found? \/ found.items.count == 0 then
+                return null
+            fi
+
+            let rows = LIST[CELL_BUNDLE_ROW]()
+
+            for item in found.items do
+                rows.add(_row(item))
+            od
+
+            let columns = _columns(rows)
+            let html = System.Text.StringBuilder()
+
+            html.append("<table>")
+
+            if let names = columns then
+                html.append("<thead><tr>")
+
+                for name in names do
+                    html.append("<th>{_escape(name)}</th>")
+                od
+
+                html.append("</tr></thead>")
+            fi
+
+            html.append("<tbody>")
+
+            for row in rows do
+                html.append("<tr>")
+
+                if columns? then
+                    for cell in row.cells do
+                        html.append("<td>{_escape(cell)}</td>")
+                    od
+                else
+                    html.append("<td>{_escape(row.text)}</td>")
+                fi
+
+                html.append("</tr>")
+            od
+
+            if found.extra > 0 then
+                let span = if let names = columns then names.count else 1 fi
+
+                html.append("<tr><td colspan=\"{span}\">and {found.extra} more</td></tr>")
+            fi
+
+            html.append("</tbody></table>")
+
+            return html.to_string()
+        si
+
+        // The column names, where every row has the same names in the
+        // same order. A row whose names differ is part of a sequence of
+        // unlike things, and a table of it would line up parts that are
+        // not the same part, so each row is then shown whole instead.
+        _columns(rows: Collections.List[CELL_BUNDLE_ROW]) -> Collections.List[string]? is
+            let first = rows[0].names
+
+            if !first? then
+                return null
+            fi
+
+            for row in rows do
+                let names = row.names
+
+                if !names? \/ names.count != first.count then
+                    return null
+                fi
+
+                for i in 0..names.count do
+                    if names[i] !~ first[i] then
+                        return null
+                    fi
+                od
+            od
+
+            return first
+        si
+
+        // One element, as the parts of a row: a tuple's elements, a map
+        // entry's key and value, an object's readable members; or the
+        // element whole where it has no parts to spread out.
+        _row(element: object?) -> CELL_BUNDLE_ROW is
+            let text = _display.cell_text(element)
+
+            if !element? then
+                return CELL_BUNDLE_ROW(null, LIST[string](), text)
+            fi
+
+            let type = element.get_type()
+
+            if type.is_generic_type /\ type.get_generic_type_definition() == typeof(Collections.KeyValuePair[_, _]) then
+                let cells = LIST[string]()
+
+                cells.add(_display.cell_text(type.get_property("Key")?.get_value(element)))
+                cells.add(_display.cell_text(type.get_property("Value")?.get_value(element)))
+
+                return CELL_BUNDLE_ROW(LIST[string](["key", "value"]), cells, text)
+            fi
+
+            if let tuple = cast System.Runtime.CompilerServices.ITuple?(element) then
+                let names = LIST[string]()
+                let cells = LIST[string]()
+
+                // .NET keeps a tuple's element names on the declaration
+                // rather than on the value, so a tuple has only its
+                // positions here, which a ghūl program names this way.
+                for i in 0..tuple.length do
+                    names.add("`{i}")
+                    cells.add(_display.cell_text(tuple[i]))
+                od
+
+                return CELL_BUNDLE_ROW(names, cells, text)
+            fi
+
+            if let found = CELL_DISPLAY.parts(element) /\ found.names.count > 0 then
+                let cells = LIST[string]()
+
+                for part in found.values do
+                    cells.add(_display.cell_text(part))
+                od
+
+                return CELL_BUNDLE_ROW(found.names, cells, text)
+            fi
+
+            return CELL_BUNDLE_ROW(null, LIST[string](), text)
+        si
+
+        _escape(text: string) -> string static =>
+            text
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+    si
+
+    // One element of a sequence in a table: its parts by name where it
+    // has them, and the element's own text for when it is shown whole.
+    class CELL_BUNDLE_ROW(names: Collections.List[string]?, cells: Collections.List[string], text: string);
+si

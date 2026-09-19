@@ -70,12 +70,24 @@ namespace Ghul.Jupyter is
             return JSON.object(members)
         si
 
-        execute_result(text: string, execution_count: int) -> string static is
+        // The value a cell ended on, as each representation of it the
+        // bundle holds, keyed by MIME type.
+        execute_result(bundle: Collections.List[(mime: string, payload: string)], execution_count: int) -> string static is
             let members = LIST[(name: string, value: string)]()
 
             members.add((name = "execution_count", value = "{execution_count}"))
-            members.add((name = "data", value = _one("text/plain", JSON.quote(text))))
+            members.add((name = "data", value = data(bundle)))
             members.add((name = "metadata", value = JSON.EMPTY_OBJECT))
+
+            return JSON.object(members)
+        si
+
+        data(bundle: Collections.List[(mime: string, payload: string)]) -> string static is
+            let members = LIST[(name: string, value: string)]()
+
+            for part in bundle do
+                members.add((name = part.mime, value = JSON.quote(part.payload)))
+            od
 
             return JSON.object(members)
         si

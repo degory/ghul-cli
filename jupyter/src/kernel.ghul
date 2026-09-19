@@ -1,6 +1,6 @@
 namespace Ghul.Jupyter is
     use Collections.LIST
-    use Ghul.Repl.CELL_DISPLAY
+    use Ghul.Repl.CELL_BUNDLE
     use Ghul.Repl.Host.Completeness
     use Ghul.Repl.Host.COMPLETENESS_CHECK
     use Ghul.Repl.Host.HOSTED_SESSION
@@ -18,7 +18,7 @@ namespace Ghul.Jupyter is
         _compiler_complaint: string?
     ) is
         _messages: MESSAGES
-        _display: CELL_DISPLAY
+        _bundle: CELL_BUNDLE
         _signer: SIGNER
         _execution_count: int
         _is_running: bool
@@ -36,7 +36,7 @@ namespace Ghul.Jupyter is
 
         init(..) is
             _messages = MESSAGES("{System.Guid.new_guid()}")
-            _display = CELL_DISPLAY()
+            _bundle = CELL_BUNDLE()
             _signer = SIGNER(_connection.key)
             _execution_count = 0
             _is_running = true
@@ -290,8 +290,8 @@ namespace Ghul.Jupyter is
                 return
             fi
 
-            if let shown = _display.format(result.value) /\ !silent then
-                _publish(request, "execute_result", CONTENT.execute_result(shown, _execution_count))
+            if let bundle = _bundle.of(result.value) /\ !silent then
+                _publish(request, "execute_result", CONTENT.execute_result(bundle, _execution_count))
             fi
 
             channel.send(

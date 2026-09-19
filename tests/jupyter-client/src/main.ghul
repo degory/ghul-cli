@@ -215,6 +215,18 @@ namespace Ghul.Jupyter.Tests is
         _execute(client, "add(n: int) -> int => n + 1\n", null)
         _execute(client, "add(x)\n", "42")
 
+        Std.write_line("a cell ending on a sequence of tuples:")
+
+        let table = _execute_raw(client, "[(1, \"one\"), (2, \"two\")]\n")
+
+        client.check(
+            _result_text(table.published) =~ "[(1, \"one\"), (2, \"two\")]",
+            "its execute_result carries the line the terminal shows as text/plain")
+
+        client.check(
+            _result_html(table.published).contains("<th>`0</th><th>`1</th>"),
+            "and a table beside it as text/html")
+
         Std.write_line("a cell that does not compile:")
 
         let broken = _execute_raw(client, "let y: int = \"not an int\"\n")
@@ -472,6 +484,24 @@ namespace Ghul.Jupyter.Tests is
         for message in published do
             if message.msg_type =~ "execute_result" then
                 return _plain_text(message.content)
+            fi
+        od
+
+        return ""
+    si
+
+    _result_html(published: Collections.List[MESSAGE]) -> string is
+        for message in published do
+            if message.msg_type =~ "execute_result" then
+                let document = System.Text.Json.JsonDocument.parse(message.content, _)
+                let data: System.Text.Json.JsonElement mut
+                let html: System.Text.Json.JsonElement mut
+
+                if document.root_element.try_get_property("data", data ref) /\
+                    data.try_get_property("text/html", html ref)
+                then
+                    return html.get_string() ?? ""
+                fi
             fi
         od
 

@@ -1,0 +1,114 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+    use Collections.MAP
+
+    use Ghul.Repl.CELL_BUNDLE
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    // A record with no text of its own, as a cell defines one.
+    class BUNDLE_POINT(x: int, y: int);
+
+    @TestClass()
+    class CELL_BUNDLE_TESTS is
+        init() is si
+
+        _mimes(value: object?) -> LIST[string] is
+            let result = LIST[string]()
+
+            if let bundle = CELL_BUNDLE().of(value) then
+                for part in bundle do
+                    result.add(part.mime)
+                od
+            fi
+
+            return result
+        si
+
+        _table(value: object?) -> string => CELL_BUNDLE().table(value) ?? ""
+
+        @Test()
+        of__starts_with_the_line_the_terminal_shows() is
+            let bundle = CELL_BUNDLE().of(cast object(LIST[int]([1, 2])))!
+
+            assert bundle[0].mime =~ "text/plain";
+            assert bundle[0].payload =~ "[1, 2]";
+        si
+
+        @Test()
+        of__a_scalar_or_a_string_has_no_table() is
+            let number = _mimes(cast object(41))
+            let text = _mimes(cast object("hello"))
+
+            assert number.count == 1 /\ number[0] =~ "text/plain";
+            assert text.count == 1 /\ text[0] =~ "text/plain";
+        si
+
+        @Test()
+        of__nothing_is_nothing() is
+            assert !CELL_BUNDLE().of(null)?;
+        si
+
+        @Test()
+        table__of_tuples_has_a_column_for_each_element() is
+            let html = _table(cast object(LIST[(int, string)]([(1, "one"), (2, "two")])))
+
+            assert html.contains("<th>`0</th><th>`1</th>");
+            assert html.contains("<tr><td>1</td><td>\"one\"</td></tr>");
+        si
+
+        @Test()
+        table__of_a_map_has_key_and_value_columns() is
+            let map = MAP[string, int]()
+
+            map["a"] = 1
+
+            let html = _table(cast object(map))
+
+            assert html.contains("<th>key</th><th>value</th>");
+            assert html.contains("<td>\"a\"</td><td>1</td>");
+        si
+
+        @Test()
+        table__of_records_has_a_column_for_each_member() is
+            let html = _table(cast object([BUNDLE_POINT(1, 2), BUNDLE_POINT(3, 4)]))
+
+            assert html.contains("<th>x</th><th>y</th>");
+            assert html.contains("<tr><td>3</td><td>4</td></tr>");
+        si
+
+        @Test()
+        table__of_unlike_things_shows_each_whole() is
+            let html = _table(cast object([cast object((1, 2)), cast object((1, 2, 3))]))
+
+            assert !html.contains("<th>");
+            assert html.contains("<tr><td>(1, 2)</td></tr>");
+        si
+
+        @Test()
+        table__says_how_many_more_rows_there_are() is
+            let html = _table(cast object(Ghul.Pipes.from(0) |> Ghul.Pipes.take(25) |> Ghul.Pipes.collect_list()))
+
+            assert html.contains("and 5 more");
+        si
+
+        @Test()
+        data__keys_each_representation_by_its_mime_type() is
+            let bundle = LIST[(mime: string, payload: string)]()
+
+            bundle.add((mime = "text/plain", payload = "a"))
+            bundle.add((mime = "text/html", payload = "<b>"))
+
+            let data = System.Text.Json.JsonDocument.parse(Ghul.Jupyter.CONTENT.data(bundle), _).root_element
+
+            assert data.get_property("text/plain").get_string() =~ "a";
+            assert data.get_property("text/html").get_string() =~ "<b>";
+        si
+
+        @Test()
+        table__escapes_markup() is
+            assert _table(cast object(["<b>"])).contains("&lt;b&gt;");
+        si
+    si
+si
