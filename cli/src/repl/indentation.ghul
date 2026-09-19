@@ -62,6 +62,15 @@ namespace Ghul.Cli.Repl is
                 return true
             fi
 
+            // An arm written on one line, as in `when x then 1`, leaves the
+            // construct open, so the next arm or the closing word steps back
+            // out to the level of this one rather than past it.
+            if (first =~ "if" \/ first =~ "elif" \/ first =~ "else" \/ first =~ "when") /\
+                !_ends_with_word(code, "fi") /\ !_ends_with_word(code, "esac")
+            then
+                return true
+            fi
+
             for opener in _openers do
                 if _ends_with_word(code, opener) then
                     return true
