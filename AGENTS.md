@@ -85,8 +85,12 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
   question. `COMPLETENESS_CHECK` runs
   `ghul-compiler --check-complete` (a spawn per call, a few hundred
   milliseconds) and answers complete, incomplete or invalid.
-- `src/repl/` — the terminal front end. `SUBMISSION_END` submits on any
-  answer but incomplete; a blank line forces submission. The session needs
+- `src/repl/` — the terminal front end. `CELL_INPUT` decides what each
+  line does to the cell being entered: finished text submits unless, at a
+  terminal, it ends on a statement written over several lines, which
+  holds the cell open; a blank line submits (without showing the value
+  after a held construct), and a line holding only `.` submits showing
+  it. The session needs
   `ghul.compiler` `MINIMUM_REPL_COMPILER` or newer, for `--submission`,
   `--check-complete` and `--compile-server`, and refuses to start on
   an older one rather than failing a cell at a time.
