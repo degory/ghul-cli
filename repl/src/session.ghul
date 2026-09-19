@@ -108,6 +108,7 @@ namespace Ghul.Repl is
         si
 
         init(want_default_use: bool) is
+            _next_index = 1
             _cells = LIST[CELL]()
             _spans = Collections.MAP[string, CELL_SPAN]()
             _want_default_use = want_default_use
@@ -181,9 +182,18 @@ namespace Ghul.Repl is
             return "{lines |> Ghul.Pipes.join("\n")}\n"
         si
 
+        // The number the next submission takes. Every submission takes
+        // one, whether or not it compiles, so the numbers a user sees
+        // count what they submitted; a cell that failed leaves its number
+        // unused by any assembly.
+        next_index: int => _next_index
+
+        _next_index: int
+
         // What the next submission needs compiling. Calling this twice
         // without accepting in between describes the same cell twice:
-        // nothing is recorded until the reply comes back.
+        // nothing is recorded, and no number is spent, until the reply
+        // comes back.
         //
         // A partial or impl block for a type an earlier cell declared
         // cannot reopen that cell's compiled type, so the type's own
@@ -191,7 +201,7 @@ namespace Ghul.Repl is
         // this cell ahead of what the user wrote, and the block adds to
         // that. Later cells then see this cell's type.
         prepare(source: string) -> CELL_REQUEST is
-            let index = _cells.count + 1
+            let index = _next_index
             let carried_names = carried_by(source)
             let carried = LIST[string]()
 
@@ -253,6 +263,8 @@ namespace Ghul.Repl is
         // and with its generated prelude subtracted, so what they point
         // at is what the user wrote.
         accept(request: CELL_REQUEST, reply: CELL_REPLY) -> SUBMIT_OUTCOME is
+            _next_index = System.Math.max(_next_index, request.index + 1)
+
             let diagnostics = LIST[string]()
 
             let spans = Collections.MAP[string, CELL_SPAN](_spans)

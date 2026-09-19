@@ -77,12 +77,12 @@ run once it is finished, and what it declares stays available to
 everything you type afterwards:
 
 ```
-> let names mut = LIST[string]()
-| names.add("first")
-> for name in ["second", "third"] do
-|     names.add(name)
-| od
-| names
+1> let names mut = LIST[string]()
+ | names.add("first")
+2> for name in ["second", "third"] do
+ |     names.add(name)
+ | od
+ | names
 [first, second, third]
 ```
 
@@ -91,9 +91,9 @@ and shows the value, so a short program can be written as one submission
 ending on the value it is for:
 
 ```
-> let x = 123
-| let y = 2
-| x * y
+1> let x = 123
+ | let y = 2
+ | x * y
 246
 ```
 
@@ -107,6 +107,14 @@ blank line submits whatever is there, and a line holding only `.` does
 the same. Text that can never be finished is submitted as soon as every
 block it opens is closed, so its errors are reported then.
 
+The prompt shows the number the next submission will take. Every
+submission takes one, including one that does not compile, and it is the
+number messages call it by (`cell-3`) and the one code reaches it through
+(`cell3.x`). A command such as `:cells` takes none. `:cells` lists the
+submissions so far, each with how it ended - `ok`, `failed`, `threw` or
+`interrupted` - and its first line, and `:cells 3` shows the whole of the
+third.
+
 A submission that ends on a value shows it, so `names` above needs no
 `write_line`. A submission that ends on a statement shows nothing, and
 neither does one ended by a blank line after a construct over several
@@ -114,12 +122,12 @@ lines, since such a construct is usually there for what it does. End
 it with `.` instead to see its value:
 
 ```
-> if names.count > 2 then
-|     "several"
-| else
-|     "few"
-| fi
-| .
+3> if names.count > 2 then
+ |     "several"
+ | else
+ |     "few"
+ | fi
+ | .
 several
 ```
 
@@ -150,8 +158,8 @@ submission, so `write_line`, the pipes and the collections need no `use`.
 force for every later submission, the same as a definition does:
 
 ```
-> use IO.Path.combine
-> combine("a", "b")
+1> use IO.Path.combine
+ | combine("a", "b")
 a/b
 ```
 
@@ -194,10 +202,11 @@ says what the end of TEXT names, both taking in everything the session has
 defined so far:
 
 ```
-> let answer = 41
-> :complete ans
+1> let answer = 41
+ |
+2> :complete ans
 answer
-> :hover answer
+2> :hover answer
 answer: int
 ```
 

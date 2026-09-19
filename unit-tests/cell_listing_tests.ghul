@@ -1,0 +1,63 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+
+    use Ghul.Cli.Repl.CELL_LISTING
+    use Ghul.Repl.Host.CELL_RECORD
+    use Ghul.Repl.Host.CellStatus
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    @TestClass()
+    class CELL_LISTING_TESTS is
+        init() is si
+
+        _cells() -> LIST[CELL_RECORD] =>
+            LIST[CELL_RECORD]([
+                CELL_RECORD(1, "let x = 1\n", CellStatus.OK),
+                CELL_RECORD(2, "let y = \n", CellStatus.FAILED),
+                CELL_RECORD(3, "for i in 0..3 do\n    write_line(i)\nod\n", CellStatus.OK),
+                CELL_RECORD(4, "while true do od\n", CellStatus.INTERRUPTED)
+            ])
+
+        @Test()
+        summary__lists_each_cell_with_how_it_ended() is
+            let lines = CELL_LISTING.summary(_cells(), 20)
+
+            assert lines.count == 4;
+            assert lines[0] =~ "1  ok          let x = 1";
+            assert lines[1] =~ "2  failed      let y =";
+            assert lines[2] =~ "3  ok          for i in 0..3 do  (3 lines)";
+            assert lines[3] =~ "4  interrupted while true do od";
+        si
+
+        @Test()
+        summary__shows_the_newest_up_to_the_limit() is
+            let lines = CELL_LISTING.summary(_cells(), 2)
+
+            assert lines.count == 3;
+            assert lines[0] =~ "2 earlier cells not shown";
+            assert lines[1].starts_with("3");
+        si
+
+        @Test()
+        summary__says_when_there_are_none() is
+            assert CELL_LISTING.summary(LIST[CELL_RECORD](), 20)[0] =~ "no cells yet";
+        si
+
+        @Test()
+        cell__shows_the_whole_of_one_cell() is
+            let lines = CELL_LISTING.cell(_cells(), "3")
+
+            assert lines.count == 4;
+            assert lines[0] =~ "cell 3: ok";
+            assert lines[2] =~ "    write_line(i)";
+        si
+
+        @Test()
+        cell__says_when_there_is_no_such_cell() is
+            assert CELL_LISTING.cell(_cells(), "9")[0] =~ "no cell 9";
+            assert CELL_LISTING.cell(_cells(), "x")[0] =~ "usage: :cells N";
+        si
+    si
+si

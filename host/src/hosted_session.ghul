@@ -19,6 +19,25 @@ namespace Ghul.Repl.Host is
         was_interrupted: bool
     );
 
+    // How a submission ended.
+    enum CellStatus is
+        // It compiled and ran to the end.
+        OK,
+
+        // It did not compile, so it never ran and declares nothing.
+        FAILED,
+
+        // It compiled and threw while it ran.
+        THREW,
+
+        // It compiled and was interrupted while it ran.
+        INTERRUPTED
+    si
+
+    // One submission, as `:cells` lists it: the number it was given, its
+    // text, and how it ended.
+    class CELL_RECORD(number: int, source: string, status: CellStatus);
+
     // The cells' own load context. The tool is itself a ghūl program, so
     // its process already holds a ghūl runtime - the one it was built
     // against, which is not the one the installed compiler builds cells
@@ -64,6 +83,7 @@ namespace Ghul.Repl.Host is
         _context: SESSION_LOAD_CONTEXT
 
         init(..) is
+            _submissions = Collections.LIST[CELL_RECORD]()
             _runner = CELL_RUNNER()
             _session = SESSION(_want_default_use)
             _context = SESSION_LOAD_CONTEXT(_probe_directory)
@@ -73,8 +93,37 @@ namespace Ghul.Repl.Host is
         // Each accepted cell's assembly, by cell name.
         _assemblies: Collections.MAP[string, Assembly]
 
+        // Every submission so far, oldest first, whether or not it
+        // compiled.
+        submissions: Collections.List[CELL_RECORD] => _submissions
+
+        // The number the next submission will take.
+        next_cell_number: int => _session.next_index
+
+        _submissions: Collections.LIST[CELL_RECORD]
+
         submit(source: string) -> SUBMIT_RESULT is
-            let request mut = _session.prepare(source)
+            let request = _session.prepare(source)
+            let result = _submit(source, request)
+
+            let status =
+                if !result.is_accepted then
+                    CellStatus.FAILED
+                elif result.was_interrupted then
+                    CellStatus.INTERRUPTED
+                elif result.run_error? then
+                    CellStatus.THREW
+                else
+                    CellStatus.OK
+                fi
+
+            _submissions.add(CELL_RECORD(request.index, source, status))
+
+            return result
+        si
+
+        _submit(source: string, first: Ghul.Repl.CELL_REQUEST) -> SUBMIT_RESULT is
+            let request mut = first
             let compiled mut = _backend.compile(request)
 
             // An import generated for an earlier cell that does not
