@@ -26,7 +26,7 @@ namespace Ghul.Jupyter.Tests is
             _messages = MESSAGES("test-session")
             _failures = LIST[string]()
 
-            _shell = CHANNEL(NetMQ.Sockets.DealerSocket(">{_connection.shell_address}"), _signer)
+            _shell = CHANNEL("shell", NetMQ.Sockets.DealerSocket(">{_connection.shell_address}"), _signer)
 
             _iopub = NetMQ.Sockets.SubscriberSocket(">{_connection.iopub_address}")
 

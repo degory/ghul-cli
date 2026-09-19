@@ -35,10 +35,10 @@ namespace Ghul.Jupyter is
             _execution_count = 0
             _is_running = true
 
-            _shell = CHANNEL(NetMQ.Sockets.RouterSocket("@{_connection.shell_address}"), _signer)
-            _control = CHANNEL(NetMQ.Sockets.RouterSocket("@{_connection.control_address}"), _signer)
-            _iopub = CHANNEL(NetMQ.Sockets.PublisherSocket("@{_connection.iopub_address}"), _signer)
-            _stdin = CHANNEL(NetMQ.Sockets.RouterSocket("@{_connection.stdin_address}"), _signer)
+            _shell = CHANNEL("shell", NetMQ.Sockets.RouterSocket("@{_connection.shell_address}"), _signer)
+            _control = CHANNEL("control", NetMQ.Sockets.RouterSocket("@{_connection.control_address}"), _signer)
+            _iopub = CHANNEL("iopub", NetMQ.Sockets.PublisherSocket("@{_connection.iopub_address}"), _signer)
+            _stdin = CHANNEL("stdin", NetMQ.Sockets.RouterSocket("@{_connection.stdin_address}"), _signer)
         si
 
         // Asked to stop from another thread: the loop notices on its

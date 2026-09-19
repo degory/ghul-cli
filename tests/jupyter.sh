@@ -53,7 +53,21 @@ dotnet "$scratch/cli/ghul-cli.dll" run "$scratch/warm.ghul" >/dev/null
 
 echo "jupyter: driving the kernel..." >&2
 
-dotnet "$scratch/client/jupyter-client.dll" "$scratch/kernel/ghul.jupyter.dll" "$scratch/session"
+# Traced, so that the one thing the trace exists to answer - did a
+# request arrive - is answered here rather than the next time someone
+# wonders. The kernel inherits this stderr, so both streams land in the
+# log and the run still shows on the terminal.
+GHUL_JUPYTER_TRACE=1 dotnet "$scratch/client/jupyter-client.dll" \
+    "$scratch/kernel/ghul.jupyter.dll" "$scratch/session" 2> >(tee "$scratch/traced.log" >&2)
+
+for expected in "recv shell kernel_info_request" "recv shell execute_request" "send iopub execute_result"; do
+    if ! grep -q "trace: $expected" "$scratch/traced.log"; then
+        echo "jupyter: GHUL_JUPYTER_TRACE did not report '$expected'" >&2
+        exit 1
+    fi
+done
+
+echo "jupyter: the trace reported what crossed the wire"
 
 echo "jupyter: a kernel whose front end goes away..." >&2
 

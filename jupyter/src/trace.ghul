@@ -1,0 +1,44 @@
+namespace Ghul.Jupyter is
+    // Every message crossing the wire, one line each on stderr, where
+    // Jupyter shows it in the kernel log. Off unless GHUL_JUPYTER_TRACE
+    // is set: without it, whether a front end ever sent a request can
+    // only be inferred from what the kernel did next, which says
+    // nothing at all about the requests it sends for nobody.
+    class TRACE is
+        _is_enabled: bool static
+
+        // The kernel swaps IO.Std.error for a writer that publishes what
+        // a running cell writes, so tracing through it would trace the
+        // publication of its own trace line and never stop. This is the
+        // real stderr, taken once and kept.
+        _stderr: IO.TextWriter static
+
+        init() static is
+            _is_enabled = System.Environment.get_environment_variable("GHUL_JUPYTER_TRACE")?
+
+            let writer = IO.StreamWriter(IO.Std.open_standard_error())
+
+            writer.auto_flush = true
+
+            _stderr = writer
+        si
+
+        is_enabled: bool static => _is_enabled
+
+        received(channel: string, msg_type: string) static is
+            _write("recv", channel, msg_type)
+        si
+
+        sent(channel: string, msg_type: string) static is
+            _write("send", channel, msg_type)
+        si
+
+        _write(direction: string, channel: string, msg_type: string) static is
+            if !_is_enabled then
+                return
+            fi
+
+            _stderr.write_line("ghul-jupyter: trace: {direction} {channel} {msg_type}")
+        si
+    si
+si
