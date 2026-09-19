@@ -61,12 +61,19 @@ namespace Ghul.Cli.Repl is
 
         // The next cell, numbered `number` at its prompt, or null when the
         // input has ended.
-        read_cell(number: int) -> CELL_READ? is
+        read_cell(number: int) -> CELL_READ? => read_cell(number, null)
+
+        // As read_cell(number), starting from `text` rather than an empty
+        // cell: an earlier cell brought back to edit.
+        read_cell(number: int, text: string?) -> CELL_READ? is
             _prompt = "{number}> "
             _continuation = "{string(' ', _prompt.length - 2)}| "
+            _initial = text
 
             return read_cell()
         si
+
+        _initial: string?
 
         read_cell() -> CELL_READ? is
             // Ctrl-C is read as a key while a cell is edited, rather than
@@ -84,6 +91,12 @@ namespace Ghul.Cli.Repl is
 
         _read_cell() -> CELL_READ? is
             _buffer.clear()
+
+            if let text = _initial then
+                _buffer.replace(text.trim_end(['\n']))
+                _initial = null
+            fi
+
             _end.clear()
             _draft = null
 

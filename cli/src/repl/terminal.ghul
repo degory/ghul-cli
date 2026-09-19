@@ -264,7 +264,11 @@ namespace Ghul.Cli.Repl is
                     when ":help" then
                         _write_help()
                     else
-                        if command =~ ":cells" then
+                        if command.starts_with(":rerun ") then
+                            _rerun(session, command.substring(":rerun ".length).trim())
+                        elif command.starts_with(":edit ") then
+                            _edit(session, command.substring(":edit ".length).trim())
+                        elif command =~ ":cells" then
                             _write_lines(CELL_LISTING.summary(session.submissions, 20))
                         elif command.starts_with(":cells ") then
                             _write_lines(CELL_LISTING.cell(session.submissions, command.substring(":cells ".length).trim()))
@@ -293,6 +297,93 @@ namespace Ghul.Cli.Repl is
             return 0
         si
 
+        // An earlier cell's text, to be the cell edited at the next prompt.
+        _pending_edit: string?
+
+        _edit(session: HOSTED_SESSION, argument: string) is
+            let number mut = 0
+
+            if !int.try_parse(argument, number ref) then
+                Std.write_line("usage: :edit N")
+
+                return
+            fi
+
+            for cell in session.submissions do
+                if cell.number == number then
+                    if _editor? then
+                        _pending_edit = cell.source
+                    else
+                        Std.write_line(":edit needs a terminal")
+                    fi
+
+                    return
+                fi
+            od
+
+            Std.write_line("no cell {number}")
+        si
+
+        // `:rerun N` submits cell N again; `:rerun N..` submits N and every
+        // later cell that ran to the end, in order, stopping at the first
+        // that does not.
+        _rerun(session: HOSTED_SESSION, argument: string) is
+            let is_from = argument.ends_with("..")
+            let digits = if is_from then argument.substring(0, argument.length - 2).trim() else argument fi
+            let number mut = 0
+
+            if !int.try_parse(digits, number ref) then
+                Std.write_line("usage: :rerun N, or :rerun N.. for N and every later cell")
+
+                return
+            fi
+
+            let cells =
+                if is_from then
+                    REPLAY.from(session.submissions, number)
+                else
+                    session.submissions |> Ghul.Pipes.filter(c => c.number == number) |> Ghul.Pipes.collect_list()
+                fi
+
+            if cells.count == 0 then
+                Std.write_line("no cell {number}")
+
+                return
+            fi
+
+            for cell in cells do
+                let new_number = session.next_cell_number
+
+                _show_replayed(new_number, cell.source)
+
+                let result = session.rerun(cell.number)
+
+                if !result? then
+                    return
+                fi
+
+                _report(result, true)
+
+                if is_from /\ (!result.is_accepted \/ result.was_interrupted \/ result.run_error?) then
+                    Std.write_line("ghul: stopped at cell {new_number}, the rerun of cell {cell.number}; later cells were not rerun")
+
+                    return
+                fi
+            od
+        si
+
+        // A rerun cell's text, written as though it had been typed at its
+        // own prompt.
+        _show_replayed(number: int, source: string) is
+            let prompt = "{number}> "
+            let continuation = "{string(' ', prompt.length - 2)}| "
+            let lines = source.trim_end(['\n']).split(['\n'])
+
+            for i in 0..lines.count do
+                Std.write_line("{if i == 0 then prompt else continuation fi}{lines[i]}")
+            od
+        si
+
         _write_lines(lines: Collections.Iterable[string]) is
             for line in lines do
                 Std.write_line(line)
@@ -302,7 +393,10 @@ namespace Ghul.Cli.Repl is
         // The next cell, or null when the input has ended.
         _read() -> CELL_READ? is
             if let editor = _editor then
-                return editor.read_cell(_current?.next_cell_number ?? 1)
+                let text = _pending_edit
+                _pending_edit = null
+
+                return editor.read_cell(_current?.next_cell_number ?? 1, text)
             fi
 
             do
@@ -433,6 +527,9 @@ namespace Ghul.Cli.Repl is
             Std.write_line(":reset           start a new session, forgetting every cell")
             Std.write_line(":cells           the cells so far: number, how each ended, its first line")
             Std.write_line(":cells N         the whole of cell N")
+            Std.write_line(":rerun N         submit cell N again, as a new cell")
+            Std.write_line(":rerun N..       submit cell N and every later cell that ran to the end")
+            Std.write_line(":edit N          bring cell N back to edit as the next cell")
             Std.write_line(":complete TEXT   what could follow TEXT")
             Std.write_line(":hover TEXT      what the end of TEXT names")
             Std.write_line(":quit            leave")

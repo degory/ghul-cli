@@ -36,7 +36,8 @@ namespace Ghul.Repl.Host is
 
     // One submission, as `:cells` lists it: the number it was given, its
     // text, and how it ended.
-    class CELL_RECORD(number: int, source: string, status: CellStatus);
+    // A rerun names the cell whose text it submitted again.
+    class CELL_RECORD(number: int, source: string, status: CellStatus, rerun_of: int?);
 
     // The cells' own load context. The tool is itself a ghūl program, so
     // its process already holds a ghūl runtime - the one it was built
@@ -102,7 +103,21 @@ namespace Ghul.Repl.Host is
 
         _submissions: Collections.LIST[CELL_RECORD]
 
-        submit(source: string) -> SUBMIT_RESULT is
+        submit(source: string) -> SUBMIT_RESULT => _submit_recorded(source, null)
+
+        // The text of an earlier cell submitted again, as a cell of its
+        // own with a number of its own.
+        rerun(number: int) -> SUBMIT_RESULT? is
+            for record in _submissions do
+                if record.number == number then
+                    return _submit_recorded(record.source, number)
+                fi
+            od
+
+            return null
+        si
+
+        _submit_recorded(source: string, rerun_of: int?) -> SUBMIT_RESULT is
             let request = _session.prepare(source)
             let result = _submit(source, request)
 
@@ -117,7 +132,7 @@ namespace Ghul.Repl.Host is
                     CellStatus.OK
                 fi
 
-            _submissions.add(CELL_RECORD(request.index, source, status))
+            _submissions.add(CELL_RECORD(request.index, source, status, rerun_of))
 
             return result
         si

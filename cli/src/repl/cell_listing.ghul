@@ -31,8 +31,9 @@ namespace Ghul.Cli.Repl is
                 let cell = cells[i]
                 let source_lines = _lines_of(cell.source)
                 let more = if source_lines.count > 1 then "  ({source_lines.count} lines)" else "" fi
+                let rerun = if let of = cell.rerun_of then "  (rerun of {of})" else "" fi
 
-                lines.add("{"{cell.number}".pad_left(width)}  {status_name(cell.status).pad_right(11)} {source_lines[0].trim_end()}{more}")
+                lines.add("{"{cell.number}".pad_left(width)}  {status_name(cell.status).pad_right(11)} {source_lines[0].trim_end()}{more}{rerun}")
             od
 
             return lines
@@ -80,6 +81,32 @@ namespace Ghul.Cli.Repl is
             fi
 
             return lines
+        si
+    si
+
+    // Which cells `:rerun N..` submits again, oldest first: cell N itself,
+    // however it ended, then every later cell that ran to the end. A cell
+    // that was itself a rerun is left out, since the cell it repeated is
+    // already in the list or before it.
+    class REPLAY is
+        init() is si
+
+        from(cells: Collections.List[CELL_RECORD], first: int) -> LIST[CELL_RECORD] static is
+            let result = LIST[CELL_RECORD]()
+
+            for cell in cells do
+                if cell.number == first then
+                    result.add(cell)
+                elif cell.number > first /\ cell.status == CellStatus.OK /\ !cell.rerun_of? then
+                    result.add(cell)
+                fi
+            od
+
+            if result.count > 0 /\ result[0].number != first then
+                result.clear()
+            fi
+
+            return result
         si
     si
 si
