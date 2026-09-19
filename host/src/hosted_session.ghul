@@ -106,6 +106,7 @@ namespace Ghul.Repl.Host is
             _context = SESSION_LOAD_CONTEXT(_probe_directory)
             _assemblies = Collections.MAP[string, Assembly]()
             _references = Collections.LIST[string]()
+            _listed_references = Collections.LIST[string]()
 
             _offer_display()
         si
@@ -127,9 +128,7 @@ namespace Ghul.Repl.Host is
 
             _context.share(name)
 
-            let added = add_reference(repl_assembly.location)
-
-            if added.problem? then
+            if _add_assembly(repl_assembly.location, Collections.LIST[string](), false)? then
                 return
             fi
 
@@ -153,7 +152,12 @@ namespace Ghul.Repl.Host is
         // context finds it when the cell runs.
         _references: Collections.LIST[string]
 
-        references: Collections.List[string] => _references
+        // The references added with add_reference or add_package, as a
+        // front end lists them. The session's own reference to ghul.repl,
+        // which display needs, is not among them.
+        _listed_references: Collections.LIST[string]
+
+        references: Collections.List[string] => _listed_references
 
         // An assembly file, referenced by every later cell.
         add_reference(path: string) -> ADDED_REFERENCES is
@@ -163,7 +167,7 @@ namespace Ghul.Repl.Host is
                 return ADDED_REFERENCES(names, "no such file: {path}")
             fi
 
-            if let problem = _add_assembly(IO.Path.get_full_path(path), names) then
+            if let problem = _add_assembly(IO.Path.get_full_path(path), names, true) then
                 return ADDED_REFERENCES(names, problem)
             fi
 
@@ -192,7 +196,7 @@ namespace Ghul.Repl.Host is
                 fi
 
                 for path in restored.paths do
-                    if let problem = _add_assembly(path, names) then
+                    if let problem = _add_assembly(path, names, true) then
                         return ADDED_REFERENCES(names, problem)
                     fi
                 od
@@ -216,7 +220,7 @@ namespace Ghul.Repl.Host is
         // is the name both the compile and the load context look for. One
         // that is there already, such as the session's own copy of the ghūl
         // runtime, is left as it is.
-        _add_assembly(path: string, names: Collections.LIST[string]) -> string? is
+        _add_assembly(path: string, names: Collections.LIST[string], listed: bool) -> string? is
             let directory = _probe_directory ?? ""
 
             if directory.length == 0 then
@@ -243,6 +247,10 @@ namespace Ghul.Repl.Host is
 
             _references.add(name)
             names.add(name)
+
+            if listed then
+                _listed_references.add(name)
+            fi
 
             _analysis?.add(destination)
 

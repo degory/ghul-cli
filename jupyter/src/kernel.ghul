@@ -55,7 +55,7 @@ namespace Ghul.Jupyter is
         // _publish like everything else a cell sends.
         _install_display_sink() is
             _session.set_display_sink(
-                KERNEL_DISPLAY_SINK((msg_type, content) => _publish(_display_parent, msg_type, content)))
+                KERNEL_DISPLAY_SINK((msg_type, content) => _publish(_display_parent, msg_type, content), () => _session.runtime))
         si
 
         // Asked to stop from another thread: the loop notices on its
