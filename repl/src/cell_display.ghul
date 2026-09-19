@@ -97,7 +97,7 @@ namespace Ghul.Repl is
 
         // Whether a type says what it is in its own words. One that
         // does not would only give back its .NET type name.
-        _has_own_text(type: System.Type) -> bool is
+        _has_own_text(type: System.Type) -> bool static is
             let to_string = type.get_method("ToString", System.Type.empty_types)
 
             if !to_string? then
@@ -112,31 +112,58 @@ namespace Ghul.Repl is
         // The type, and the public properties and fields a ghūl program
         // could read, as the constructor call that would build it reads.
         _describe(value: object, type: System.Type, depth: int) -> string is
-            let parts = LIST[string]()
+            let found = parts(value)!
+            let rendered = LIST[string]()
 
-            for property in type.get_properties(_instance_flags()) do
-                if
-                    property.can_read /\ property.get_index_parameters().count == 0 /\
-                    CELL_EXPORTS.is_user_name(property.name) /\ parts.count < _LIMIT
-                then
-                    parts.add("{property.name} = {_render(property.get_value(value), depth + 1)}")
-                fi
-            od
-
-            for member in type.get_fields(_instance_flags()) do
-                if CELL_EXPORTS.is_user_name(member.name) /\ parts.count < _LIMIT then
-                    parts.add("{member.name} = {_render(member.get_value(value), depth + 1)}")
-                fi
+            for i in 0..found.names.count do
+                rendered.add("{found.names[i]} = {_render(found.values[i], depth + 1)}")
             od
 
             let name = type_name(type)
 
-            if parts.count == 0 then
+            if rendered.count == 0 then
                 return name
             fi
 
-            return "{name}({parts |> Ghul.Pipes.join(", ")})"
+            return "{name}({rendered |> Ghul.Pipes.join(", ")})"
         si
+
+        // The public properties and fields a ghūl program could read from
+        // a value with no text of its own, by name; null for a value that
+        // says what it is in its own words.
+        parts(value: object) -> (names: LIST[string], values: LIST[object?])? static is
+            let type = value.get_type()
+
+            if _has_own_text(type) then
+                return null
+            fi
+
+            let names = LIST[string]()
+            let values = LIST[object?]()
+
+            for property in type.get_properties(_instance_flags()) do
+                if
+                    property.can_read /\ property.get_index_parameters().count == 0 /\
+                    CELL_EXPORTS.is_user_name(property.name) /\ names.count < _LIMIT
+                then
+                    names.add(property.name)
+                    values.add(property.get_value(value))
+                fi
+            od
+
+            for member in type.get_fields(_instance_flags()) do
+                if CELL_EXPORTS.is_user_name(member.name) /\ names.count < _LIMIT then
+                    names.add(member.name)
+                    values.add(member.get_value(value))
+                fi
+            od
+
+            return (names = names, values = values)
+        si
+
+        // A value as one part of something larger shows it: a string
+        // quoted, and nesting cut short sooner than at the top.
+        cell_text(value: object?) -> string => _render(value, 1)
 
         // A type as a ghūl program names it: the built-in names for the
         // types that have one, type arguments in square brackets, and
@@ -228,12 +255,13 @@ namespace Ghul.Repl is
                 cast int(System.Reflection.BindingFlags.PUBLIC) |
                 cast int(System.Reflection.BindingFlags.INSTANCE))
 
-        // Whatever the value holds, where it holds a sequence of things.
-        // Asked of the value rather than of a type it might implement:
-        // the non-generic enumerable interface has no name in ghūl, and
-        // the generic one cannot be named without knowing the element
-        // type, which is the thing being discovered.
-        _try_elements(value: object, depth: int) -> string? is
+        // Whatever the value holds, where it holds a sequence of things:
+        // the first `limit` of them, and how many more there are. Asked of
+        // the value rather than of a type it might implement: the
+        // non-generic enumerable interface has no name in ghūl, and the
+        // generic one cannot be named without knowing the element type,
+        // which is the thing being discovered.
+        elements(value: object, limit: int) -> (items: LIST[object?], extra: int)? static is
             let flags = _instance_flags()
 
             let get_enumerator = value.get_type().get_method("GetEnumerator", flags)
@@ -256,16 +284,34 @@ namespace Ghul.Repl is
                 return null
             fi
 
-            let rendered = LIST[string]()
+            let items = LIST[object?]()
             let extra mut = 0
 
             while cast bool(move_next.invoke(enumerator, System.Array.empty[object]())!) do
-                if rendered.count < _LIMIT then
-                    rendered.add(_render(current.get_value(enumerator), depth + 1))
+                if items.count < limit then
+                    items.add(current.get_value(enumerator))
                 else
                     extra = extra + 1
                 fi
             od
+
+            return (items = items, extra = extra)
+        si
+
+        _try_elements(value: object, depth: int) -> string? is
+            let found = elements(value, _LIMIT)
+
+            if !found? then
+                return null
+            fi
+
+            let rendered = LIST[string]()
+
+            for item in found.items do
+                rendered.add(_render(item, depth + 1))
+            od
+
+            let extra = found.extra
 
             let body = rendered |> Ghul.Pipes.join(", ")
 
