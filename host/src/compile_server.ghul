@@ -119,8 +119,13 @@ namespace Ghul.Repl.Host is
         _is_ready: bool
         _is_unannounced: bool
 
+        // Held for each exchange with the server, which answers one line
+        // at a time, while a warm-up compile runs alongside the prompt.
+        _exchange_lock: object
+
         init(..) is
             _server = _connection
+            _exchange_lock = object()
 
             // Said at the first cell rather than here, so it appears after
             // the banner rather than before it.
@@ -143,14 +148,42 @@ namespace Ghul.Repl.Host is
                 _say("ghul: the compile server did not start; starting the compiler for each cell instead")
             fi
 
-            if let server = _server then
-                if let result = _through(server, request) then
-                    return result
+            System.Threading.Monitor.enter(_exchange_lock)
+
+            try
+                if let server = _server then
+                    if let result = _through(server, request) then
+                        return result
+                    fi
                 fi
-            fi
+            finally
+                System.Threading.Monitor.exit(_exchange_lock)
+            yrt
 
             return _fallback.compile(request)
         si
+
+        // Compiles a throwaway cell in the background, so that the
+        // compiler's first compile, which takes most of a second, is paid
+        // while the first cell is being typed rather than after it.
+        warm_up() -> Tasks.TASK =>
+            Tasks.TASK.run(() -> void is
+                System.Threading.Monitor.enter(_exchange_lock)
+
+                try
+                    if let server = _server then
+                        let _ = _through(server, CELL_REQUEST(0, WARM_UP_NAME, "0\n", 0, LIST[string](), 0, LIST[string]()))
+                    fi
+                catch e: System.Exception
+                    // A server that fails here fails the first cell too,
+                    // which reports it.
+                finally
+                    System.Threading.Monitor.exit(_exchange_lock)
+                yrt
+            si)
+
+        // Not a name a cell takes, so its assembly is never mistaken for one's.
+        WARM_UP_NAME: string static => "warm_up"
 
         close() is
             _server?.close()
@@ -203,7 +236,22 @@ namespace Ghul.Repl.Host is
         // Asked of the server once it is ready, which answers in a few
         // milliseconds. Until then the check is left to the fallback, so
         // the first line typed does not wait for the server to warm up.
+        // While another exchange is under way, which at the start of a
+        // session is the warm-up, the check is left to the fallback rather
+        // than wait for it.
         _check_reply(text: string) -> COMPILE_SERVER_REPLY? is
+            if !System.Threading.Monitor.try_enter(_exchange_lock) then
+                return null
+            fi
+
+            try
+                return _check_reply_holding_lock(text)
+            finally
+                System.Threading.Monitor.exit(_exchange_lock)
+            yrt
+        si
+
+        _check_reply_holding_lock(text: string) -> COMPILE_SERVER_REPLY? is
             let server = _server
 
             if !server? then
