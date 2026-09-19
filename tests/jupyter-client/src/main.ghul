@@ -311,8 +311,13 @@ namespace Ghul.Jupyter.Tests is
 
         Std.write_line("is_complete:")
 
+        // The same rules as Enter at the terminal: a value submits, a let
+        // holds the cell open for what follows, unfinished text waits, and
+        // a blank line submits whatever is above it.
+        _is_complete(client, "41", "complete")
+        _is_complete(client, "let x = 1", "incomplete")
         _is_complete(client, "let x = 1\n", "complete")
-        _is_complete(client, "if true then\n", "incomplete")
+        _is_complete(client, "if true then", "incomplete")
 
         Std.write_line("shutdown:")
 

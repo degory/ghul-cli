@@ -1,9 +1,9 @@
 namespace Ghul.Cli.Tests is
+    use Ghul.Repl.Host.HELD_CONSTRUCT
     use Collections.LIST
 
     use Ghul.Cli.Repl.CELL_INPUT
-    use Ghul.Cli.Repl.CellStep
-    use Ghul.Cli.Repl.HELD_CONSTRUCT
+    use Ghul.Repl.Host.CellStep
     use Ghul.Repl.Host.Completeness
 
     use Ghul.Repl.CELL_REPLY

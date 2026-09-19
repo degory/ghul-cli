@@ -1,4 +1,4 @@
-namespace Ghul.Cli.Repl is
+namespace Ghul.Repl.Host is
     use Collections.LIST
 
     // What a run of source text is, for colouring it.

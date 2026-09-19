@@ -1,25 +1,13 @@
 namespace Ghul.Cli.Repl is
+    use Ghul.Repl.Host.HELD_CONSTRUCT
     use Collections.LIST
     use Ghul.Repl.CELL_DISPLAY
     use IO.Std
     use Ghul.Repl.Host.Completeness
+    use Ghul.Repl.Host.CELL_END
+    use Ghul.Repl.Host.CellStep
     use Ghul.Repl.Host.HOSTED_SESSION
     use Ghul.Repl.Host.SUBMIT_RESULT
-
-    // What a line typed at the prompt does to the cell being entered.
-    enum CellStep is
-        // Nothing to do: a blank line or a lone `.` with nothing typed.
-        NOTHING,
-
-        // Keep reading lines into the same cell.
-        WAIT,
-
-        // Submit the cell and show the value it ends on.
-        SUBMIT,
-
-        // Submit the cell without showing the value it ends on.
-        SUBMIT_QUIETLY
-    si
 
     // The lines of the cell being entered, and when it ends. Completeness
     // is asked of the compiler as each line is entered. Text it calls
@@ -121,73 +109,6 @@ namespace Ghul.Cli.Repl is
             _lines.clear()
             _is_held = false
             _statement_start = 0
-        si
-    si
-
-    // Whether a statement over several lines is one that holds the cell
-    // open when it closes: an if, a case, a loop, a try, or a
-    // definition. Anything else - a let, an assignment, a call spread
-    // over lines - is submitted as soon as it is finished.
-    class HELD_CONSTRUCT is
-        init() is si
-
-        _openers: string[] static => ["if", "case", "for", "while", "do", "try"]
-
-        _definitions: string[] static => [
-            "class", "struct", "trait", "union", "enum", "namespace", "partial", "impl"
-        ]
-
-        starts(lines: Collections.List[string], start: int) -> bool static is
-            let i mut = start
-
-            // Pragmas written above a definition belong to it.
-            while i < lines.count /\ (lines[i].trim().starts_with("@") \/ lines[i].trim().length == 0) do
-                i = i + 1
-            od
-
-            if i >= lines.count then
-                return false
-            fi
-
-            let first = lines[i].trim()
-            let word mut = INDENTATION.first_word(first)
-
-            // A labelled loop: `outer: for ...`.
-            if first.length > word.length /\ first[word.length] == ':' then
-                word = INDENTATION.first_word(first.substring(word.length + 1))
-            fi
-
-            for opener in _openers do
-                if word =~ opener then
-                    return true
-                fi
-            od
-
-            for definition in _definitions do
-                if word =~ definition then
-                    return true
-                fi
-            od
-
-            return _is_function_definition(first, word)
-        si
-
-        // A named function or method: a name and a parameter list, with
-        // the line ending on the body's `is` or `=>`, or a return type.
-        _is_function_definition(first: string, word: string) -> bool static is
-            if word.length == 0 \/ first.length <= word.length then
-                return false
-            fi
-
-            let after = first[word.length]
-
-            if after != '(' /\ after != '[' then
-                return false
-            fi
-
-            let code = first.trim_end()
-
-            return code.ends_with(" is") \/ code.ends_with("=>") \/ code.contains(") ->")
         si
     si
 

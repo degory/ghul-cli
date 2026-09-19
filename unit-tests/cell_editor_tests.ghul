@@ -1,12 +1,12 @@
 namespace Ghul.Cli.Tests is
+    use Ghul.Repl.Host.BLOCK_DEPTH
+    use Ghul.Repl.Host.CELL_END
     use Collections.LIST
 
     use Ghul.Cli.Repl.CELL_BUFFER
-    use Ghul.Cli.Repl.BLOCK_DEPTH
-    use Ghul.Cli.Repl.CELL_END
     use Ghul.Cli.Repl.CELL_LAYOUT
     use Ghul.Cli.Repl.CELL_TEXT
-    use Ghul.Cli.Repl.CellStep
+    use Ghul.Repl.Host.CellStep
     use Ghul.Repl.Host.CHECK_ANSWER
     use Ghul.Repl.Host.Completeness
 

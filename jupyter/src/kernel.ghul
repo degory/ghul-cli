@@ -1,4 +1,6 @@
 namespace Ghul.Jupyter is
+    use Ghul.Repl.Host.CELL_END
+    use Ghul.Repl.Host.CellStep
     use Collections.LIST
     use Ghul.Repl.CELL_BUNDLE
     use Ghul.Repl.Host.Completeness
@@ -19,6 +21,10 @@ namespace Ghul.Jupyter is
     ) is
         _messages: MESSAGES
         _bundle: CELL_BUNDLE
+
+        // When a cell typed at a console is finished, judged the way the
+        // terminal judges it.
+        _cell_end: CELL_END
         _signer: SIGNER
         _execution_count: int
         _is_running: bool
@@ -37,6 +43,12 @@ namespace Ghul.Jupyter is
         init(..) is
             _messages = MESSAGES("{System.Guid.new_guid()}")
             _bundle = CELL_BUNDLE()
+
+            if !_session.completeness_fallback? then
+                _session.completeness_fallback = _completeness
+            fi
+
+            _cell_end = CELL_END(text => _session.check_ending(text))
             _signer = SIGNER(_connection.key)
             _execution_count = 0
             _is_running = true
@@ -379,12 +391,18 @@ namespace Ghul.Jupyter is
         _is_complete(channel: CHANNEL, request: MESSAGE) is
             let code = JSON.string_member(request.content, "code") ?? ""
 
+            let lines = Collections.LIST[string](code.split(['\n']))
+
+            _cell_end.clear()
+
             let answer =
-                case _completeness.check(code)
-                when Completeness.INCOMPLETE then CONTENT.is_complete("incomplete", _indent_of(code))
-                when Completeness.INVALID then CONTENT.is_complete("invalid", "")
-                else CONTENT.is_complete("complete", "")
-                esac
+                if _cell_end.step_for(lines) == CellStep.WAIT then
+                    CONTENT.is_complete("incomplete", _indent_of(code))
+                elif _cell_end.completeness(lines) == Completeness.INVALID then
+                    CONTENT.is_complete("invalid", "")
+                else
+                    CONTENT.is_complete("complete", "")
+                fi
 
             channel.send(_messages.reply(request, "is_complete_reply", answer))
         si

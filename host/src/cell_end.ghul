@@ -1,8 +1,21 @@
-namespace Ghul.Cli.Repl is
+namespace Ghul.Repl.Host is
     use Collections.LIST
     use Collections.MAP
-    use Ghul.Repl.Host.CHECK_ANSWER
-    use Ghul.Repl.Host.Completeness
+
+    // What a line typed at the prompt does to the cell being entered.
+    enum CellStep is
+        // Nothing to do: a blank line or a lone `.` with nothing typed.
+        NOTHING,
+
+        // Keep reading lines into the same cell.
+        WAIT,
+
+        // Submit the cell and show the value it ends on.
+        SUBMIT,
+
+        // Submit the cell without showing the value it ends on.
+        SUBMIT_QUIETLY
+    si
 
     // What Enter on the last line of a cell edited at a terminal does,
     // judged from the whole cell, since any line of it can have been
@@ -65,7 +78,7 @@ namespace Ghul.Cli.Repl is
                 return if is_held(content) then CellStep.SUBMIT_QUIETLY else CellStep.SUBMIT fi
             fi
 
-            case _completeness(lines)
+            case completeness(lines)
             when Completeness.INCOMPLETE then
                 return CellStep.WAIT
             when Completeness.INVALID then
@@ -115,7 +128,7 @@ namespace Ghul.Cli.Repl is
             for k in 1..lines.count do
                 let at = lines.count - k
 
-                if _completeness(_prefix(lines, at)) == Completeness.COMPLETE then
+                if completeness(_prefix(lines, at)) == Completeness.COMPLETE then
                     start = at
 
                     break
@@ -125,7 +138,8 @@ namespace Ghul.Cli.Repl is
             return lines.count - start > 1 /\ HELD_CONSTRUCT.starts(lines, start)
         si
 
-        _completeness(lines: Collections.List[string]) -> Completeness =>
+        // What the compiler says of the text as it stands.
+        completeness(lines: Collections.List[string]) -> Completeness =>
             _answer(lines).completeness
 
         _answer(lines: Collections.List[string]) -> CHECK_ANSWER is
@@ -186,6 +200,73 @@ namespace Ghul.Cli.Repl is
             od
 
             return depth
+        si
+    si
+
+    // Whether a statement over several lines is one that holds the cell
+    // open when it closes: an if, a case, a loop, a try, or a
+    // definition. Anything else - a let, an assignment, a call spread
+    // over lines - is submitted as soon as it is finished.
+    class HELD_CONSTRUCT is
+        init() is si
+
+        _openers: string[] static => ["if", "case", "for", "while", "do", "try"]
+
+        _definitions: string[] static => [
+            "class", "struct", "trait", "union", "enum", "namespace", "partial", "impl"
+        ]
+
+        starts(lines: Collections.List[string], start: int) -> bool static is
+            let i mut = start
+
+            // Pragmas written above a definition belong to it.
+            while i < lines.count /\ (lines[i].trim().starts_with("@") \/ lines[i].trim().length == 0) do
+                i = i + 1
+            od
+
+            if i >= lines.count then
+                return false
+            fi
+
+            let first = lines[i].trim()
+            let word mut = INDENTATION.first_word(first)
+
+            // A labelled loop: `outer: for ...`.
+            if first.length > word.length /\ first[word.length] == ':' then
+                word = INDENTATION.first_word(first.substring(word.length + 1))
+            fi
+
+            for opener in _openers do
+                if word =~ opener then
+                    return true
+                fi
+            od
+
+            for definition in _definitions do
+                if word =~ definition then
+                    return true
+                fi
+            od
+
+            return _is_function_definition(first, word)
+        si
+
+        // A named function or method: a name and a parameter list, with
+        // the line ending on the body's `is` or `=>`, or a return type.
+        _is_function_definition(first: string, word: string) -> bool static is
+            if word.length == 0 \/ first.length <= word.length then
+                return false
+            fi
+
+            let after = first[word.length]
+
+            if after != '(' /\ after != '[' then
+                return false
+            fi
+
+            let code = first.trim_end()
+
+            return code.ends_with(" is") \/ code.ends_with("=>") \/ code.contains(") ->")
         si
     si
 si

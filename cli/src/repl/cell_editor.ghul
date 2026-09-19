@@ -1,4 +1,7 @@
 namespace Ghul.Cli.Repl is
+    use Ghul.Repl.Host.CELL_END
+    use Ghul.Repl.Host.CellStep
+    use Ghul.Repl.Host.LINE_SPANS
     use Collections.LIST
     use IO.Std
 

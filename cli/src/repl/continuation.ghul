@@ -1,4 +1,6 @@
 namespace Ghul.Cli.Repl is
+    use Ghul.Repl.Host.GHUL_LEXER
+    use Ghul.Repl.Host.TokenKind
     // A line ending in a backslash that is a token of its own - not the end
     // of a longer operator such as `/\`, and not inside a string, a
     // character literal or a comment - says the cell is not finished,

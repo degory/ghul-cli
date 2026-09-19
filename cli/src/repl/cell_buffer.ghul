@@ -1,4 +1,5 @@
 namespace Ghul.Cli.Repl is
+    use Ghul.Repl.Host.INDENTATION
     use Collections.LIST
 
     // A cell as it stood, for putting back.
