@@ -1,67 +1,98 @@
 # ghul.jupyter
 
-A [Jupyter](https://jupyter.org) kernel for ghūl: notebook cells compiled
-and run as a [ghul.repl](../repl/README.md) session, one assembly a cell.
+[![CI](https://img.shields.io/github/actions/workflow/status/degory/ghul-cli/ci.yml?branch=main)](https://github.com/degory/ghul-cli/actions/workflows/ci.yml?query=branch%3Amain)
+[![NuGet version (ghul.jupyter)](https://img.shields.io/nuget/v/ghul.jupyter.svg)](https://www.nuget.org/packages/ghul.jupyter/)
+[![License](https://img.shields.io/github/license/degory/ghul-cli)](https://github.com/degory/ghul-cli/blob/main/LICENSE)
+[![ghūl](https://img.shields.io/badge/gh%C5%ABl-100%25!-information)](https://ghul.dev)
 
-## Using it from VS Code
+A [Jupyter](https://jupyter.org) kernel for [ghūl](https://ghul.dev). It
+compiles and runs notebook cells as a
+[ghul.repl](https://github.com/degory/ghul-cli/blob/main/repl/README.md)
+session, with one assembly for each cell.
+
+## installing
 
 ```sh
 dotnet tool install -g ghul.jupyter
 ghul-jupyter install
 ```
 
-`install` writes the kernelspec - what a front end looks for a kernel by -
-and prints where it put it, under `JUPYTER_DATA_DIR` when that is set and
+`ghul-jupyter install` writes the kernelspec, which is the file a front end
+finds a kernel by, and prints where it wrote it. It writes under
+`JUPYTER_DATA_DIR` when that is set, and under
 `~/.local/share/jupyter/kernels/ghul` otherwise. `ghul-jupyter uninstall`
-removes it. `ghul-jupyter kernel <connection-file>` is what a front end
-then runs; it is not meant to be typed.
+removes the kernelspec.
 
-The kernelspec names the tool by its absolute path, since VS Code does not
-look a bare command name up on `PATH`, and carries an `env`
-putting the .NET installation and the tools directory on `PATH` - and
-setting `DOTNET_ROOT` when .NET is not installed in a default location -
-so a front end started from a desktop launcher, without the shell's
-environment, can still start it. Both are taken from the process that ran
-`install`, so run it again after moving either.
+A front end runs `ghul-jupyter kernel <connection-file>` to start the kernel.
+You do not type that command yourself.
 
-Then reload the VS Code window (**Developer: Reload Window**): the Jupyter
-extension looks for kernelspecs when it starts and does not notice a new
-one until then. In VS Code with the
-[Jupyter extension](https://marketplace.visualstudio.com/items?itemName=ms-toolsai.jupyter)
-installed: open or create a `.ipynb` file, click the kernel picker at the
-top right, choose **Jupyter Kernel...**, and pick **ghūl**. Cells are
-highlighted as ghūl by the
-[ghūl extension](https://marketplace.visualstudio.com/items?itemName=degory.ghul),
-if it is installed.
+The kernel compiles cells with a `ghul-compiler` that is already on the
+machine. It looks first for the compiler that `GHUL_COMPILER` names, then for
+the copy that
+`ghul.cli` installs, and then for a `ghul-compiler` on the path. The simplest
+way to
+get one is to install `ghul.cli` and run any script once.
 
-Cells compile with the `ghul-compiler` this machine already has: the copy
-`ghul.cli` installs, whatever `ghul-compiler` is on the path, or the one
-`GHUL_COMPILER` names. Installing `ghul.cli` and running any script once
-is the simplest way to have one.
+## using it from VS Code
 
-## What a cell is
+1. Install the
+   [Jupyter extension](https://marketplace.visualstudio.com/items?itemName=ms-toolsai.jupyter).
+2. Reload the window (**Developer: Reload Window**). The Jupyter extension
+   looks for kernelspecs when it starts, so it does not see a new one until you
+   reload.
+3. Open or create a `.ipynb` file.
+4. Click the kernel picker at the top right, choose **Jupyter Kernel...**, and
+   pick **ghūl**.
 
-Each submission is its own assembly in its own namespace, referencing the
-earlier cells. Redefining something replaces it going forward rather than
-editing what has already run, and a cell that ends on a value shows it.
-[`ghul.repl`'s README](../repl/README.md) describes the session, and the
-`ghul repl` section of [the CLI's](../README.md) describes what a session
-can and cannot do in this version.
+The
+[ghūl extension](https://marketplace.visualstudio.com/items?itemName=degory.ghul)
+highlights cells as ghūl, if you have it installed.
 
-A cell that does not compile leaves the session as it was; one that throws
-is kept, since it compiled and its definitions are there for later cells.
-What a cell writes arrives as it is written, a line at a time.
+## the kernelspec
 
-## What it implements
+The kernelspec names the tool by its absolute path, because VS Code does not
+look up a bare command name on `PATH`.
 
-Protocol 5.3 over the five ZeroMQ sockets, signed with the connection
-file's key: `kernel_info_request`, `execute_request` (with `stream`,
-`execute_result` and `error` published as the cell runs),
-`is_complete_request` answered by the compiler, `shutdown_request` and
-`interrupt_request`. `complete_request` and `inspect_request` are answered
-from the session's own analyser, so a name declared in an earlier cell
-completes and can be inspected in a later one; where no analyser is
-available they answer with nothing rather than failing.
+The kernelspec also sets an environment for the kernel. It puts the .NET
+installation and the tools directory on `PATH`, and it sets `DOTNET_ROOT` when
+.NET is not installed in a default location. A front end started from a
+desktop launcher does not have the environment of your shell, and this lets it
+start the kernel anyway.
 
-Restarting is the front end starting the process again, so a restart is a
-new session. A cell cannot read standard input.
+`install` takes both the path and the environment from the process that runs
+it. Run `ghul-jupyter install` again after you move the tool or .NET.
+
+## cells
+
+The kernel compiles each cell as its own assembly, in its own namespace, with
+references to the earlier cells. A new definition of a name replaces the old
+one for later cells, and does not change cells that have already run. A cell
+that ends on a value shows the value.
+
+A cell that does not compile leaves the session as it was. The kernel keeps a
+cell that throws, because the cell compiled and later cells can use its
+definitions. The kernel sends what a cell writes as the cell writes it, a line
+at a time. A cell cannot read standard input.
+
+To restart, the front end starts the kernel process again, so a restart
+begins a new session.
+
+The [ghul.repl README](https://github.com/degory/ghul-cli/blob/main/repl/README.md)
+describes the session. The REPL section of
+[the CLI's README](https://github.com/degory/ghul-cli/blob/main/README.md)
+describes what a cell can do.
+
+## the protocol
+
+The kernel implements protocol 5.3 over the five ZeroMQ sockets, and signs
+messages with the key in the connection file. It answers these requests:
+
+- `kernel_info_request`
+- `execute_request`. It publishes `stream`, `execute_result` and `error`
+  messages as the cell runs.
+- `is_complete_request`. The compiler gives the answer.
+- `complete_request` and `inspect_request`. The session's analyser gives the
+  answers, so a name that an earlier cell declared completes in a later cell,
+  and you can inspect it there. When no analyser is available, the kernel
+  answers with nothing rather than an error.
+- `shutdown_request` and `interrupt_request`

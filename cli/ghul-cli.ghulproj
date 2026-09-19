@@ -20,6 +20,7 @@
     <PackageOutputPath>../nupkg</PackageOutputPath>
     <PackageProjectUrl>https://ghul.dev</PackageProjectUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>ghul-logo-icon.png</PackageIcon>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/degory/ghul-cli</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
@@ -30,6 +31,7 @@
   <ItemGroup>
     <None Include="../README.md" Pack="true" PackagePath="\" />
     <None Include="../LICENSE*" Pack="true" PackagePath="\" />
+    <None Include="../images/ghul-logo-icon.png" Pack="true" PackagePath="" />
 
     <ProjectReference Include="../host/host.ghulproj" />
 
