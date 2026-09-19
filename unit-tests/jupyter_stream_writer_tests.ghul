@@ -1,0 +1,80 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+
+    use Ghul.Jupyter.STREAM_WRITER
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    // What a cell writes reaches the front end through STREAM_WRITER, and
+    // a cell writes through the console, which wraps the writer it is
+    // given. So these go through the console too: calling the writer
+    // directly takes a different path and hides a lost line ending.
+    @TestClass()
+    class JUPYTER_STREAM_WRITER_TESTS is
+        init() is si
+
+        _check(expected: string, actual: string) is
+            assert actual =~ expected else "expected {expected.replace("\n", "\\n")} but got {actual.replace("\n", "\\n")}"
+        si
+
+        _through_the_console(write: () -> void) -> string is
+            let published = LIST[string]()
+            let writer = STREAM_WRITER(text => published.add(text))
+            let console = IO.Std.`out
+
+            IO.Std.set_out(writer)
+
+            try
+                write()
+            finally
+                IO.Std.set_out(console)
+            yrt
+
+            writer.flush()
+
+            return string.join("|", published)
+        si
+
+        @Test()
+        a_written_line_ends_in_a_line_ending() is
+            _check("one\n", _through_the_console(() -> void => IO.Std.write_line("one")))
+        si
+
+        @Test()
+        each_line_is_published_as_it_ends() is
+            _check(
+                "one\n|two\n",
+                _through_the_console(() -> void is
+                    IO.Std.write_line("one")
+                    IO.Std.write_line("two")
+                si))
+        si
+
+        @Test()
+        a_line_of_something_other_than_a_string_ends_too() is
+            _check(
+                "123\n|True\n|x\n",
+                _through_the_console(() -> void is
+                    IO.Std.write_line(123)
+                    IO.Std.write_line(true)
+                    IO.Std.write_line('x')
+                si))
+        si
+
+        @Test()
+        an_empty_line_is_a_line_ending() is
+            _check("\n", _through_the_console(() -> void => IO.Std.write_line()))
+        si
+
+        @Test()
+        text_with_no_line_ending_waits_for_the_flush() is
+            _check(
+                "one\n|and",
+                _through_the_console(() -> void is
+                    IO.Std.write_line("one")
+                    IO.Std.write("and")
+                si))
+        si
+    si
+si

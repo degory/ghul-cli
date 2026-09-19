@@ -239,11 +239,11 @@ namespace Ghul.Jupyter.Tests is
 
         Std.write_line("a cell that writes:")
 
-        let wrote = _execute_raw(client, "IO.Std.write_line(\"printed\")\n")
+        let wrote = _execute_raw(client, "IO.Std.write_line(\"printed\")\nIO.Std.write(\"and \")\nIO.Std.write_line(123)\n")
 
         client.check(
-            _stream_text(wrote.published).contains("printed"),
-            "what a cell writes arrives as a stream message")
+            _stream_text(wrote.published) =~ "printed\nand 123\n",
+            "what a cell writes arrives as a stream message, line endings included")
 
         Std.write_line("completion and inspection of an earlier cell's name:")
 
