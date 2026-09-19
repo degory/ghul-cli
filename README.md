@@ -262,6 +262,23 @@ answer: int
 Pipe[string]
 ```
 
+`:ref FILE` makes an assembly available to every later cell, and `:nuget
+PACKAGE` does the same for a NuGet package and everything it depends on,
+the latest stable release unless a version follows the name. A C# extension
+method is called as the static method it is:
+
+```
+1> :nuget Humanizer.Core 2.14.1
+restoring Humanizer.Core...
+referenced Humanizer
+1> Humanizer.StringHumanizeExtensions.humanize("some_long_identifier")
+some long identifier
+```
+
+Restoring a package runs `dotnet publish` on a small project that references
+it, so the first one takes a few seconds. `:reset` starts a session with no
+references.
+
 `:save FILE` writes the cells that ran to the end to FILE, each after a
 `// cell N` line, and `:load FILE` submits the cells in FILE in order, as a
 new cell each, stopping at the first that does not run to the end. A file

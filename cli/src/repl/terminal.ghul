@@ -292,6 +292,10 @@ namespace Ghul.Cli.Repl is
                             _complete(session, command.substring(":complete ".length))
                         elif command.starts_with(":hover ") then
                             _hover(session, command.substring(":hover ".length))
+                        elif command.starts_with(":ref ") then
+                            _reference(session, command.substring(":ref ".length).trim())
+                        elif command.starts_with(":nuget ") then
+                            _package(session, command.substring(":nuget ".length).trim())
                         elif command.starts_with(":type ") then
                             _type(session, command.substring(":type ".length))
                         elif command.starts_with(":save ") then
@@ -531,6 +535,45 @@ namespace Ghul.Cli.Repl is
             fi
         si
 
+        // An assembly file, referenced by the cells after it.
+        _reference(session: HOSTED_SESSION, path: string) is
+            if path.length == 0 then
+                Std.write_line("usage: :ref FILE")
+
+                return
+            fi
+
+            _report_references(session.add_reference(path))
+        si
+
+        // A NuGet package, `NAME` or `NAME VERSION`, and what it depends on,
+        // referenced by the cells after it.
+        _package(session: HOSTED_SESSION, argument: string) is
+            let parts = argument.split([' '], System.StringSplitOptions.REMOVE_EMPTY_ENTRIES)
+
+            if parts.count < 1 \/ parts.count > 2 then
+                Std.write_line("usage: :nuget PACKAGE [VERSION]")
+
+                return
+            fi
+
+            Std.write_line("restoring {parts[0]}...")
+
+            _report_references(session.add_package(parts[0], if parts.count > 1 then parts[1] else null fi))
+        si
+
+        _report_references(added: Ghul.Repl.Host.ADDED_REFERENCES) is
+            if added.names.count > 0 then
+                Std.write_line("referenced {added.names |> Ghul.Pipes.join(", ")}")
+            fi
+
+            if let problem = added.problem then
+                Std.write_line(problem)
+            elif added.names.count == 0 then
+                Std.write_line("nothing new to reference")
+            fi
+        si
+
         // The type of an expression, which is compiled but not run.
         _type(session: HOSTED_SESSION, expression: string) is
             if expression.trim().length == 0 then
@@ -634,6 +677,8 @@ namespace Ghul.Cli.Repl is
             Std.write_line(":complete TEXT   what could follow TEXT")
             Std.write_line(":hover TEXT      what the end of TEXT names")
             Std.write_line(":type EXPR       the type of EXPR, without running it")
+            Std.write_line(":ref FILE        reference an assembly in later cells")
+            Std.write_line(":nuget PKG [V]   reference a NuGet package in later cells")
             Std.write_line(":save FILE       write the cells that ran to the end to FILE")
             Std.write_line(":load FILE       submit the cells in FILE, in order")
             Std.write_line(":quit            leave")

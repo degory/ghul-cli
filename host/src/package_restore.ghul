@@ -1,0 +1,97 @@
+namespace Ghul.Repl.Host is
+    use Collections.LIST
+
+    // What adding a reference or a package came to: the assemblies now
+    // referenced, by name, and why nothing was, where nothing was.
+    class ADDED_REFERENCES(names: Collections.List[string], problem: string?);
+
+    // A NuGet package and everything it depends on, as assemblies: a
+    // throwaway project that references the package is published, and
+    // the assemblies that come out, other than the project's own, are the
+    // package's.
+    class PACKAGE_RESTORE is
+        init() is si
+
+        PROJECT_NAME: string static => "ghul_repl_package_restore"
+
+        // The package's assemblies, or why there are none. With no version
+        // the latest stable release is taken.
+        assemblies(package: string, version: string?, directory: string) -> (paths: LIST[string], problem: string?) static is
+            let paths = LIST[string]()
+
+            IO.Directory.create_directory(directory)
+
+            IO.File.write_all_text(
+                IO.Path.join([directory, "{PROJECT_NAME}.csproj"]),
+                project(package, version))
+
+            let output = IO.Path.join([directory, "out"])
+
+            let start_info = System.Diagnostics.ProcessStartInfo("dotnet")
+
+            start_info.argument_list.add("publish")
+            start_info.argument_list.add(directory)
+            start_info.argument_list.add("--nologo")
+            start_info.argument_list.add("-v")
+            start_info.argument_list.add("q")
+            start_info.argument_list.add("-o")
+            start_info.argument_list.add(output)
+            start_info.use_shell_execute = false
+            start_info.redirect_standard_output = true
+            start_info.redirect_standard_error = true
+
+            let process = System.Diagnostics.Process.start(start_info)
+
+            if !process? then
+                return (paths = paths, problem = "could not start dotnet to restore {package}")
+            fi
+
+            let said = process.standard_output.read_to_end()
+            let _ = process.standard_error.read_to_end()
+
+            process.wait_for_exit()
+
+            if process.exit_code != 0 then
+                return (paths = paths, problem = "could not restore {package}: {first_error(said) ?? "dotnet publish failed"}")
+            fi
+
+            for path in IO.Directory.get_files(output, "*.dll") do
+                if !(IO.Path.get_file_name_without_extension(path) =~ PROJECT_NAME) then
+                    paths.add(path)
+                fi
+            od
+
+            paths.sort(System.StringComparer.ordinal)
+
+            return (paths = paths, problem = null)
+        si
+
+        project(package: string, version: string?) -> string static =>
+            "<Project Sdk=\"Microsoft.NET.Sdk\">\n"
+            "  <PropertyGroup>\n"
+            "    <TargetFramework>net10.0</TargetFramework>\n"
+            "    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n"
+            "  </PropertyGroup>\n"
+            "  <ItemGroup>\n"
+            "    <PackageReference Include=\"{System.Security.SecurityElement.escape(package)}\" Version=\"{System.Security.SecurityElement.escape(version ?? "*")}\" />\n"
+            "  </ItemGroup>\n"
+            "</Project>\n"
+
+        // The first error MSBuild reported, without the project path it
+        // puts after it.
+        first_error(output: string) -> string? static is
+            for line in output.split(['\n']) do
+                let at = line.index_of(": error ", System.StringComparison.ORDINAL)
+
+                if at >= 0 then
+                    let message = line.substring(at + 2).trim()
+                    let project_at = message.last_index_of(" [", System.StringComparison.ORDINAL)
+
+                    return if project_at > 0 then message.substring(0, project_at) else message fi
+                fi
+            od
+
+            return null
+        si
+    si
+si
