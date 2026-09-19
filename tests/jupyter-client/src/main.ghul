@@ -40,6 +40,7 @@ namespace Ghul.Jupyter.Tests is
                 _from_assembly(kernel_assembly, connection_file)
             fi
 
+        let since_start = System.Diagnostics.Stopwatch.start_new()
         let started = System.Diagnostics.Process.start(start_info)
 
         if !started? then
@@ -62,7 +63,7 @@ namespace Ghul.Jupyter.Tests is
                 return _abandon(client)
             fi
 
-            let outcome = _drive(client)
+            let outcome = _drive(client, since_start)
 
             // A kernel told to shut down has to go on its own, and take
             // its compile server with it.
@@ -192,13 +193,23 @@ namespace Ghul.Jupyter.Tests is
         return process.has_exited
     si
 
-    _drive(client: CLIENT) -> int is
+    // How long start-up and the first cell may take before the check
+    // fails. Generous, since a shared CI runner is slow and uneven: the
+    // times are reported on every run, and the ceiling only catches a
+    // kernel that has become unusable.
+    _TIMING_CEILING_MS: long static => 60000L
+
+    _drive(client: CLIENT, since_start: System.Diagnostics.Stopwatch) -> int is
         Std.write_line("kernel_info:")
 
         // Asks until the subscription is live, which is also what proves
         // the kernel brackets a request with status messages: without
         // them this never returns.
         let info = client.wait_until_subscribed()
+        let start_up_ms = since_start.elapsed_milliseconds
+
+        Std.write_line("  start-up: {start_up_ms} ms from starting the kernel to its first kernel_info_reply")
+        client.check(start_up_ms < _TIMING_CEILING_MS, "the kernel starts within {_TIMING_CEILING_MS} ms")
 
         client.check(info?, "the kernel answers kernel_info_request and publishes its status")
 
@@ -211,7 +222,14 @@ namespace Ghul.Jupyter.Tests is
 
         Std.write_line("three chained cells:")
 
+        let first_cell = System.Diagnostics.Stopwatch.start_new()
+
         _execute(client, "let x = 41\n", null)
+
+        let first_cell_ms = first_cell.elapsed_milliseconds
+
+        Std.write_line("  first cell: {first_cell_ms} ms from execute_request to execute_reply")
+        client.check(first_cell_ms < _TIMING_CEILING_MS, "the first cell runs within {_TIMING_CEILING_MS} ms")
         _execute(client, "add(n: int) -> int => n + 1\n", null)
         _execute(client, "add(x)\n", "42")
 
