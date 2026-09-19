@@ -375,6 +375,54 @@ if [[ "$repl_generated_out" != *"after 7 3 5 ANN"* ]]; then
     exit 1
 fi
 
+echo "smoke: 'ghul repl' adds to types declared in earlier cells with partial and impl..." >&2
+repl_carry_in="$scratch/repl-carry-in.txt"
+cat > "$repl_carry_in" <<'REPL'
+class POINT(x: int, y: int) is
+    _secret: int
+    init(..) is _secret = 7 si
+si
+
+area(q: POINT) -> int => q.x * q.y
+
+partial POINT is
+    norm() -> int => x * x + y * y + _secret
+si
+
+struct V(a: int)
+
+partial V is
+    doubled() -> int => a * 2
+si
+
+union Chain[T] is END; LINK(head: T, tail: Chain[T]); si
+
+trait Printer is print() -> string; si
+
+impl Printer for Chain[T] is
+    print() -> string => if let (head, tail): LINK = self then "{head} {tail.print()}" else "end" fi
+si
+
+"carried {POINT(3, 4).norm()} {V(4).doubled()} {Chain.LINK(1, Chain.END[int]).print()}"
+
+:quit
+REPL
+repl_carry_out="$(dotnet "$cli" repl < "$repl_carry_in" 2>"$scratch/repl-carry.err")" || {
+    echo "smoke: ghul repl exited non-zero:" >&2
+    cat "$scratch/repl-carry.err" >&2
+    exit 1
+}
+# A cell's diagnostics and notes go to standard error with its output.
+repl_carry_all="$repl_carry_out$(cat "$scratch/repl-carry.err")"
+for expected in "carried 32 8 1 end" "area still takes the earlier POINT"; do
+    if [[ "$repl_carry_all" != *"$expected"* ]]; then
+        echo "smoke: expected the repl to show '$expected', got:" >&2
+        echo "$repl_carry_out" >&2
+        cat "$scratch/repl-carry.err" >&2
+        exit 1
+    fi
+done
+
 echo "smoke: 'ghul repl' extends a class declared in an earlier submission..." >&2
 repl_extend_in="$scratch/repl-extend-in.txt"
 cat > "$repl_extend_in" <<'REPL'

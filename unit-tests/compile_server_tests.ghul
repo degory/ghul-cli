@@ -84,7 +84,7 @@ namespace Ghul.Cli.Tests is
             SESSION_FILES(IO.Path.join([IO.Path.get_temp_path(), "ghul-cli-tests-{System.Guid.new_guid().to_string("N")}"]), null)
 
         _request(index: int) -> CELL_REQUEST =>
-            CELL_REQUEST(index, "cell{index}", "let x = 1\n", 0, LIST[string]())
+            CELL_REQUEST(index, "cell{index}", "let x = 1\n", 0, LIST[string](), 0, LIST[string]())
 
         _backend(server: ServerConnection?, fallback: CompileBackend, said: LIST[string]) -> SERVER_BACKEND =>
             SERVER_BACKEND(server, fallback, _files(), line => said.add(line))
@@ -111,7 +111,7 @@ namespace Ghul.Cli.Tests is
             let server = FAKE_SERVER(_ready, LIST[string?](["{{\"status\":0,\"diagnostics\":[]}}"]))
             let backend = _backend(server, FAKE_BACKEND(), LIST[string]())
 
-            backend.compile(CELL_REQUEST(2, "cell2", "x\n", 0, LIST[string](["cell1"])));
+            backend.compile(CELL_REQUEST(2, "cell2", "x\n", 0, LIST[string](["cell1"]), 0, LIST[string]()));
 
             let request = System.Text.Json.JsonDocument.parse(server.sent[0], _).root_element
 

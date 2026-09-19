@@ -1,0 +1,82 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+
+    use Ghul.Repl.DECLARATION
+    use Ghul.Repl.DECLARATION_SPANS
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    // Where each top-level type declaration, and each partial or impl
+    // block, runs in the text of a cell that compiled.
+    @TestClass()
+    class DECLARATION_SPANS_TESTS is
+        init() is si
+
+        _texts(source: string) -> LIST[string] is
+            let result = LIST[string]()
+
+            for d in DECLARATION_SPANS.of(source) do
+                result.add("{d.kind} {d.name}: {d.text_in(source)}")
+            od
+
+            return result
+        si
+
+        @Test()
+        of__finds_a_class_with_a_body() is
+            let source = "let x = 1\nclass POINT(x: int) is\n    sum() -> int => if x > 0 then x else 0 fi\nsi\nx + 1\n"
+            let found = _texts(source)
+
+            assert found.count == 1;
+            assert found[0] =~ "class POINT: class POINT(x: int) is\n    sum() -> int => if x > 0 then x else 0 fi\nsi";
+        si
+
+        @Test()
+        of__ends_a_declaration_without_a_body_at_its_line() is
+            let found = _texts("class POINT(x: int, y: int)\nlet p = POINT(1, 2)\n")
+
+            assert found.count == 1;
+            assert found[0] =~ "class POINT: class POINT(x: int, y: int)";
+        si
+
+        @Test()
+        of__finds_a_union_written_on_one_line() is
+            let found = _texts("union Tree is LEAF(value: int); NODE(left: Tree, right: Tree); si\n")
+
+            assert found.count == 1;
+            assert found[0] =~ "union Tree: union Tree is LEAF(value: int); NODE(left: Tree, right: Tree); si";
+        si
+
+        @Test()
+        of__names_an_impl_by_the_type_after_for() is
+            let found = _texts("impl Printer for List[T] is\n    print() -> string => \"l\"\nsi\n")
+
+            assert found.count == 1;
+            assert found[0].starts_with("impl List: impl Printer for List[T] is");
+        si
+
+        @Test()
+        of__takes_a_pragma_with_its_declaration() is
+            let found = _texts("@equality()\nclass P(x: int)\n")
+
+            assert found.count == 1;
+            assert found[0] =~ "class P: @equality()\nclass P(x: int)";
+        si
+
+        // Block words inside strings and comments are not blocks.
+        @Test()
+        of__passes_over_strings_and_comments() is
+            let source = "class C is\n    // si fi\n    say() -> string => \"si {{\"is\"}} fi\"\nsi\nclass D(x: int)\n"
+            let found = _texts(source)
+
+            assert found.count == 2;
+            assert found[1] =~ "class D: class D(x: int)";
+        si
+
+        @Test()
+        of__ignores_a_keyword_escaped_as_a_name() is
+            assert _texts("let `class = 1\n").count == 0;
+        si
+    si
+si

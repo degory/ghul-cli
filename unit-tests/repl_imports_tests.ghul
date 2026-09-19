@@ -233,6 +233,67 @@ namespace Ghul.Cli.Tests is
             assert Ghul.Repl.CELL_EXPORTS.is_user_name("count_async");
         si
 
+
+        // A partial or impl block for a type an earlier cell declared
+        // declares that type again, with the earlier text, ahead of the
+        // block.
+        @Test()
+        prepare__carries_an_earlier_type_a_block_adds_to() is
+            let session = SESSION(false)
+
+            _accept(session, "class P(x: int)\n", LIST[string](["P"]));
+
+            let request = session.prepare("partial P is\n    f() -> int => x\nsi\n")
+
+            assert request.carried_names.count == 1;
+            assert request.carried_names[0] =~ "P";
+            assert request.carried_line_count == 1;
+            assert request.source =~ "use cell1.`P\nclass P(x: int)\npartial P is\n    f() -> int => x\nsi\n";
+            assert request.prelude_line_count == 2;
+        si
+
+        // A third cell adding to the type carries the second one's block
+        // too, so what it declares is the type as it now stands.
+        @Test()
+        prepare__carries_every_block_added_since() is
+            let session = SESSION(false)
+
+            _accept(session, "class P(x: int)\n", LIST[string](["P"]));
+            _accept(session, "partial P is\n    f() -> int => x\nsi\n", LIST[string](["P"]));
+
+            let request = session.prepare("partial P is\n    g() -> int => f()\nsi\n")
+
+            assert request.carried_line_count == 4;
+            assert request.source.contains("class P(x: int)\npartial P is\n    f() -> int => x\nsi\npartial P is\n    g()");
+        si
+
+        @Test()
+        prepare__carries_nothing_for_a_block_on_a_type_declared_in_the_cell() is
+            let session = SESSION(false)
+
+            _accept(session, "class P(x: int)\n", LIST[string](["P"]));
+
+            let request = session.prepare("class P(y: int)\npartial P is\n    f() -> int => y\nsi\n")
+
+            assert request.carried_names.count == 0;
+            assert request.carried_line_count == 0;
+        si
+
+        // Declaring the type again starts its text over.
+        @Test()
+        prepare__forgets_blocks_added_before_a_type_is_declared_again() is
+            let session = SESSION(false)
+
+            _accept(session, "class P(x: int)\n", LIST[string](["P"]));
+            _accept(session, "partial P is\n    f() -> int => x\nsi\n", LIST[string](["P"]));
+            _accept(session, "class P(y: int)\n", LIST[string](["P"]));
+
+            let request = session.prepare("partial P is\n    g() -> int => y\nsi\n")
+
+            assert request.carried_line_count == 1;
+            assert !request.source.contains("f()");
+        si
+
     si
 
     @TestClass()

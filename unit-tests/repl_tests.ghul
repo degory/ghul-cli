@@ -217,6 +217,21 @@ namespace Ghul.Cli.Tests is
             assert !shown.location?;
             assert shown.render().starts_with("internal: the session prelude failed: ");
         si
+
+        // An error in an earlier definition the cell declared again is
+        // shown against the block that carried it, saying which it was.
+        @Test()
+        for_display__shows_an_error_in_a_carried_definition_against_its_block() is
+            let cells = Collections.MAP[string, Ghul.Repl.CELL_SPAN]()
+
+            cells["cell3"] = Ghul.Repl.CELL_SPAN(3, 4, 2, "the earlier definition of P", 2)
+
+            let shown = DIAGNOSTIC_LINES.for_display(
+                Ghul.Repl.CELL_DIAGNOSTIC.parse("cell3.ghul: 3,10..3,12: error: symbol not found: q"),
+                cells)
+
+            assert shown.render() =~ "cell-3: 2,1..2,1: error: in the earlier definition of P: symbol not found: q";
+        si
     si
 
     @TestClass()

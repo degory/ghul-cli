@@ -13,7 +13,10 @@ namespace Ghul.Repl is
     );
 
     // What a host has to compile, and nothing about how. The source is
-    // the whole cell text, generated prelude included. The references
+    // the whole cell text, generated prelude included. The prelude's
+    // last `carried_line_count` lines are the earlier definitions of the
+    // types in `carried_names`, which the cell adds to with partial or
+    // impl blocks and so has to declare again. The references
     // are the names of the session's earlier cells, in the order they
     // were accepted, which the host maps to whatever it holds them as -
     // a file, bytes, an assembly it already has loaded. A host that
@@ -25,7 +28,9 @@ namespace Ghul.Repl is
         name: string,
         source: string,
         prelude_line_count: int,
-        references: Collections.List[string]
+        references: Collections.List[string],
+        carried_line_count: int,
+        carried_names: Collections.List[string]
     );
 
     // What the host got back. The diagnostics still carry the paths and
@@ -93,6 +98,11 @@ namespace Ghul.Repl is
         // Imports that bring in a set of names rather than one.
         _wildcards: LIST[string]
 
+        // The text of each type an accepted cell declared, by name, with
+        // every partial and impl block later cells added to it: what a
+        // cell extending the type declares again.
+        _type_sources: Collections.MAP[string, LIST[string]]
+
         init() is
             self.init(true)
         si
@@ -103,6 +113,7 @@ namespace Ghul.Repl is
             _want_default_use = want_default_use
             _bindings = Collections.MAP[string, string]()
             _wildcards = LIST[string]()
+            _type_sources = Collections.MAP[string, LIST[string]]()
         si
 
         cells: Collections.List[CELL] => _cells
@@ -173,10 +184,25 @@ namespace Ghul.Repl is
         // What the next submission needs compiling. Calling this twice
         // without accepting in between describes the same cell twice:
         // nothing is recorded until the reply comes back.
+        //
+        // A partial or impl block for a type an earlier cell declared
+        // cannot reopen that cell's compiled type, so the type's own
+        // text, with every block added to it since, is declared again in
+        // this cell ahead of what the user wrote, and the block adds to
+        // that. Later cells then see this cell's type.
         prepare(source: string) -> CELL_REQUEST is
             let index = _cells.count + 1
-            let prelude_text = prelude_for(source)
+            let carried_names = carried_by(source)
+            let carried = LIST[string]()
+
+            for name in carried_names do
+                carried.add_range(_type_sources[name])
+            od
+
+            let carried_text = if carried.count == 0 then "" else "{carried |> Ghul.Pipes.join("\n")}\n" fi
+            let prelude_text = "{prelude_for(source)}{carried_text}"
             let prelude_line_count = if prelude_text.length == 0 then 0 else prelude_text.split(['\n']).count - 1 fi
+            let carried_line_count = if carried_text.length == 0 then 0 else carried_text.split(['\n']).count - 1 fi
 
             let references = LIST[string]()
 
@@ -189,7 +215,35 @@ namespace Ghul.Repl is
                 cell_name_for(index),
                 "{prelude_text}{source}",
                 prelude_line_count,
-                references)
+                references,
+                carried_line_count,
+                carried_names)
+        si
+
+        // The types an earlier cell declared that the source adds to
+        // without declaring them itself.
+        carried_by(source: string) -> Collections.List[string] is
+            let declarations = DECLARATION_SPANS.of(source)
+            let declared = Collections.SET[string]()
+
+            for d in declarations do
+                if !d.is_extension then
+                    declared.add(d.name)
+                fi
+            od
+
+            let result = LIST[string]()
+
+            for d in declarations do
+                if
+                    d.is_extension /\ !declared.contains(d.name) /\
+                    _type_sources.contains_key(d.name) /\ !result.contains(d.name)
+                then
+                    result.add(d.name)
+                fi
+            od
+
+            return result
         si
 
         // Take the answer to a request. A cell that compiled joins the
@@ -203,19 +257,28 @@ namespace Ghul.Repl is
 
             let spans = Collections.MAP[string, CELL_SPAN](_spans)
 
-            spans[request.name] = CELL_SPAN(request.index, request.prelude_line_count)
+            let span = _span_for(request)
+
+            spans[request.name] = span
 
             for diagnostic in reply.diagnostics do
-                diagnostics.add(DIAGNOSTIC_LINES.for_display(diagnostic, spans).render())
+                if let private_use = _private_use_in_carried(request, span, diagnostic) then
+                    if !diagnostics.contains(private_use) then
+                        diagnostics.add(private_use)
+                    fi
+                else
+                    diagnostics.add(DIAGNOSTIC_LINES.for_display(diagnostic, spans).render())
+                fi
             od
 
             if let loaded = reply.loaded then
                 let cell = CELL(request.index, request.name, request.source, loaded.exports)
 
                 _cells.add(cell)
-                _spans[cell.name] = CELL_SPAN(request.index, request.prelude_line_count)
+                _spans[cell.name] = span
 
                 _carry_imports(_user_text(request))
+                _record_type_sources(_user_text(request), loaded.exports)
 
                 for name in loaded.exports do
                     _bindings[name] = import_of(cell.name, name)
@@ -225,6 +288,94 @@ namespace Ghul.Repl is
             fi
 
             return SUBMIT_OUTCOME(false, diagnostics, null)
+        si
+
+        // Where a request's lines come from, for showing its diagnostics:
+        // the generated prelude, then any carried definitions, which are
+        // shown against the first block in the cell that adds to them.
+        _span_for(request: CELL_REQUEST) -> CELL_SPAN is
+            if request.carried_line_count == 0 then
+                return CELL_SPAN(request.index, request.prelude_line_count)
+            fi
+
+            let user = _user_text(request)
+            let anchor mut = 1
+
+            for d in DECLARATION_SPANS.of(user) do
+                if d.is_extension /\ _has(request.carried_names, d.name) then
+                    anchor = _line_of(user, d.start)
+                    break
+                fi
+            od
+
+            return CELL_SPAN(
+                request.index,
+                request.prelude_line_count,
+                request.carried_line_count,
+                "the earlier definition of {request.carried_names |> Ghul.Pipes.join(" and ")}",
+                anchor)
+        si
+
+        // An error in a carried definition naming an underscore name: a
+        // name private to the cell that declared it, which no later cell
+        // can see, so the type cannot be declared again anywhere else.
+        _private_use_in_carried(request: CELL_REQUEST, span: CELL_SPAN, diagnostic: CELL_DIAGNOSTIC) -> string? is
+            let location = diagnostic.location
+
+            if !location? \/ !span.is_carried_line(location.start_line) \/ !(diagnostic.severity =~ "error") then
+                return null
+            fi
+
+            let m = System.Text.RegularExpressions.Regex.match(diagnostic.message, "(?<![A-Za-z0-9_])_[A-Za-z0-9_]+")
+
+            if !m.success then
+                return null
+            fi
+
+            let names = request.carried_names |> Ghul.Pipes.join(" and ")
+
+            return
+                "{cell_label_for(request.index)}: {span.anchor_line},1..{span.anchor_line},1: error: "
+                "{names} cannot be added to from a later cell: its definition uses {m.value}, which is private "
+                "to the cell that defined it; declare {names} again instead"
+        si
+
+        _record_type_sources(user: string, exports: Collections.List[string]) is
+            let declarations = DECLARATION_SPANS.of(user)
+
+            for d in declarations do
+                if !d.is_extension /\ _has(exports, d.name) then
+                    _type_sources[d.name] = LIST[string]([d.text_in(user)])
+                fi
+            od
+
+            for d in declarations do
+                if d.is_extension /\ _type_sources.contains_key(d.name) then
+                    _type_sources[d.name].add(d.text_in(user))
+                fi
+            od
+        si
+
+        _has(names: Collections.List[string], name: string) -> bool static is
+            for n in names do
+                if n =~ name then
+                    return true
+                fi
+            od
+
+            return false
+        si
+
+        _line_of(text: string, offset: int) -> int static is
+            let line mut = 1
+
+            for i in 0..offset do
+                if text[i] == '\n' then
+                    line = line + 1
+                fi
+            od
+
+            return line
         si
 
         // A diagnostic about a request's text that was analysed rather
@@ -273,7 +424,7 @@ namespace Ghul.Repl is
                 if
                     location? /\ diagnostic.severity =~ "error" /\
                     (IO.Path.get_file_name_without_extension(location.path) ?? "") =~ request.name /\
-                    location.start_line >= 1 /\ location.start_line <= request.prelude_line_count
+                    location.start_line >= 1 /\ location.start_line <= request.prelude_line_count - request.carried_line_count
                 then
                     let directive = lines[location.start_line - 1].trim()
 
