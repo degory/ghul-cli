@@ -262,6 +262,70 @@ namespace Ghul.Cli.Repl is
             column = 0
         si
 
+        // Ctrl-U: deletes from the start of the line to the cursor.
+        kill_to_start() is
+            _set_line(line.substring(column))
+            _expected[row] = -1
+            column = 0
+        si
+
+        // Ctrl-K: deletes from the cursor to the end of the line.
+        kill_to_end() is
+            _set_line(line.substring(0, column))
+        si
+
+        // Ctrl-W: deletes the word before the cursor, and the spaces after
+        // it, as far back as the last space before it.
+        delete_word_before() is
+            let text = line
+            let start mut = column
+
+            while start > 0 /\ text[start - 1] == ' ' do
+                start = start - 1
+            od
+
+            while start > 0 /\ text[start - 1] != ' ' do
+                start = start - 1
+            od
+
+            if start < INDENTATION.leading_spaces(text) then
+                _expected[row] = -1
+            fi
+
+            _set_line(text.remove(start, column - start))
+            column = start
+        si
+
+        // To the start of the word before the cursor, or of the one the
+        // cursor is in.
+        word_left() is
+            let text = line
+
+            while column > 0 /\ !_is_word(text[column - 1]) do
+                column = column - 1
+            od
+
+            while column > 0 /\ _is_word(text[column - 1]) do
+                column = column - 1
+            od
+        si
+
+        // To the end of the word after the cursor, or of the one the cursor
+        // is in.
+        word_right() is
+            let text = line
+
+            while column < text.length /\ !_is_word(text[column]) do
+                column = column + 1
+            od
+
+            while column < text.length /\ _is_word(text[column]) do
+                column = column + 1
+            od
+        si
+
+        _is_word(c: char) -> bool static => char.is_letter_or_digit(c) \/ c == '_'
+
         end() is
             column = line.length
         si

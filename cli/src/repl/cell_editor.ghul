@@ -11,11 +11,14 @@ namespace Ghul.Cli.Repl is
     // Down move between its lines, and past the first or last line recall
     // earlier cells; Left and Right cross line ends; Enter inserts a line
     // in the middle of the cell and on its last line does what CELL_END
-    // says; Alt-Enter submits the cell from any line. Backspace at the start of a
-    // line joins it to the one above, and Delete at the end of one joins
-    // the next. Home and End (or Ctrl-A and Ctrl-E) go to either end of a
-    // line, Tab completes, a paste is taken as it is, and Ctrl-D in an
-    // empty cell ends the input. Ctrl-C does nothing here.
+    // says; Alt-Enter submits the cell from any line. Backspace at the
+    // start of a line joins it to the one above, and Delete at the end of
+    // one joins the next. Home and End (or Ctrl-A and Ctrl-E) go to either
+    // end of a line, Ctrl-Left and Ctrl-Right (or Alt-B and Alt-F) move by
+    // a word, Ctrl-U and Ctrl-K delete to either end of the line, Ctrl-W
+    // deletes the word before the cursor, Ctrl-L clears the screen, Tab
+    // completes, a paste is taken as it is, and Ctrl-D in an empty cell
+    // ends the input. Ctrl-C does nothing here.
     class CELL_EDITOR(
         _complete: (string, int, int) -> Collections.List[string]?,
         _palette: PALETTE?,
@@ -126,6 +129,10 @@ namespace Ghul.Cli.Repl is
                         if let read = _submit_now() then
                             return read
                         fi
+                    elif next.key_char == 'b' then
+                        _buffer.word_left()
+                    elif next.key_char == 'f' then
+                        _buffer.word_right()
                     elif next.key_char == '[' /\ _follows("200~") then
                         _buffer.insert_verbatim(_read_paste())
                     fi
@@ -181,9 +188,9 @@ namespace Ghul.Cli.Repl is
                 when System.ConsoleKey.DELETE then
                     _buffer.delete()
                 when System.ConsoleKey.LEFT_ARROW then
-                    _buffer.left()
+                    if is_control then _buffer.word_left() else _buffer.left() fi
                 when System.ConsoleKey.RIGHT_ARROW then
-                    _buffer.right()
+                    if is_control then _buffer.word_right() else _buffer.right() fi
                 when System.ConsoleKey.HOME then
                     _buffer.home()
                 when System.ConsoleKey.END then
@@ -218,6 +225,24 @@ namespace Ghul.Cli.Repl is
                         _buffer.home()
                     elif is_control /\ key.key == System.ConsoleKey.E then
                         _buffer.end()
+                    elif is_alt /\ key.key == System.ConsoleKey.B then
+                        _buffer.word_left()
+                    elif is_alt /\ key.key == System.ConsoleKey.F then
+                        _buffer.word_right()
+                    elif is_control /\ key.key == System.ConsoleKey.U then
+                        _buffer.kill_to_start()
+                    elif is_control /\ key.key == System.ConsoleKey.K then
+                        _buffer.kill_to_end()
+                    elif is_control /\ key.key == System.ConsoleKey.W then
+                        _buffer.delete_word_before()
+                    elif is_control /\ key.key == System.ConsoleKey.B then
+                        _buffer.left()
+                    elif is_control /\ key.key == System.ConsoleKey.F then
+                        _buffer.right()
+                    elif is_control /\ key.key == System.ConsoleKey.L then
+                        // Clears the screen, leaving the cell at the top.
+                        Std.write("{_escape}[H{_escape}[2J")
+                        _cursor_screen_row = 0
                     elif is_control /\ key.key == System.ConsoleKey.D then
                         if _buffer.is_blank /\ _buffer.lines.count == 1 then
                             _finish("")
@@ -255,8 +280,8 @@ namespace Ghul.Cli.Repl is
             return CELL_READ(if is_command then text else "{text}\n" fi, CellStep.SUBMIT, is_command)
         si
 
-        // One name on offer is written in; several are written in as far
-        // as they agree, and listed when they agree no further.
+        // One name on offer is written in. Several are written in as far
+        // as they agree, and listed below the cell.
         _complete_at() is
             let offered = _complete(_buffer.text, _buffer.row + 1, _buffer.column + 1)
 
@@ -269,14 +294,19 @@ namespace Ghul.Cli.Repl is
 
             if extension.length > 0 then
                 _buffer.insert(extension)
-            elif offered.count > 1 then
+            fi
+
+            if offered.count > 1 then
                 let row = _buffer.row
                 let column = _buffer.column
 
                 _buffer.to_end()
                 _draw()
                 Std.write("\r\n")
-                Std.write_line(offered |> Ghul.Pipes.take(60) |> Ghul.Pipes.join("  "))
+
+                for line in COMPLETION_QUERY.columns(offered, _width, 6) do
+                    Std.write_line(line)
+                od
 
                 _buffer.move_to(row, column)
                 _cursor_screen_row = 0

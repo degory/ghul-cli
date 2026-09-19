@@ -1,0 +1,156 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+
+    use Ghul.Cli.Repl.CELL_BUFFER
+    use Ghul.Cli.Repl.COMPLETION_QUERY
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    @TestClass()
+    class CELL_BUFFER_EDITING_TESTS is
+        init() is si
+
+        // A one-line cell holding `line`, the cursor `back` characters
+        // from its end.
+        _line(line: string, back: int) -> CELL_BUFFER is
+            let buffer = CELL_BUFFER()
+
+            buffer.replace(line)
+
+            for _ in 0..back do
+                buffer.left()
+            od
+
+            return buffer
+        si
+
+        @Test()
+        kill_to_start__deletes_up_to_the_cursor() is
+            let buffer = _line("let total = 5", 1)
+
+            buffer.kill_to_start()
+
+            assert buffer.line =~ "5";
+            assert buffer.column == 0;
+        si
+
+        @Test()
+        kill_to_end__deletes_from_the_cursor() is
+            let buffer = _line("let total = 5", 4)
+
+            buffer.kill_to_end()
+
+            assert buffer.line =~ "let total";
+            assert buffer.column == 9;
+        si
+
+        @Test()
+        delete_word_before__deletes_the_word_and_the_spaces_after_it() is
+            let buffer = _line("write_line(total)  ", 0)
+
+            buffer.delete_word_before()
+
+            assert buffer.line =~ "";
+            assert buffer.column == 0;
+
+            let second = _line("let a = total", 0)
+
+            second.delete_word_before()
+
+            assert second.line =~ "let a = ";
+        si
+
+        @Test()
+        word_left__stops_at_the_start_of_each_word() is
+            let buffer = _line("names.add(first_name)", 0)
+
+            buffer.word_left()
+            assert buffer.column == 10;
+
+            buffer.word_left()
+            assert buffer.column == 6;
+
+            buffer.word_left()
+            assert buffer.column == 0;
+
+            buffer.word_left()
+            assert buffer.column == 0;
+        si
+
+        @Test()
+        word_right__stops_at_the_end_of_each_word() is
+            let buffer = _line("names.add(first_name)", 0)
+
+            buffer.home()
+
+            buffer.word_right()
+            assert buffer.column == 5;
+
+            buffer.word_right()
+            assert buffer.column == 9;
+
+            buffer.word_right()
+            assert buffer.column == 20;
+
+            buffer.word_right()
+            assert buffer.column == 21;
+        si
+    si
+
+    @TestClass()
+    class COMPLETION_QUERY_TESTS is
+        init() is si
+
+        @Test()
+        prefix__is_the_name_ending_at_the_column() is
+            assert COMPLETION_QUERY.prefix("words.co", 8) =~ "co";
+            assert COMPLETION_QUERY.prefix("let first_na", 12) =~ "first_na";
+            assert COMPLETION_QUERY.prefix("x.", 2) =~ "";
+            assert COMPLETION_QUERY.prefix("abc", 10) =~ "abc";
+        si
+
+        @Test()
+        narrow__keeps_names_extending_the_prefix_once_each_in_order() is
+            let names = COMPLETION_QUERY.narrow(["count", "continue", "contains", "count", "add"], "co")
+
+            assert names.count == 3;
+            assert names[0] =~ "contains";
+            assert names[1] =~ "continue";
+            assert names[2] =~ "count";
+        si
+
+        @Test()
+        narrow__is_case_sensitive() is
+            let names = COMPLETION_QUERY.narrow(["Count", "count"], "c")
+
+            assert names.count == 1;
+            assert names[0] =~ "count";
+        si
+
+        @Test()
+        columns__lays_names_out_across_the_width() is
+            let lines = COMPLETION_QUERY.columns(LIST[string](["aa", "bbb", "c", "dd"]), 10, 6)
+
+            assert lines.count == 2;
+            assert lines[0] =~ "aa   bbb";
+            assert lines[1] =~ "c    dd";
+        si
+
+        @Test()
+        columns__says_how_many_more_past_the_last_row() is
+            let names = LIST[string]()
+
+            for i in 0..10 do
+                names.add("n{i}")
+            od
+
+            let lines = COMPLETION_QUERY.columns(names, 8, 2)
+
+            assert lines.count == 3;
+            assert lines[0] =~ "n0  n1";
+            assert lines[1] =~ "n2  n3";
+            assert lines[2] =~ "and 6 more";
+        si
+    si
+si
