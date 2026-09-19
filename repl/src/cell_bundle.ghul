@@ -1,0 +1,245 @@
+namespace Ghul.Repl is
+    use Collections.LIST
+
+    // The MIME bundle a notebook shows for the value a cell ended on.
+    // text/plain is always there and is what CELL_DISPLAY writes, so a
+    // front end that renders nothing else shows exactly what the
+    // terminal shows; a table is added beside it where a table says
+    // more than a line does.
+    //
+    // No text/markdown: every Jupyter front end renders text/html, so a
+    // markdown alternative would restate the table in a form no front
+    // end would reach for.
+    class CELL_BUNDLE is
+        _display: CELL_DISPLAY
+
+        init() is
+            _display = CELL_DISPLAY()
+        si
+
+        // How many rows a table is worth before it says how many more
+        // there are. The same limit CELL_DISPLAY renders a line under.
+        _ROWS: int static => 20
+
+        // Null where the cell produced nothing to show, exactly as
+        // CELL_DISPLAY.format answers null.
+        of(value: object?) -> Collections.List[(mime: string, payload: string)]? is
+            if !_display.format(value)? then
+                return null
+            fi
+
+            let parts = LIST[(mime: string, payload: string)]()
+
+            parts.add((mime = "text/plain", payload = _display.format(value)!))
+
+            if let table = _table(value!) then
+                parts.add((mime = "text/html", payload = table))
+            fi
+
+            return parts
+        si
+
+        // A table, where the value is a sequence of things that share a
+        // shape: a row each, and a column for each of the names that
+        // shape gives its parts. A sequence of scalars has one unnamed
+        // column, which is still worth a table - it is what makes a long
+        // list readable. Anything else gets no table at all.
+        _table(value: object) -> string? is
+            let rows = _rows(value)
+
+            if !rows? \/ rows.count == 0 then
+                return null
+            fi
+
+            let columns = _columns(rows)
+
+            let html = System.Text.StringBuilder()
+
+            html.append("<table>")
+
+            if columns? then
+                html.append("<thead><tr>")
+
+                for column in columns do
+                    html.append("<th>{_escape(column)}</th>")
+                od
+
+                html.append("</tr></thead>")
+            fi
+
+            html.append("<tbody>")
+
+            for row in rows do
+                html.append("<tr>")
+
+                for cell in row.cells do
+                    html.append("<td>{_escape(cell)}</td>")
+                od
+
+                html.append("</tr>")
+            od
+
+            html.append("</tbody></table>")
+
+            return "{html}"
+        si
+
+        // Every column name the rows agree on, or nothing where they
+        // have no names to agree on. A row whose names differ from the
+        // first row's is a sequence of unlike things, and a table of it
+        // would line up parts that are not the same part.
+        _columns(rows: Collections.List[ROW]) -> Collections.List[string]? is
+            let first = rows[0]
+
+            if !first.names? then
+                return null
+            fi
+
+            for row in rows do
+                if !row.names? \/ row.names.count != first.names.count then
+                    return null
+                fi
+
+                for i in 0..row.names.count do
+                    if row.names[i] !~ first.names[i] then
+                        return null
+                    fi
+                od
+            od
+
+            return first.names
+        si
+
+        _rows(value: object) -> Collections.List[ROW]? is
+            let flags =
+                cast System.Reflection.BindingFlags(
+                    cast int(System.Reflection.BindingFlags.PUBLIC) |
+                    cast int(System.Reflection.BindingFlags.INSTANCE))
+
+            let get_enumerator = value.get_type().get_method("GetEnumerator", flags)
+
+            if !get_enumerator? \/ get_enumerator.get_parameters().count > 0 then
+                return null
+            fi
+
+            let enumerator = get_enumerator.invoke(value, System.Array.empty[object]())
+
+            if !enumerator? then
+                return null
+            fi
+
+            let enumerator_type = enumerator.get_type()
+            let move_next = enumerator_type.get_method("MoveNext", flags)
+            let current = enumerator_type.get_property("Current", flags)
+
+            if !move_next? \/ !current? then
+                return null
+            fi
+
+            let rows = LIST[ROW]()
+            let extra mut = 0
+
+            while cast bool(move_next.invoke(enumerator, System.Array.empty[object]())!) do
+                if rows.count < _ROWS then
+                    rows.add(_row(current.get_value(enumerator)))
+                else
+                    extra = extra + 1
+                fi
+            od
+
+            if rows.count == 0 then
+                return null
+            fi
+
+            if extra > 0 then
+                let more = LIST[string]()
+
+                more.add("and {extra} more")
+
+                rows.add(ROW(null, more))
+            fi
+
+            return rows
+        si
+
+        // One element, as the cells of a row: the parts of a tuple under
+        // their element names, the key and the value of a map's pair, or
+        // the element itself where it has no parts to spread out.
+        _row(element: object?) -> ROW is
+            if !element? then
+                return ROW(null, _one("null"))
+            fi
+
+            let type = element.get_type()
+
+            if type.is_generic_type /\ type.get_generic_type_definition() == typeof(Collections.KeyValuePair[_, _]) then
+                let key = type.get_property("Key")
+                let item = type.get_property("Value")
+
+                if key? /\ item? then
+                    let names = LIST[string]()
+                    let cells = LIST[string]()
+
+                    names.add("key")
+                    names.add("value")
+
+                    cells.add(_cell(key.get_value(element)))
+                    cells.add(_cell(item.get_value(element)))
+
+                    return ROW(names, cells)
+                fi
+            fi
+
+            if let tuple = cast System.Runtime.CompilerServices.ITuple?(element) then
+                let names = _tuple_names(type, tuple.length)
+                let cells = LIST[string]()
+
+                for i in 0..tuple.length do
+                    cells.add(_cell(tuple[i]))
+                od
+
+                return ROW(names, cells)
+            fi
+
+            return ROW(null, _one(_cell(element)))
+        si
+
+        _one(text: string) -> Collections.List[string] static is
+            let cells = LIST[string]()
+
+            cells.add(text)
+
+            return cells
+        si
+
+        // A tuple's element names, which .NET keeps on the declaration
+        // rather than on the value, so a tuple reached through reflection
+        // has only its positions. Those are what a ghūl program calls
+        // them, so they are what the columns say.
+        _tuple_names(type: System.Type, length: int) -> Collections.List[string] static is
+            let names = LIST[string]()
+
+            for i in 0..length do
+                names.add("`{i}")
+            od
+
+            return names
+        si
+
+        // A cell's text is the one-line rendering, at a depth that
+        // quotes a string: a table's cells sit beside each other and
+        // have to be told apart, exactly as a tuple's parts do.
+        _cell(value: object?) -> string => _display.cell_text(value);
+
+        _escape(text: string) -> string static =>
+            text
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+
+        class ROW(_names: Collections.List[string]?, _cells: Collections.List[string]) is
+            names: Collections.List[string]? => _names
+            cells: Collections.List[string] => _cells
+        si
+    si
+si
