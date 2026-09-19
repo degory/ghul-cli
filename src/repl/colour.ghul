@@ -1,0 +1,315 @@
+namespace Ghul.Cli.Repl is
+    use Collections.LIST
+    use IO.Std
+
+    // The colours `--theme` asks for. AUTO picks light or dark from the
+    // terminal's background.
+    enum ThemeChoice is
+        AUTO,
+        DARK,
+        LIGHT,
+        NONE
+    si
+
+    // How many colours the terminal can show.
+    enum ColourDepth is
+        NONE,
+        SIXTEEN,
+        TWO_HUNDRED_FIFTY_SIX,
+        TRUE_COLOUR
+    si
+
+    // Colours for each kind of text: VS Code's Light+ and Dark+, the
+    // themes ghul.dev renders its examples in and the playground edits
+    // them in. Operators, punctuation and anything unrecognised are left
+    // in the terminal's own foreground colour, which is what Light+ and
+    // Dark+ approximate them with.
+    class PALETTE is
+        _colours: LIST[int]
+        _depth: ColourDepth
+
+        init(colours: LIST[int], depth: ColourDepth) is
+            _colours = colours
+            _depth = depth
+        si
+
+        // The colours as 0xRRGGBB, or -1 for the terminal's foreground,
+        // indexed by TokenKind.
+        light(depth: ColourDepth) -> PALETTE static =>
+            PALETTE(_table([
+                -1, 0x0000FF, 0xAF00DB, 0x0000FF, 0x0000FF, 0x267F99, 0x001080,
+                0xA31515, 0xEE0000, 0x008000, 0x098658, -1, -1
+            ]), depth)
+
+        dark(depth: ColourDepth) -> PALETTE static =>
+            PALETTE(_table([
+                -1, 0x569CD6, 0xC586C0, 0x569CD6, 0x569CD6, 0x4EC9B0, 0x9CDCFE,
+                0xCE9178, 0xD7BA7D, 0x6A9955, 0xB5CEA8, -1, -1
+            ]), depth)
+
+        _table(colours: int[]) -> LIST[int] static => LIST[int](colours)
+
+        colour(kind: TokenKind) -> int =>
+            _colours[cast int(kind)]
+
+        // Text with the runs the lexer found in it coloured. Text outside
+        // any run keeps the terminal's foreground.
+        paint(text: string, spans: Collections.List[TOKEN_SPAN]) -> string is
+            let result = System.Text.StringBuilder()
+            let written mut = 0
+
+            for span in spans do
+                if span.start < written \/ span.start + span.length > text.length then
+                    continue
+                fi
+
+                result.append(text.substring(written, span.start - written))
+
+                let foreground = colour(span.kind)
+
+                if foreground >= 0 then
+                    result.append(COLOUR_CODES.foreground(foreground, _depth))
+                    result.append(text.substring(span.start, span.length))
+                    result.append(COLOUR_CODES.RESET)
+                else
+                    result.append(text.substring(span.start, span.length))
+                fi
+
+                written = span.start + span.length
+            od
+
+            result.append(text.substring(written))
+
+            return result.to_string()
+        si
+    si
+
+    // The escape sequences that set the foreground colour.
+    class COLOUR_CODES is
+        init() is si
+
+        RESET: string static => "\u001B[39m"
+
+        foreground(colour: int, depth: ColourDepth) -> string static is
+            let red = (colour >> 16) & 0xFF
+            let green = (colour >> 8) & 0xFF
+            let blue = colour & 0xFF
+
+            case depth
+            when ColourDepth.TRUE_COLOUR then
+                return "\u001B[38;2;{red};{green};{blue}m"
+            when ColourDepth.TWO_HUNDRED_FIFTY_SIX then
+                return "\u001B[38;5;{index_256(red, green, blue)}m"
+            when ColourDepth.SIXTEEN then
+                return "\u001B[{code_16(red, green, blue)}m"
+            else
+                return ""
+            esac
+        si
+
+        // The nearest of the 256-colour palette's colour cube and grey
+        // ramp.
+        index_256(red: int, green: int, blue: int) -> int static is
+            let cube_red = _cube_step(red)
+            let cube_green = _cube_step(green)
+            let cube_blue = _cube_step(blue)
+
+            let cube_index = 16 + 36 * cube_red + 6 * cube_green + cube_blue
+            let cube_distance = _distance(red, green, blue, _cube_level(cube_red), _cube_level(cube_green), _cube_level(cube_blue))
+
+            let average = (red + green + blue) / 3
+            let grey_step = System.Math.clamp((average - 8) / 10, 0, 23)
+            let grey_level = 8 + 10 * grey_step
+            let grey_distance = _distance(red, green, blue, grey_level, grey_level, grey_level)
+
+            return if grey_distance < cube_distance then 232 + grey_step else cube_index fi
+        si
+
+        // The SGR code of the nearest of the sixteen standard colours.
+        code_16(red: int, green: int, blue: int) -> int static is
+            let best mut = 0
+            let best_distance mut = int.max_value
+
+            for i in 0..16 do
+                let colour = _sixteen[i]
+                let distance = _distance(red, green, blue, (colour >> 16) & 0xFF, (colour >> 8) & 0xFF, colour & 0xFF)
+
+                if distance < best_distance then
+                    best = i
+                    best_distance = distance
+                fi
+            od
+
+            return if best < 8 then 30 + best else 90 + best - 8 fi
+        si
+
+        // xterm's defaults for the sixteen standard colours.
+        _sixteen: int[] static => [
+            0x000000, 0xCD0000, 0x00CD00, 0xCDCD00, 0x0000EE, 0xCD00CD, 0x00CDCD, 0xE5E5E5,
+            0x7F7F7F, 0xFF0000, 0x00FF00, 0xFFFF00, 0x5C5CFF, 0xFF00FF, 0x00FFFF, 0xFFFFFF
+        ]
+
+        _cube_step(value: int) -> int static =>
+            if value < 48 then 0 elif value < 115 then 1 else (value - 35) / 40 fi
+
+        _cube_level(step: int) -> int static =>
+            if step == 0 then 0 else 55 + 40 * step fi
+
+        _distance(r1: int, g1: int, b1: int, r2: int, g2: int, b2: int) -> int static =>
+            (r1 - r2) * (r1 - r2) + (g1 - g2) * (g1 - g2) + (b1 - b2) * (b1 - b2)
+    si
+
+    // Which palette a terminal gets, from what it says about itself.
+    class COLOUR_CHOICE is
+        init() is si
+
+        // How many colours the environment says the terminal shows.
+        // NO_COLOR, set to anything, turns colour off.
+        depth(environment: (string) -> string?) -> ColourDepth static is
+            if let no_colour = environment("NO_COLOR") /\ no_colour.length > 0 then
+                return ColourDepth.NONE
+            fi
+
+            let colour_term = (environment("COLORTERM") ?? "").to_lower_invariant()
+
+            if colour_term =~ "truecolor" \/ colour_term =~ "24bit" then
+                return ColourDepth.TRUE_COLOUR
+            fi
+
+            let term = environment("TERM") ?? ""
+
+            if term.length == 0 \/ term =~ "dumb" then
+                return ColourDepth.NONE
+            fi
+
+            if term.contains("256") then
+                return ColourDepth.TWO_HUNDRED_FIFTY_SIX
+            fi
+
+            return ColourDepth.SIXTEEN
+        si
+
+        // Whether a background colour reported as an answer to an OSC 11
+        // query, `rgb:RRRR/GGGG/BBBB` with one to four hex digits a
+        // component, is light. Null when it cannot be read.
+        is_light_reply(reply: string) -> bool? static is
+            let start = reply.index_of("rgb:", System.StringComparison.ORDINAL)
+
+            if start < 0 then
+                return null
+            fi
+
+            let components = LIST[double]()
+            let digits = System.Text.StringBuilder()
+            let i mut = start + 4
+
+            while i <= reply.length /\ components.count < 3 do
+                let c = if i < reply.length then reply[i] else '/' fi
+
+                if char.is_ascii_hex_digit(c) then
+                    digits.append(c)
+                elif digits.length > 0 /\ digits.length <= 4 then
+                    let value = int.parse(digits.to_string(), System.Globalization.NumberStyles.HEX_NUMBER)
+                    let maximum = (1 << (4 * digits.length)) - 1
+
+                    components.add(cast double(value) / cast double(maximum))
+                    digits.clear()
+                else
+                    return null
+                fi
+
+                i = i + 1
+            od
+
+            if components.count < 3 then
+                return null
+            fi
+
+            let luminance = 0.2126 * components[0] + 0.7152 * components[1] + 0.0722 * components[2]
+
+            return luminance > 0.5
+        si
+
+        // Whether the background named by COLORFGBG, `foreground;background`
+        // as rxvt and others set it, is light. Null when it names none.
+        is_light_colorfgbg(value: string?) -> bool? static is
+            if !value? then
+                return null
+            fi
+
+            let last = value.last_index_of(';')
+            let background = if last >= 0 then value.substring(last + 1) else value fi
+            let index mut = 0
+
+            if !int.try_parse(background, index ref) then
+                return null
+            fi
+
+            return index == 7 \/ (index >= 9 /\ index <= 15)
+        si
+
+        // The palette for a choice, given what can be learnt about the
+        // terminal: its depth, its answer to a background query, and
+        // COLORFGBG. Dark when nothing says otherwise.
+        palette(choice: ThemeChoice, depth: ColourDepth, query_background: () -> string?, colorfgbg: string?) -> PALETTE? static is
+            if choice == ThemeChoice.NONE \/ depth == ColourDepth.NONE then
+                return null
+            fi
+
+            if choice == ThemeChoice.LIGHT then
+                return PALETTE.light(depth)
+            elif choice == ThemeChoice.DARK then
+                return PALETTE.dark(depth)
+            fi
+
+            let is_light mut = false
+
+            if let reply = query_background() then
+                is_light = is_light_reply(reply) ?? is_light_colorfgbg(colorfgbg) ?? false
+            else
+                is_light = is_light_colorfgbg(colorfgbg) ?? false
+            fi
+
+            return if is_light then PALETTE.light(depth) else PALETTE.dark(depth) fi
+        si
+    si
+
+    // Asks the terminal for its background colour with OSC 11, waiting a
+    // short while for the answer. Terminals that do not answer leave
+    // nothing to read, and the wait runs out.
+    class BACKGROUND_QUERY is
+        init() is si
+
+        ask(timeout_milliseconds: int) -> string? static is
+            try
+                // Reading from the console first puts it into the mode that
+                // does not echo, so the answer is not written back to the
+                // screen.
+                let _ = Std.key_available
+
+                Std.write("\u001B]11;?\u001B\\")
+
+                let reply = System.Text.StringBuilder()
+                let deadline = System.DateTime.utc_now.add_milliseconds(cast double(timeout_milliseconds))
+
+                while System.DateTime.utc_now < deadline do
+                    if Std.key_available then
+                        let c = Std.read_key(true).key_char
+
+                        reply.append(c)
+
+                        if reply.length > 4 /\ (c == '\\' \/ cast int(c) == 7) then
+                            return reply.to_string()
+                        fi
+                    else
+                        System.Threading.Thread.sleep(5)
+                    fi
+                od
+
+                return if reply.length > 0 then reply.to_string() else null fi
+            catch e: System.Exception
+                return null
+            yrt
+        si
+    si
+si

@@ -90,7 +90,12 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
   terminal, it ends on a statement written over several lines, which
   holds the cell open; a blank line submits (without showing the value
   after a held construct), and a line holding only `.` submits showing
-  it. The session needs
+  it. `INDENTATION` is where a new line starts and when a closing word
+  steps it back out, `GHUL_LEXER` splits typed text into coloured runs
+  with the playground editor grammar's word lists and never fails on
+  half-typed input, and `PALETTE` / `COLOUR_CHOICE` / `BACKGROUND_QUERY`
+  pick Light+ or Dark+ at the depth the terminal supports, from `--theme`,
+  an OSC 11 query, `COLORFGBG` and `NO_COLOR`. The session needs
   `ghul.compiler` `MINIMUM_REPL_COMPILER` or newer, for `--submission`,
   `--check-complete` and `--compile-server`, and refuses to start on
   an older one rather than failing a cell at a time.

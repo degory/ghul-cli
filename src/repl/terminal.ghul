@@ -102,7 +102,7 @@ namespace Ghul.Cli.Repl is
     // report what happened. Everything it knows about a cell it learns
     // from SESSION, so a notebook or the playground can take its place
     // without any of this.
-    class TERMINAL(_make_session: () -> HOSTED_SESSION, _want_default_use: bool) is
+    class TERMINAL(_make_session: () -> HOSTED_SESSION, _want_default_use: bool, _theme: ThemeChoice) is
         _display: CELL_DISPLAY
         _current: HOSTED_SESSION?
 
@@ -125,10 +125,21 @@ namespace Ghul.Cli.Repl is
 
             _reader =
                 if is_interactive then
-                    CONSOLE_EDITOR((text, line, column) => _names(text, line, column))
+                    CONSOLE_EDITOR((text, line, column) => _names(text, line, column), _palette())
                 else
                     PLAIN_READER()
                 fi
+        si
+
+        // What the input is coloured with at a terminal, if anything.
+        _palette() -> PALETTE? is
+            let environment = (name: string) -> string? => System.Environment.get_environment_variable(name)
+
+            return COLOUR_CHOICE.palette(
+                _theme,
+                COLOUR_CHOICE.depth(environment),
+                () => BACKGROUND_QUERY.ask(200),
+                environment("COLORFGBG"))
         si
 
         run() -> int is

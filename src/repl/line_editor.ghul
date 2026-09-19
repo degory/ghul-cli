@@ -37,11 +37,22 @@ namespace Ghul.Cli.Repl is
             cursor = cursor + value.length
         si
 
+        // Backspace in the spaces a line starts with takes the cursor back
+        // a whole indent step; anywhere else it deletes one character.
         backspace() is
-            if cursor > 0 then
-                cursor = cursor - 1
-                _text.remove(cursor, 1)
+            if cursor == 0 then
+                return
             fi
+
+            let target =
+                if is_in_indent then
+                    INDENTATION.backspace_column(cursor)
+                else
+                    cursor - 1
+                fi
+
+            _text.remove(target, cursor - target)
+            cursor = target
         si
 
         delete() is
@@ -76,6 +87,27 @@ namespace Ghul.Cli.Repl is
             _text.clear()
             _text.append(value)
             cursor = value.length
+        si
+
+        // Whether the cursor is in or at the end of the spaces the line
+        // starts with.
+        is_in_indent: bool => INDENTATION.leading_spaces(text) >= cursor
+
+        // The line re-indented as INDENTATION says, the cursor staying
+        // with the text it was in.
+        reindent(expected: int) is
+            let text = self.text
+            let adjusted = INDENTATION.adjust(text, expected)
+
+            if adjusted =~ text then
+                return
+            fi
+
+            let moved = adjusted.length - text.length
+
+            _text.clear()
+            _text.append(adjusted)
+            cursor = System.Math.clamp(cursor + moved, 0, adjusted.length)
         si
 
         // The part of a name the cursor follows, which completion extends.
@@ -160,8 +192,9 @@ namespace Ghul.Cli.Repl is
     // A line edited in place at the terminal: the arrow keys move and
     // recall, backspace and delete delete, Home and End (or Ctrl-A and
     // Ctrl-E) go to either end, Tab completes, and Ctrl-D on an empty line
-    // ends the input.
-    class CONSOLE_EDITOR(_complete: (string, int, int) -> Collections.List[string]?): LineReader is
+    // ends the input. A line starts indented as INDENTATION says, and is
+    // coloured as it is typed when there is a palette to colour it with.
+    class CONSOLE_EDITOR(_complete: (string, int, int) -> Collections.List[string]?, _palette: PALETTE?): LineReader is
         _history: LINE_HISTORY
 
         init(..) is
@@ -170,8 +203,15 @@ namespace Ghul.Cli.Repl is
 
         read_line(prompt: string, before: Collections.List[string]) -> string? is
             let buffer = LINE_BUFFER()
+            let expected = INDENTATION.for_next_line(before)
 
-            Std.write(prompt)
+            buffer.insert(string(' ', expected))
+
+            // Cleared once the indent is changed by hand, after which the
+            // line keeps whatever indent it is given.
+            let is_indent_automatic mut = true
+
+            _redraw(prompt, buffer, before)
 
             do
                 let key = Std.read_key(true)
@@ -185,8 +225,16 @@ namespace Ghul.Cli.Repl is
 
                     return buffer.text
                 when System.ConsoleKey.BACKSPACE then
+                    if buffer.is_in_indent then
+                        is_indent_automatic = false
+                    fi
+
                     buffer.backspace()
                 when System.ConsoleKey.DELETE then
+                    if buffer.is_in_indent then
+                        is_indent_automatic = false
+                    fi
+
                     buffer.delete()
                 when System.ConsoleKey.LEFT_ARROW then
                     buffer.left()
@@ -224,7 +272,11 @@ namespace Ghul.Cli.Repl is
                     fi
                 esac
 
-                _redraw(prompt, buffer)
+                if is_indent_automatic /\ key.key != System.ConsoleKey.UP_ARROW /\ key.key != System.ConsoleKey.DOWN_ARROW then
+                    buffer.reindent(expected)
+                fi
+
+                _redraw(prompt, buffer, before)
             od
         si
 
@@ -246,22 +298,32 @@ namespace Ghul.Cli.Repl is
             elif offered.count > 1 then
                 Std.write_line("")
                 Std.write_line(offered |> Ghul.Pipes.take(60) |> Ghul.Pipes.join("  "))
-                Std.write(prompt)
+                _redraw(prompt, buffer, before)
             fi
         si
 
         // The line written again from the prompt on, cleared to its end,
         // with the cursor put back where it is in the text.
-        _redraw(prompt: string, buffer: LINE_BUFFER) is
+        _redraw(prompt: string, buffer: LINE_BUFFER, before: Collections.List[string]) is
             let text = buffer.text
 
-            Std.write("\r{prompt}{text}\u001B[K")
+            Std.write("\r{prompt}{_painted(text, before)}\u001B[K")
 
             let back = text.length - buffer.cursor
 
             if back > 0 then
                 Std.write("\u001B[{back}D")
             fi
+        si
+
+        // The line coloured, read in the light of the lines before it so
+        // that a comment or string they leave open carries on into it.
+        _painted(text: string, before: Collections.List[string]) -> string is
+            if let palette = _palette then
+                return palette.paint(text, LINE_SPANS.of_last_line(before, text))
+            fi
+
+            return text
         si
     si
 si

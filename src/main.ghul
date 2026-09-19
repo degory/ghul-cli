@@ -591,24 +591,45 @@ namespace Ghul.Cli is
     si
 
     // What `ghul repl` was asked for.
-    class REPL_OPTIONS(want_server: bool, want_default_use: bool) is
+    class REPL_OPTIONS(want_server: bool, want_default_use: bool, theme: Repl.ThemeChoice) is
         // Null when an argument is not one the session takes.
         parse(args: Collections.List[string]) -> REPL_OPTIONS? static is
             let want_server mut = true
             let want_default_use mut = true
+            let theme mut = Repl.ThemeChoice.AUTO
+            let i mut = 0
 
-            for argument in args do
-                case argument
+            while i < args.count do
+                case args[i]
                 when "--no-server" then
                     want_server = false
                 when "--no-default-use" then
                     want_default_use = false
+                when "--theme" then
+                    i = i + 1
+
+                    if i >= args.count then
+                        return null
+                    fi
+
+                    case args[i]
+                    when "dark" then
+                        theme = Repl.ThemeChoice.DARK
+                    when "light" then
+                        theme = Repl.ThemeChoice.LIGHT
+                    when "none" then
+                        theme = Repl.ThemeChoice.NONE
+                    else
+                        return null
+                    esac
                 else
                     return null
                 esac
+
+                i = i + 1
             od
 
-            return REPL_OPTIONS(want_server, want_default_use)
+            return REPL_OPTIONS(want_server, want_default_use, theme)
         si
     si
 
@@ -616,7 +637,7 @@ namespace Ghul.Cli is
         let options = REPL_OPTIONS.parse(args)
 
         if !options? then
-            Std.error.write_line("usage: ghul repl [--no-server] [--no-default-use]")
+            Std.error.write_line("usage: ghul repl [--no-server] [--no-default-use] [--theme dark|light|none]")
 
             return 1
         fi
@@ -649,7 +670,7 @@ namespace Ghul.Cli is
                     say)
 
             let terminal =
-                Repl.TERMINAL(make_session, options.want_default_use)
+                Repl.TERMINAL(make_session, options.want_default_use, options.theme)
 
             return run_closing_on_signal(terminal)
         fi
