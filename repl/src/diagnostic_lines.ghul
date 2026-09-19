@@ -44,20 +44,54 @@ namespace Ghul.Repl is
         // of the session, related ones included, names the cell by its
         // label and counts lines from the first the user wrote, using the
         // prelude of the cell it points into. A location in some other
-        // file, or in a cell's generated prelude, is left as it is.
+        // file is left as it is. One in a cell's generated prelude points
+        // at text the user did not write, so it is reported as the
+        // session's own failure instead. Names a cell's namespace
+        // qualifies are shown without it.
         for_display(diagnostic: CELL_DIAGNOSTIC, cells: Collections.Map[string, CELL_SPAN]) -> CELL_DIAGNOSTIC static is
+            if _is_in_prelude(diagnostic.location, cells) then
+                return CELL_DIAGNOSTIC(
+                    null,
+                    diagnostic.severity,
+                    diagnostic.code,
+                    "internal: the session prelude failed: {diagnostic.render()}",
+                    Collections.LIST[CELL_RELATED]())
+            fi
+
             let related = Collections.LIST[CELL_RELATED]()
 
             for r in diagnostic.related do
-                related.add(CELL_RELATED(r.message, _for_display(r.location, cells)))
+                related.add(CELL_RELATED(without_cell_names(r.message), _for_display(r.location, cells)))
             od
 
             return CELL_DIAGNOSTIC(
                 _for_display(diagnostic.location, cells),
                 diagnostic.severity,
                 diagnostic.code,
-                diagnostic.message,
+                without_cell_names(diagnostic.message),
                 related)
+        si
+
+        // A message with each `cellN.` qualifier taken off the names it
+        // mentions: the user knows a definition by its name, not by the
+        // cell that happened to make it.
+        without_cell_names(message: string) -> string static =>
+            Regex.replace(message, "\\b{CELL_NAME_STEM}[0-9]+\\.", "")
+
+        _is_in_prelude(location: CELL_LOCATION?, cells: Collections.Map[string, CELL_SPAN]) -> bool static is
+            if !location? then
+                return false
+            fi
+
+            let file = IO.Path.get_file_name(location.path) ?? ""
+
+            if !file.ends_with(".ghul") then
+                return false
+            fi
+
+            let name = file.substring(0, file.length - 5)
+
+            return cells.contains_key(name) /\ location.start_line <= cells[name].prelude_lines
         si
 
         _for_display(location: CELL_LOCATION?, cells: Collections.Map[string, CELL_SPAN]) -> CELL_LOCATION? static is

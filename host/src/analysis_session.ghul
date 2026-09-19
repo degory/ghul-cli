@@ -34,6 +34,10 @@ namespace Ghul.Repl.Host is
             let start_info = DETACHED_START.of(compiler_shim)
 
             start_info.argument_list.add("--analyse")
+
+            for argument in REPL_COMPILER_ARGUMENTS.quieted do
+                start_info.argument_list.add(argument)
+            od
             start_info.argument_list.add("--submission")
             start_info.argument_list.add(ANALYSIS_SESSION.INPUT_NAME)
             start_info.argument_list.add("--analysis-idle-timeout")

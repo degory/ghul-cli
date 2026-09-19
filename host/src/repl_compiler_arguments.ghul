@@ -1,0 +1,13 @@
+namespace Ghul.Repl.Host is
+    // What every compiler a session starts is told, whichever way it
+    // compiles or analyses a cell.
+    class REPL_COMPILER_ARGUMENTS is
+        // Warnings that are advice about code meant to last rather than
+        // about code being tried out. Passing a function that is not
+        // declared pure where a pure one is asked for costs nothing a
+        // cell would notice, and saying so at every `map(f)` teaches a
+        // newcomer to ignore warnings.
+        quieted: Collections.List[string] static =>
+            Collections.LIST[string](["--suppress", "impure-function-argument"])
+    si
+si

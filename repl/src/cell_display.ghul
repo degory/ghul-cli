@@ -1,10 +1,16 @@
 namespace Ghul.Repl is
     use Collections.LIST
+    use System.Text.RegularExpressions.Regex
 
     // One line for the value a cell ended on, or null where there is
     // nothing to show. Everything the terminal knows about rendering a
     // value is here, so a notebook wanting a richer display - a MIME
     // bundle, a table - replaces this and nothing else.
+    //
+    // Values are written as ghūl would write them where it can: strings
+    // inside a structure are quoted, types are named as a ghūl program
+    // names them, and an object with no text of its own shows its type
+    // and its public properties.
     class CELL_DISPLAY is
         init() is si
 
@@ -12,44 +18,223 @@ namespace Ghul.Repl is
         // saying how many more there are.
         _LIMIT: int static => 20
 
+        // How far into nested values the line goes before a value is
+        // named by its type alone.
+        _DEPTH: int static => 2
+
         format(value: object?) -> string? is
             if !value? then
                 return null
             fi
 
-            return _render(value, true)
+            return _render(value, 0)
         si
 
-        _render(value: object?, want_elements: bool) -> string is
+        _render(value: object?, depth: int) -> string is
             if !value? then
                 return "null"
             fi
 
-            // A string is a sequence of characters, and rendering it as
-            // one would be nobody's idea of an answer.
+            let type = value.get_type()
+
+            // A string is shown as it is at the top, where it is the
+            // whole answer, and quoted inside anything else, where it has
+            // to be told apart from its neighbours.
             if let text: string = value then
-                return text
+                return if depth == 0 then text else _quote(text) fi
             fi
 
-            if want_elements then
-                if let elements = _try_elements(value) then
-                    return elements
-                fi
+            if type == typeof(char) then
+                return if depth == 0 then "{value}" else "'{value}'" fi
+            fi
+
+            if type == typeof(bool) then
+                return if cast bool(value) then "true" else "false" fi
+            fi
+
+            if depth > _DEPTH then
+                return type_name(type)
+            fi
+
+            if let tuple = cast System.Runtime.CompilerServices.ITuple?(value) then
+                return _tuple(tuple, depth)
+            fi
+
+            if type.is_generic_type /\ type.get_generic_type_definition() == typeof(Collections.KeyValuePair[_, _]) then
+                return _pair(value, type, depth)
+            fi
+
+            if let elements = _try_elements(value, depth) then
+                return elements
+            fi
+
+            if !_has_own_text(type) then
+                return _describe(value, type, depth)
             fi
 
             return "{value}"
         si
+
+        _quote(text: string) -> string =>
+            "\"{text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\t", "\\t")}\""
+
+        _tuple(tuple: System.Runtime.CompilerServices.ITuple, depth: int) -> string is
+            let rendered = LIST[string]()
+
+            for i in 0..tuple.length do
+                rendered.add(_render(tuple[i], depth + 1))
+            od
+
+            return "({rendered |> Ghul.Pipes.join(", ")})"
+        si
+
+        _pair(value: object, type: System.Type, depth: int) -> string is
+            let key = type.get_property("Key")?.get_value(value)
+            let item = type.get_property("Value")?.get_value(value)
+
+            return "({_render(key, depth + 1)}, {_render(item, depth + 1)})"
+        si
+
+        // Whether a type says what it is in its own words. One that
+        // does not would only give back its .NET type name.
+        _has_own_text(type: System.Type) -> bool is
+            let to_string = type.get_method("ToString", System.Type.empty_types)
+
+            if !to_string? then
+                return true
+            fi
+
+            let declaring = to_string.declaring_type
+
+            return declaring != typeof(object) /\ declaring != typeof(System.ValueType)
+        si
+
+        // The type, and the public properties and fields a ghūl program
+        // could read, as the constructor call that would build it reads.
+        _describe(value: object, type: System.Type, depth: int) -> string is
+            let parts = LIST[string]()
+
+            for property in type.get_properties(_instance_flags()) do
+                if
+                    property.can_read /\ property.get_index_parameters().count == 0 /\
+                    CELL_EXPORTS.is_user_name(property.name) /\ parts.count < _LIMIT
+                then
+                    parts.add("{property.name} = {_render(property.get_value(value), depth + 1)}")
+                fi
+            od
+
+            for member in type.get_fields(_instance_flags()) do
+                if CELL_EXPORTS.is_user_name(member.name) /\ parts.count < _LIMIT then
+                    parts.add("{member.name} = {_render(member.get_value(value), depth + 1)}")
+                fi
+            od
+
+            let name = type_name(type)
+
+            if parts.count == 0 then
+                return name
+            fi
+
+            return "{name}({parts |> Ghul.Pipes.join(", ")})"
+        si
+
+        // A type as a ghūl program names it: the built-in names for the
+        // types that have one, type arguments in square brackets, and
+        // with no mention of the cell a definition came from.
+        type_name(type: System.Type) -> string static is
+            if type.is_array then
+                let element = type.get_element_type()
+
+                return "{if element? then type_name(element) else "?" fi}[]"
+            fi
+
+            if type.is_generic_type /\ type.get_generic_type_definition() == typeof(System.Nullable[_]) then
+                return "{type_name(type.get_generic_arguments()[0])}?"
+            fi
+
+            if let builtin = _builtin_name(type) then
+                return builtin
+            fi
+
+            let name mut = type.name
+
+            let tick = name.index_of('`')
+
+            if tick >= 0 then
+                name = name.substring(0, tick)
+            fi
+
+            if let owner = _cell_relative_namespace(type.`namespace) then
+                name = "{owner}.{name}"
+            fi
+
+            if type.is_generic_type then
+                let arguments = LIST[string]()
+
+                for argument in type.get_generic_arguments() do
+                    arguments.add(type_name(argument))
+                od
+
+                return "{name}[{arguments |> Ghul.Pipes.join(", ")}]"
+            fi
+
+            return name
+        si
+
+        // What a type's namespace adds to its name when shown: the union
+        // for a variant of one declared in a cell, and nothing otherwise:
+        // a cell's own namespace is noise, and a library type reads well
+        // enough by its short name.
+        _cell_relative_namespace(space: string?) -> string? static is
+            if !space? then
+                return null
+            fi
+
+            let m = Regex.match(space, "^{CELL_NAME_STEM}[0-9]+(\\.(?<rest>.*))?$")
+
+            if !m.success then
+                return null
+            fi
+
+            let rest = m.groups["rest"]
+
+            return if rest.success then rest.value else null fi
+        si
+
+        _builtin_name(type: System.Type) -> string? static is
+            if type == typeof(int) then return "int" fi
+            if type == typeof(long) then return "long" fi
+            if type == typeof(short) then return "short" fi
+            if type == typeof(byte) then return "byte" fi
+            if type == typeof(uint) then return "uint" fi
+            if type == typeof(ulong) then return "ulong" fi
+            if type == typeof(ushort) then return "ushort" fi
+            if type == typeof(ubyte) then return "ubyte" fi
+            if type == typeof(word) then return "word" fi
+            if type == typeof(uword) then return "uword" fi
+            if type == typeof(double) then return "double" fi
+            if type == typeof(single) then return "single" fi
+            if type == typeof(decimal) then return "decimal" fi
+            if type == typeof(bool) then return "bool" fi
+            if type == typeof(char) then return "char" fi
+            if type == typeof(string) then return "string" fi
+            if type == typeof(object) then return "object" fi
+
+            return null
+        si
+
+        _instance_flags() -> System.Reflection.BindingFlags static =>
+            cast System.Reflection.BindingFlags(
+                cast int(System.Reflection.BindingFlags.PUBLIC) |
+                cast int(System.Reflection.BindingFlags.INSTANCE))
 
         // Whatever the value holds, where it holds a sequence of things.
         // Asked of the value rather than of a type it might implement:
         // the non-generic enumerable interface has no name in ghūl, and
         // the generic one cannot be named without knowing the element
         // type, which is the thing being discovered.
-        _try_elements(value: object) -> string? is
-            let flags =
-                cast System.Reflection.BindingFlags(
-                    cast int(System.Reflection.BindingFlags.PUBLIC) |
-                    cast int(System.Reflection.BindingFlags.INSTANCE))
+        _try_elements(value: object, depth: int) -> string? is
+            let flags = _instance_flags()
 
             let get_enumerator = value.get_type().get_method("GetEnumerator", flags)
 
@@ -76,10 +261,7 @@ namespace Ghul.Repl is
 
             while cast bool(move_next.invoke(enumerator, System.Array.empty[object]())!) do
                 if rendered.count < _LIMIT then
-                    // One level deep: a list of lists says what its
-                    // elements are, and no further, since a line is what
-                    // there is room for.
-                    rendered.add(_render(current.get_value(enumerator), false))
+                    rendered.add(_render(current.get_value(enumerator), depth + 1))
                 else
                     extra = extra + 1
                 fi
