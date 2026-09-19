@@ -132,19 +132,35 @@ namespace Ghul.Repl.Host is
             fi
 
             let restore_directory = IO.Path.join([directory, "packages", System.Guid.new_guid().to_string("N")])
-            let restored = PACKAGE_RESTORE.assemblies(package, version, restore_directory)
 
-            if let problem = restored.problem then
-                return ADDED_REFERENCES(names, problem)
-            fi
+            // The restore's project and its build output go once what it
+            // produced is copied beside the cells.
+            try
+                let restored = PACKAGE_RESTORE.assemblies(package, version, restore_directory)
 
-            for path in restored.paths do
-                if let problem = _add_assembly(path, names) then
+                if let problem = restored.problem then
                     return ADDED_REFERENCES(names, problem)
                 fi
-            od
 
-            return ADDED_REFERENCES(names, null)
+                for path in restored.paths do
+                    if let problem = _add_assembly(path, names) then
+                        return ADDED_REFERENCES(names, problem)
+                    fi
+                od
+
+                return ADDED_REFERENCES(names, null)
+            finally
+                _delete_quietly(restore_directory)
+            yrt
+        si
+
+        _delete_quietly(directory: string) static is
+            try
+                if IO.Directory.exists(directory) then
+                    IO.Directory.delete(directory, true)
+                fi
+            catch e: System.Exception
+            yrt
         si
 
         // Copied into the session's directory under its assembly name, which
