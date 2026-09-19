@@ -44,6 +44,41 @@ namespace Ghul.Cli.Tests is
             assert buffer.cursor == 1;
         si
 
+        // In the spaces a line starts with, backspace goes back a whole
+        // indent step.
+        @Test()
+        backspace__removes_an_indent_step_in_leading_spaces() is
+            let buffer = _typed("      ")
+
+            buffer.backspace()
+
+            assert buffer.text =~ "    ";
+            assert buffer.cursor == 4;
+
+            buffer.backspace()
+
+            assert buffer.text =~ "";
+        si
+
+        @Test()
+        backspace__removes_one_character_after_the_leading_spaces() is
+            let buffer = _typed("    ab")
+
+            buffer.backspace()
+
+            assert buffer.text =~ "    a";
+        si
+
+        @Test()
+        reindent__outdents_a_closing_word_keeping_the_cursor_after_it() is
+            let buffer = _typed("        fi")
+
+            buffer.reindent(8)
+
+            assert buffer.text =~ "    fi";
+            assert buffer.cursor == 6;
+        si
+
         @Test()
         moving__stops_at_either_end() is
             let buffer = _typed("ab")

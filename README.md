@@ -116,6 +116,23 @@ Read from a pipe or a file rather than typed at a terminal, a construct
 over several lines ends the submission when it closes, and a `.` line
 ends one too.
 
+At a terminal each line starts indented four spaces further in after a
+line that opens a block - one ending in `is`, `then`, `else`, `do`, `try`
+or `=>`, a `case` or `catch` line, or an open bracket - and a line
+starting with `si`, `fi`, `od`, `esac`, `yrt`, `else`, `elif`, `when`,
+`catch` or `finally` steps back out as the word is typed. Backspace in a
+line's indent removes a whole step, and leaves the line's indent to you
+from then on.
+
+What you type is coloured as you type it, in the colours ghul.dev and the
+playground use: VS Code's Dark+ on a dark background and Light+ on a light
+one. The session asks the terminal for its background colour, falls back
+to `COLORFGBG`, and uses the dark colours when neither says. `ghul repl
+--theme dark`, `--theme light` or `--theme none` chooses for it. There
+is no colour when `NO_COLOR` is set, and none when the input or output is
+not a terminal. `COLORTERM` and `TERM` decide between 24-bit colour, the
+256-colour palette and the standard sixteen.
+
 The compiler's default imports (`use default`) are in force in every
 submission, so `write_line`, the pipes and the collections need no `use`.
 `ghul repl --no-default-use` leaves them out. A `use` you type stays in

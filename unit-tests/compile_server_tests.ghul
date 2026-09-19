@@ -366,5 +366,23 @@ namespace Ghul.Cli.Tests is
         parse__is_null_for_an_argument_it_does_not_take() is
             assert !REPL_OPTIONS.parse(LIST[string](["--fast"]))?;
         si
+
+        @Test()
+        parse__defaults_to_choosing_the_theme_from_the_terminal() is
+            assert REPL_OPTIONS.parse(LIST[string]())!.theme == Ghul.Cli.Repl.ThemeChoice.AUTO;
+        si
+
+        @Test()
+        parse__takes_a_theme() is
+            assert REPL_OPTIONS.parse(LIST[string](["--theme", "light"]))!.theme == Ghul.Cli.Repl.ThemeChoice.LIGHT;
+            assert REPL_OPTIONS.parse(LIST[string](["--theme", "dark", "--no-server"]))!.theme == Ghul.Cli.Repl.ThemeChoice.DARK;
+            assert REPL_OPTIONS.parse(LIST[string](["--theme", "none"]))!.theme == Ghul.Cli.Repl.ThemeChoice.NONE;
+        si
+
+        @Test()
+        parse__is_null_for_a_theme_it_does_not_know_or_a_missing_one() is
+            assert !REPL_OPTIONS.parse(LIST[string](["--theme", "solarized"]))?;
+            assert !REPL_OPTIONS.parse(LIST[string](["--theme"]))?;
+        si
     si
 si

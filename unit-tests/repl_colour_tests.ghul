@@ -1,0 +1,297 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+
+    use Ghul.Cli.Repl.COLOUR_CHOICE
+    use Ghul.Cli.Repl.COLOUR_CODES
+    use Ghul.Cli.Repl.ColourDepth
+    use Ghul.Cli.Repl.GHUL_LEXER
+    use Ghul.Cli.Repl.INDENTATION
+    use Ghul.Cli.Repl.LINE_SPANS
+    use Ghul.Cli.Repl.PALETTE
+    use Ghul.Cli.Repl.ThemeChoice
+    use Ghul.Cli.Repl.TOKEN_SPAN
+    use Ghul.Cli.Repl.TokenKind
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    @TestClass()
+    class GHUL_LEXER_TESTS is
+        init() is si
+
+        // Each run as `kind:text`, joined with spaces.
+        _runs(text: string) -> string =>
+            GHUL_LEXER.spans(text) |> Ghul.Pipes.map(span => "{span.kind}:{text.substring(span.start, span.length)}") |> Ghul.Pipes.join(" ")
+
+        @Test()
+        spans__colour_control_flow_apart_from_other_keywords() is
+            assert _runs("if x then let y = 1 fi") =~
+                "CONTROL:if IDENTIFIER:x CONTROL:then KEYWORD:let IDENTIFIER:y OPERATOR:= NUMBER:1 CONTROL:fi";
+        si
+
+        @Test()
+        spans__tell_type_words_constants_and_capitalised_names_apart() is
+            assert _runs("LIST[int] null Collections") =~
+                "TYPE_NAME:LIST PUNCTUATION:[ TYPE_KEYWORD:int PUNCTUATION:] CONSTANT:null IDENTIFIER:Collections";
+        si
+
+        @Test()
+        spans__read_numbers_with_fractions_exponents_hex_and_suffixes() is
+            assert _runs("1.5e3 0x20AC`c 12_345L 2..4") =~
+                "NUMBER:1.5e3 NUMBER:0x20AC`c NUMBER:12_345L NUMBER:2 OPERATOR:.. NUMBER:4";
+        si
+
+        @Test()
+        spans__read_comments() is
+            assert _runs("x // note") =~ "IDENTIFIER:x COMMENT:// note";
+            assert _runs("/* a */ y") =~ "COMMENT:/* a */ IDENTIFIER:y";
+        si
+
+        @Test()
+        spans__read_escapes_and_code_in_a_string() is
+            assert _runs("\"a\\tb {{n + 1}}\"") =~
+                "STRING:\" STRING:a ESCAPE:\\t STRING:b  PUNCTUATION:{{ IDENTIFIER:n OPERATOR:+ NUMBER:1 PUNCTUATION:}} STRING:\"";
+        si
+
+        @Test()
+        spans__read_a_string_nested_in_an_interpolation() is
+            assert _runs("\"{{f(\"x\")}}\"") =~
+                "STRING:\" PUNCTUATION:{{ IDENTIFIER:f PUNCTUATION:( STRING:\" STRING:x STRING:\" PUNCTUATION:) PUNCTUATION:}} STRING:\"";
+        si
+
+        @Test()
+        spans__read_character_literals() is
+            assert _runs("'a' '\\n'") =~ "STRING:'a' ESCAPE:'\\n'";
+        si
+
+        @Test()
+        spans__read_a_backticked_name_as_a_name() is
+            assert _runs("`class") =~ "IDENTIFIER:`class";
+        si
+
+        // Half-typed text of every shape is split without complaint, and
+        // every run lies inside the text.
+        @Test()
+        spans__never_fail_on_unfinished_text() is
+            let texts = [
+                "\"open", "\"{{", "\"{{x", "\"{{\"", "\"\\", "'", "'\\", "'a", "/*", "/* x *", "0x", "1.", "1e", "`",
+                "}}", "\"}}}}{{{{", "\"{{\"{{\"{{", "x /", "a => \"b {{c(\"d {{e"
+            ]
+
+            for text in texts do
+                for span in GHUL_LEXER.spans(text) do
+                    assert span.start >= 0 /\ span.length > 0 /\ span.start + span.length <= text.length;
+                od
+            od
+        si
+
+        // A string left open ends at its line, so it does not colour the
+        // lines after it.
+        @Test()
+        spans__end_an_open_string_at_its_line() is
+            assert _runs("\"open\nfi") =~ "STRING:\" STRING:open CONTROL:fi";
+        si
+
+        @Test()
+        of_last_line__carries_an_open_comment_from_the_lines_before() is
+            let spans = LINE_SPANS.of_last_line(LIST[string](["/* starts"]), "still */ x")
+
+            assert spans.count == 2;
+            assert spans[0].kind == TokenKind.COMMENT /\ spans[0].start == 0 /\ spans[0].length == 8;
+            assert spans[1].kind == TokenKind.IDENTIFIER /\ spans[1].start == 9;
+        si
+    si
+
+    @TestClass()
+    class INDENTATION_TESTS is
+        init() is si
+
+        _after(lines: string[]) -> int => INDENTATION.for_next_line(LIST[string](lines))
+
+        @Test()
+        for_next_line__starts_the_first_line_at_the_margin() is
+            assert _after([]) == 0;
+        si
+
+        @Test()
+        for_next_line__goes_a_step_deeper_after_a_line_opening_a_block() is
+            assert _after(["if x then"]) == 4;
+            assert _after(["class A is"]) == 4;
+            assert _after(["    for i in xs do"]) == 8;
+            assert _after(["else"]) == 4;
+            assert _after(["try"]) == 4;
+            assert _after(["catch e: System.Exception"]) == 4;
+            assert _after(["f() -> int =>"]) == 4;
+            assert _after(["when 1 then"]) == 4;
+            assert _after(["let xs = ["]) == 4;
+            assert _after(["f("]) == 4;
+            assert _after(["case x"]) == 4;
+        si
+
+        @Test()
+        for_next_line__stays_level_after_a_line_that_opens_nothing() is
+            assert _after(["    let x = 1"]) == 4;
+            assert _after(["let y = if c then 1 else 2 fi"]) == 0;
+            assert _after(["case x when 1 then 2 else 3 esac"]) == 0;
+            assert _after(["this_is = x"]) == 0;
+        si
+
+        @Test()
+        for_next_line__ignores_a_comment_and_a_blank_line() is
+            assert _after(["if x then // why", "   "]) == 4;
+            assert _after(["let s = \"// then\""]) == 0;
+        si
+
+        @Test()
+        adjust__outdents_a_line_starting_with_a_closing_word() is
+            for closer in ["si", "fi", "od", "esac", "yrt", "else", "elif c then", "when 2 then", "catch e: E", "finally"] do
+                assert INDENTATION.adjust("    {closer}", 4) =~ closer;
+            od
+        si
+
+        // A name that starts like a closing word is not one, so the line
+        // goes back in once the name is longer.
+        @Test()
+        adjust__indents_again_when_the_word_turns_out_to_be_a_name() is
+            assert INDENTATION.adjust("    fi", 4) =~ "fi";
+            assert INDENTATION.adjust("file", 4) =~ "    file";
+            assert INDENTATION.adjust("    size", 4) =~ "    size";
+        si
+
+        @Test()
+        adjust__leaves_an_indent_changed_by_hand() is
+            assert INDENTATION.adjust("  fi", 8) =~ "  fi";
+        si
+
+        @Test()
+        adjust__never_goes_past_the_margin() is
+            assert INDENTATION.adjust("fi", 0) =~ "fi";
+        si
+
+        @Test()
+        backspace_column__goes_back_to_the_step_before() is
+            assert INDENTATION.backspace_column(8) == 4;
+            assert INDENTATION.backspace_column(6) == 4;
+            assert INDENTATION.backspace_column(4) == 0;
+            assert INDENTATION.backspace_column(1) == 0;
+            assert INDENTATION.backspace_column(0) == 0;
+        si
+    si
+
+    @TestClass()
+    class COLOUR_CHOICE_TESTS is
+        init() is si
+
+        _environment(values: string[]) -> (string) -> string? =>
+            name => (
+                for i in 0..values.count / 2 do
+                    if values[2 * i] =~ name then
+                        return values[2 * i + 1]
+                    fi
+                od
+
+                null
+            )
+
+        @Test()
+        depth__follows_colorterm_then_term() is
+            assert COLOUR_CHOICE.depth(_environment(["COLORTERM", "truecolor", "TERM", "xterm"])) == ColourDepth.TRUE_COLOUR;
+            assert COLOUR_CHOICE.depth(_environment(["COLORTERM", "24bit"])) == ColourDepth.TRUE_COLOUR;
+            assert COLOUR_CHOICE.depth(_environment(["TERM", "xterm-256color"])) == ColourDepth.TWO_HUNDRED_FIFTY_SIX;
+            assert COLOUR_CHOICE.depth(_environment(["TERM", "xterm"])) == ColourDepth.SIXTEEN;
+        si
+
+        @Test()
+        depth__is_none_without_a_capable_terminal_or_under_no_color() is
+            assert COLOUR_CHOICE.depth(_environment([])) == ColourDepth.NONE;
+            assert COLOUR_CHOICE.depth(_environment(["TERM", "dumb"])) == ColourDepth.NONE;
+            assert COLOUR_CHOICE.depth(_environment(["NO_COLOR", "1", "COLORTERM", "truecolor"])) == ColourDepth.NONE;
+        si
+
+        // NO_COLOR set but empty does not count, by its own definition.
+        @Test()
+        depth__ignores_an_empty_no_color() is
+            assert COLOUR_CHOICE.depth(_environment(["NO_COLOR", "", "TERM", "xterm"])) == ColourDepth.SIXTEEN;
+        si
+
+        @Test()
+        is_light_reply__reads_the_background_luminance() is
+            assert COLOUR_CHOICE.is_light_reply("]11;rgb:ffff/ffff/ffff\\") =~ true;
+            assert COLOUR_CHOICE.is_light_reply("]11;rgb:1e1e/1e1e/1e1e\\") =~ false;
+            assert COLOUR_CHOICE.is_light_reply("]11;rgb:fd/f6/e3") =~ true;
+        si
+
+        @Test()
+        is_light_reply__is_null_for_what_it_cannot_read() is
+            assert !COLOUR_CHOICE.is_light_reply("")?;
+            assert !COLOUR_CHOICE.is_light_reply("]11;rgb:zz/00/00")?;
+            assert !COLOUR_CHOICE.is_light_reply("]11;rgb:ff")?;
+        si
+
+        @Test()
+        is_light_colorfgbg__reads_the_background_index() is
+            assert COLOUR_CHOICE.is_light_colorfgbg("0;15") =~ true;
+            assert COLOUR_CHOICE.is_light_colorfgbg("15;0") =~ false;
+            assert COLOUR_CHOICE.is_light_colorfgbg("0;default;7") =~ true;
+            assert !COLOUR_CHOICE.is_light_colorfgbg("15;default")?;
+            assert !COLOUR_CHOICE.is_light_colorfgbg(null)?;
+        si
+
+        @Test()
+        palette__is_null_for_none_or_a_terminal_without_colour() is
+            assert !COLOUR_CHOICE.palette(ThemeChoice.NONE, ColourDepth.TRUE_COLOUR, () => null, null)?;
+            assert !COLOUR_CHOICE.palette(ThemeChoice.DARK, ColourDepth.NONE, () => null, null)?;
+        si
+
+        @Test()
+        palette__follows_an_explicit_theme_without_asking_the_terminal() is
+            let asked = LIST[bool]()
+            let palette = COLOUR_CHOICE.palette(ThemeChoice.LIGHT, ColourDepth.TRUE_COLOUR, () -> string? => (asked.add(true); null), null)
+
+            assert palette!.colour(TokenKind.KEYWORD) == 0x0000FF;
+            assert asked.count == 0;
+        si
+
+        @Test()
+        palette__picks_light_from_a_light_background_and_dark_otherwise() is
+            let light = COLOUR_CHOICE.palette(ThemeChoice.AUTO, ColourDepth.TRUE_COLOUR, () => "]11;rgb:ffff/ffff/ffff\\", null)
+            let from_colorfgbg = COLOUR_CHOICE.palette(ThemeChoice.AUTO, ColourDepth.TRUE_COLOUR, () => null, "0;15")
+            let unknown = COLOUR_CHOICE.palette(ThemeChoice.AUTO, ColourDepth.TRUE_COLOUR, () => null, null)
+
+            assert light!.colour(TokenKind.KEYWORD) == 0x0000FF;
+            assert from_colorfgbg!.colour(TokenKind.KEYWORD) == 0x0000FF;
+            assert unknown!.colour(TokenKind.KEYWORD) == 0x569CD6;
+        si
+    si
+
+    @TestClass()
+    class COLOUR_CODES_TESTS is
+        init() is si
+
+        @Test()
+        index_256__picks_the_nearest_cube_colour_or_grey() is
+            assert COLOUR_CODES.index_256(0, 0, 255) == 21;
+            assert COLOUR_CODES.index_256(255, 255, 255) == 231;
+            assert COLOUR_CODES.index_256(128, 128, 128) == 244;
+        si
+
+        @Test()
+        code_16__picks_the_nearest_standard_colour() is
+            assert COLOUR_CODES.code_16(0, 0, 238) == 34;
+            assert COLOUR_CODES.code_16(90, 90, 255) == 94;
+            assert COLOUR_CODES.code_16(0, 128, 0) == 32;
+            assert COLOUR_CODES.code_16(0, 0, 0) == 30;
+        si
+
+        // The foreground colour for each run, and nothing between runs.
+        @Test()
+        paint__colours_runs_and_leaves_the_rest() is
+            let palette = PALETTE.dark(ColourDepth.TRUE_COLOUR)
+            let text = "if x"
+            let painted = palette.paint(text, GHUL_LEXER.spans(text))
+            let escape = cast char(27)
+
+            assert painted =~ "{escape}[38;2;197;134;192mif{escape}[39m {escape}[38;2;156;220;254mx{escape}[39m";
+        si
+    si
+si

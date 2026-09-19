@@ -1,0 +1,175 @@
+namespace Ghul.Cli.Repl is
+    use Collections.LIST
+
+    // Where a line typed at the prompt starts, in steps of four spaces.
+    // A line goes one step deeper than the one before it when that line
+    // opens something - a block, a case, an open bracket - and a line
+    // starting with a word that closes or continues a block goes one step
+    // back out as soon as the word is typed.
+    class INDENTATION is
+        init() is si
+
+        WIDTH: int static => 4
+
+        // Words that end a line opening a block.
+        _openers: string[] static => ["is", "then", "else", "do", "try", "finally", "=>"]
+
+        // Words that start a line closing a block, or starting the next
+        // part of one, which sits at the level of the line that opened it.
+        _closers: string[] static => [
+            "si", "fi", "od", "esac", "yrt", "lav",
+            "else", "elif", "when", "catch", "finally"
+        ]
+
+        // How far a new line after these goes in: the last line with
+        // anything on it, one step further when it opens something.
+        for_next_line(before: Collections.List[string]) -> int static is
+            let i mut = before.count - 1
+
+            while i >= 0 /\ before[i].trim().length == 0 do
+                i = i - 1
+            od
+
+            if i < 0 then
+                return 0
+            fi
+
+            let line = before[i]
+            let indent = leading_spaces(line)
+
+            return if opens_block(line) then indent + WIDTH else indent fi
+        si
+
+        // Whether a line leaves the next one a step deeper.
+        opens_block(line: string) -> bool static is
+            let code = _without_comment(line).trim_end()
+
+            if code.length == 0 then
+                return false
+            fi
+
+            let last = code[code.length - 1]
+
+            if last == '(' \/ last == '[' then
+                return true
+            fi
+
+            let first = first_word(line)
+
+            // A case goes a step deeper for its first arm, which a `when`
+            // line then brings back out to the case's own level.
+            if (first =~ "case" /\ !_ends_with_word(code, "esac")) \/ first =~ "catch" then
+                return true
+            fi
+
+            for opener in _openers do
+                if _ends_with_word(code, opener) then
+                    return true
+                fi
+            od
+
+            return false
+        si
+
+        // Whether a line starts with a word that closes a block.
+        starts_with_closer(line: string) -> bool static is
+            let first = first_word(line)
+
+            for closer in _closers do
+                if first =~ closer then
+                    return true
+                fi
+            od
+
+            return false
+        si
+
+        // A line as it should be indented, given the indent it was started
+        // at: a step out when it starts with a closing word, and back in
+        // when it no longer does. A line whose indent has been changed by
+        // hand is left as it is.
+        adjust(line: string, expected: int) -> string static is
+            let indent = leading_spaces(line)
+            let outdented = if expected >= WIDTH then expected - WIDTH else 0 fi
+
+            if indent != expected /\ indent != outdented then
+                return line
+            fi
+
+            let wanted = if starts_with_closer(line) then outdented else expected fi
+
+            if wanted == indent then
+                return line
+            fi
+
+            return "{string(' ', wanted)}{line.substring(indent)}"
+        si
+
+        // Where backspace with the cursor at `column`, inside a line's
+        // leading spaces, takes the cursor: back to the step before.
+        backspace_column(column: int) -> int static =>
+            if column <= 0 then 0 else ((column - 1) / WIDTH) * WIDTH fi
+
+        leading_spaces(line: string) -> int static is
+            let count mut = 0
+
+            while count < line.length /\ line[count] == ' ' do
+                count = count + 1
+            od
+
+            return count
+        si
+
+        // The first word of a line, or the empty string.
+        first_word(line: string) -> string static is
+            let start = leading_spaces(line)
+            let end mut = start
+
+            while end < line.length /\ (char.is_letter_or_digit(line[end]) \/ line[end] == '_') do
+                end = end + 1
+            od
+
+            return line.substring(start, end - start)
+        si
+
+        _ends_with_word(code: string, word: string) -> bool static is
+            if !code.ends_with(word, System.StringComparison.ORDINAL) then
+                return false
+            fi
+
+            let before = code.length - word.length
+
+            if before == 0 then
+                return true
+            fi
+
+            let c = code[before - 1]
+
+            // An operator word such as `=>` needs no boundary; a name does.
+            return !char.is_letter(word[0]) \/ !(char.is_letter_or_digit(c) \/ c == '_' \/ c == '`')
+        si
+
+        // A line without any `//` comment on its end, ignoring one inside a
+        // string literal.
+        _without_comment(line: string) -> string static is
+            let in_string mut = false
+            let i mut = 0
+
+            while i < line.length do
+                let c = line[i]
+
+                if c == '"' then
+                    in_string = !in_string
+                elif c == '\\' /\ in_string then
+                    i = i + 1
+                elif !in_string /\ c == '/' /\ i + 1 < line.length /\ line[i + 1] == '/' then
+                    return line.substring(0, i)
+                fi
+
+                i = i + 1
+            od
+
+            return line
+        si
+    si
+si
