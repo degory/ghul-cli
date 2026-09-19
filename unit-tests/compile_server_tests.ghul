@@ -47,6 +47,40 @@ namespace Ghul.Cli.Tests is
         si
     si
 
+    // Holds its one exchange until released, saying when it has begun.
+    class BLOCKING_SERVER: ServerConnection is
+        began: System.Threading.ManualResetEventSlim
+        release: System.Threading.ManualResetEventSlim
+        sent: LIST[string]
+        is_closed: bool
+
+        init() is
+            began = System.Threading.ManualResetEventSlim(false)
+            release = System.Threading.ManualResetEventSlim(false)
+            sent = LIST[string]()
+        si
+
+        await_ready(timeout_ms: int) -> string? => "{{\"ready\":true,\"status\":0,\"diagnostics\":[]}}"
+
+        exchange(line: string, timeout_ms: int) -> string? is
+            sent.add(line)
+            began.set()
+            release.wait()
+
+            if is_closed then
+                return null
+            fi
+
+            return "{{\"status\":0,\"diagnostics\":[]}}"
+        si
+
+        // As a process ending does, closing ends an exchange under way.
+        close() is
+            is_closed = true
+            release.set()
+        si
+    si
+
     class FAKE_BACKEND: CompileBackend is
         compiled: LIST[string]
         is_closed: bool public
@@ -88,6 +122,59 @@ namespace Ghul.Cli.Tests is
 
         _backend(server: ServerConnection?, fallback: CompileBackend, said: LIST[string]) -> SERVER_BACKEND =>
             SERVER_BACKEND(server, fallback, _files(), line => said.add(line))
+
+        @Test()
+        warm_up__compiles_a_throwaway_cell_on_the_server() is
+            let server = FAKE_SERVER(_ready, LIST[string?](["{{\"status\":0,\"diagnostics\":[]}}", "{{\"status\":0,\"diagnostics\":[]}}"]))
+            let backend = _backend(server, FAKE_BACKEND(), LIST[string]())
+
+            backend.warm_up().wait()
+
+            let request = System.Text.Json.JsonDocument.parse(server.sent[0], _).root_element
+
+            assert request.get_property("name").get_string() =~ SERVER_BACKEND.WARM_UP_NAME;
+
+            let result = backend.compile(_request(1))
+
+            assert result.assembly_path!.ends_with("cell1.dll");
+            assert server.sent.count == 2;
+        si
+
+        // Typing at the prompt while the warm-up has the server asks the
+        // fallback rather than waiting for the server.
+        @Test()
+        check__leaves_the_answer_to_the_fallback_while_the_warm_up_runs() is
+            let server = BLOCKING_SERVER()
+            let backend = _backend(server, FAKE_BACKEND(), LIST[string]())
+
+            let warming = backend.warm_up()
+
+            assert server.began.wait(10000);
+            assert !backend.check("1 + 1")?;
+
+            server.release.set()
+
+            assert warming.wait(10000);
+            assert server.sent.count == 1;
+        si
+
+        @Test()
+        close__ends_a_warm_up_under_way_without_reporting_it() is
+            let server = BLOCKING_SERVER()
+            let said = LIST[string]()
+            let backend = _backend(server, FAKE_BACKEND(), said)
+
+            let warming = backend.warm_up()
+
+            assert server.began.wait(10000);
+
+            backend.close()
+
+            assert warming.wait(10000);
+            assert server.is_closed;
+            assert said.count == 0;
+            assert !backend.is_serving;
+        si
 
         @Test()
         compile__compiles_on_the_server_once_it_is_ready() is

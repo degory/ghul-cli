@@ -278,7 +278,11 @@ namespace Ghul.Repl.Host is
 
             let backend: CompileBackend =
                 if want_server then
-                    SERVER_BACKEND(_start_server(compiler_shim, files), spawn, files, say)
+                    let server = SERVER_BACKEND(_start_server(compiler_shim, files), spawn, files, say)
+
+                    let _ = server.warm_up()
+
+                    server
                 else
                     spawn
                 fi
