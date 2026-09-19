@@ -17,8 +17,9 @@ namespace Ghul.Cli.Repl is
     // end of a line, Ctrl-Left and Ctrl-Right (or Alt-B and Alt-F) move by
     // a word, Ctrl-U and Ctrl-K delete to either end of the line, Ctrl-W
     // deletes the word before the cursor, Ctrl-L clears the screen, Tab
-    // completes, Shift-Tab shows what the name at the cursor is, a paste
-    // is taken as it is, and Ctrl-D in an empty cell ends the input.
+    // completes and then offers a menu, Shift-Tab shows what the name at
+    // the cursor is, a paste is taken as it is, and Ctrl-D in an empty
+    // cell ends the input.
     // Ctrl-C abandons the cell to history and starts it again.
     class CELL_EDITOR(
         _complete: (string, int, int) -> Collections.List[string]?,
@@ -39,6 +40,9 @@ namespace Ghul.Cli.Repl is
 
         // The first line drawn, when the cell is taller than the terminal.
         _top: int
+
+        // The names Tab offers, while they are shown to choose from.
+        _menu: COMPLETION_MENU?
 
         init(..) is
             _prompt = "> "
@@ -104,6 +108,7 @@ namespace Ghul.Cli.Repl is
 
             _end.clear()
             _draft = null
+            _menu = null
 
             _cursor_screen_row = 0
             _top = 0
@@ -120,6 +125,12 @@ namespace Ghul.Cli.Repl is
                     _abandon()
 
                     continue
+                fi
+
+                if let menu = _menu then
+                    if _menu_key(menu, key, is_alt) then
+                        continue
+                    fi
                 fi
 
                 // A terminal sends Alt-Enter as Escape then Enter, and a
@@ -300,11 +311,70 @@ namespace Ghul.Cli.Repl is
 
             if extension.length > 0 then
                 _buffer.insert(extension)
-            fi
 
-            if offered.count > 1 then
-                _show_below(COMPLETION_QUERY.columns(offered, _width, 6))
+                if offered.count > 1 then
+                    _show_below(COMPLETION_QUERY.columns(offered, _width, 6))
+                fi
+            elif offered.count > 1 then
+                // Nothing more they share: a Tab now offers them to choose
+                // from, the first written in.
+                let menu = COMPLETION_MENU(offered, typed, _width, 6)
+
+                _menu = menu
+                _buffer.replace_name_before_cursor(menu.chosen)
             fi
+        si
+
+        // A key while the menu is shown. Tab, Right and Down move to the
+        // next name and Shift-Tab, Left and Up back, writing it in; Enter
+        // keeps the name written in and Escape puts back what was typed.
+        // Any other key keeps the name and is then taken as usual, which
+        // is what false says.
+        _menu_key(menu: COMPLETION_MENU, key: System.ConsoleKeyInfo, is_alt: bool) -> bool is
+            let is_shift = (key.modifiers & System.ConsoleModifiers.SHIFT) == System.ConsoleModifiers.SHIFT
+
+            case key.key
+            when System.ConsoleKey.TAB then
+                if is_shift then menu.previous() else menu.next() fi
+            when System.ConsoleKey.RIGHT_ARROW then
+                menu.next()
+            when System.ConsoleKey.LEFT_ARROW then
+                menu.previous()
+            when System.ConsoleKey.DOWN_ARROW then
+                menu.down()
+            when System.ConsoleKey.UP_ARROW then
+                menu.up()
+            when System.ConsoleKey.ENTER then
+                _menu = null
+
+                if is_alt then
+                    return false
+                fi
+
+                _draw()
+
+                return true
+            when System.ConsoleKey.ESCAPE then
+                _menu = null
+
+                if _key_arrives_soon() then
+                    return false
+                fi
+
+                _buffer.replace_name_before_cursor(menu.typed)
+                _draw()
+
+                return true
+            else
+                _menu = null
+
+                return false
+            esac
+
+            _buffer.replace_name_before_cursor(menu.chosen)
+            _draw()
+
+            return true
         si
 
         // What the name at the cursor is, shown below the cell.
@@ -349,6 +419,8 @@ namespace Ghul.Cli.Repl is
             if text.trim().length == 0 then
                 return
             fi
+
+            _menu = null
 
             _write_whole("^C")
 
@@ -434,9 +506,12 @@ namespace Ghul.Cli.Repl is
             let width = _width
             let layout = CELL_LAYOUT(width, _prompt.length)
 
-            _top = layout.top(lines, _buffer.row, _top, _height - 1)
+            let below = _menu?.lines(name => "{_escape}[7m{name}{_escape}[27m")
+            let room = System.Math.max(1, _height - 1 - (below?.count ?? 0))
 
-            let bottom = layout.bottom(lines, _top, _height - 1)
+            _top = layout.top(lines, _buffer.row, _top, room)
+
+            let bottom = layout.bottom(lines, _top, room)
 
             let output = System.Text.StringBuilder()
 
@@ -465,6 +540,13 @@ namespace Ghul.Cli.Repl is
                 context.add(lines[i])
                 rows = rows + layout.rows(lines[i])
             od
+
+            if let menu_lines = below then
+                for line in menu_lines do
+                    output.append("\r\n{line}")
+                    rows = rows + 1
+                od
+            fi
 
             // Where the cursor is left, counted in rows from the first drawn
             // row, and where it has to go.

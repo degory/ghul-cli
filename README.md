@@ -219,7 +219,10 @@ Ctrl-U and Ctrl-K delete to the start or end of the line, Ctrl-W deletes the
 word before the cursor, and Ctrl-L clears the screen. Tab completes the name
 being typed from everything the session has defined; where more than one name
 fits, it writes in as much as they share and lists them below the
-submission. Shift-Tab shows what the name at the cursor is below the
+submission. Tab again, with nothing more they share, offers them to choose
+from: Tab, Right and Down move to the next, Shift-Tab, Left and Up back, each
+written in as the selection moves; Enter keeps it and Escape puts back what
+was typed, and any other key keeps it and goes on typing. Shift-Tab shows what the name at the cursor is below the
 submission, as `:hover` does. Ctrl-D in an empty submission leaves.
 
 Ctrl-C at the prompt sets aside what you have typed: it stays on the screen

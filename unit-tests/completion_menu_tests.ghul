@@ -1,0 +1,115 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+
+    use Ghul.Cli.Repl.CELL_BUFFER
+    use Ghul.Cli.Repl.COMPLETION_MENU
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    @TestClass()
+    class COMPLETION_MENU_TESTS is
+        init() is si
+
+        // Names two characters long in cells four wide: two to a row in a
+        // width of 8.
+        _menu(count: int, rows: int) -> COMPLETION_MENU is
+            let names = LIST[string]()
+
+            for i in 0..count do
+                names.add("n{i}")
+            od
+
+            return COMPLETION_MENU(names, "n", 8, rows)
+        si
+
+        _marked(name: string) -> string => "[{name}]"
+
+        @Test()
+        lines__mark_the_selected_name() is
+            let menu = _menu(4, 6)
+
+            let lines = menu.lines(_marked)
+
+            assert lines.count == 2;
+            assert lines[0] =~ "[n0]  n1";
+            assert lines[1] =~ "n2  n3";
+        si
+
+        @Test()
+        next_and_previous__wrap_around() is
+            let menu = _menu(3, 6)
+
+            menu.previous()
+            assert menu.chosen =~ "n2";
+
+            menu.next()
+            assert menu.chosen =~ "n0";
+        si
+
+        @Test()
+        down_and_up__move_by_a_row() is
+            let menu = _menu(5, 6)
+
+            menu.down()
+            assert menu.chosen =~ "n2";
+
+            menu.down()
+            assert menu.chosen =~ "n4";
+
+            menu.down()
+            assert menu.chosen =~ "n4";
+
+            menu.up()
+            assert menu.chosen =~ "n2";
+        si
+
+        @Test()
+        down__goes_to_the_last_name_from_the_row_above_a_short_last_row() is
+            let menu = _menu(5, 6)
+
+            menu.next()
+            menu.next()
+            menu.next()
+
+            assert menu.chosen =~ "n3";
+
+            menu.down()
+            assert menu.chosen =~ "n4";
+        si
+
+        @Test()
+        lines__scroll_to_keep_the_selection_shown_and_count_it() is
+            let menu = _menu(10, 2)
+
+            assert menu.lines(_marked)[0] =~ "[n0]  n1";
+            assert menu.lines(_marked)[2] =~ "1 of 10";
+
+            menu.down()
+            menu.down()
+
+            let lines = menu.lines(_marked)
+
+            assert lines.count == 3;
+            assert lines[0] =~ "n2  n3";
+            assert lines[1] =~ "[n4]  n5";
+            assert lines[2] =~ "5 of 10";
+        si
+
+        @Test()
+        replace_name_before_cursor__replaces_only_the_name() is
+            let buffer = CELL_BUFFER()
+
+            buffer.replace("words.co + 1")
+
+            for _ in 0..4 do
+                buffer.left()
+            od
+
+            buffer.replace_name_before_cursor("count")
+
+            assert buffer.line =~ "words.count + 1";
+            assert buffer.column == 11;
+        si
+    si
+si
