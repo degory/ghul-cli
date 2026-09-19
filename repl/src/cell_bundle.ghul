@@ -39,12 +39,55 @@ namespace Ghul.Repl is
 
             parts.add((mime = "text/plain", payload = plain))
 
+            parts.add_range(images(value))
+
             if let html = table(value) then
                 parts.add((mime = "text/html", payload = html))
             fi
 
             return parts
         si
+
+        // The images a value offers through the runtime's Renderable, as
+        // base64. Only raster image types are taken: a notebook shows the
+        // bundle in a web page, where HTML or SVG from a cell could carry
+        // script. The value's Renderable is the one in the runtime the
+        // cells run against, which is not this tool's own, so it is found
+        // by name.
+        images(value: object?) -> LIST[(mime: string, payload: string)] is
+            let found = LIST[(mime: string, payload: string)]()
+
+            if !value? then
+                return found
+            fi
+
+            let renderable = value.get_type().get_interface("Ghul.Renderable")
+
+            if !renderable? then
+                return found
+            fi
+
+            let representations = renderable.get_method("representations")
+
+            if !representations? then
+                return found
+            fi
+
+            try
+                if let offered: Collections.Iterable[(mime: string, content: ubyte[])] = representations.invoke(value, null) then
+                    for (mime, content) in offered do
+                        if _RASTER_TYPES |> Ghul.Pipes.any(t => t =~ mime) then
+                            found.add((mime = mime, payload = System.Convert.to_base64_string(content)))
+                        fi
+                    od
+                fi
+            catch e: System.Reflection.TargetInvocationException
+            yrt
+
+            return found
+        si
+
+        _RASTER_TYPES: string[] static => ["image/png", "image/jpeg", "image/gif"]
 
         // A table, where the value is a sequence of things that share a
         // shape: a row each, and a column for each name that shape gives

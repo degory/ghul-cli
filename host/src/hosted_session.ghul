@@ -58,23 +58,17 @@ namespace Ghul.Repl.Host is
         // Assemblies the cells share with the host rather than load a copy
         // of: a cell calling display reaches the sink the host installed
         // only if both see one ghul.repl.
-        _shared: Collections.SET[string]
 
         init(probe_directory: string?) is
             super.init("ghul-repl", false)
 
             _probe_directory = probe_directory
-            _shared = Collections.SET[string]()
-        si
-
-        share(name: string) is
-            _shared.add(name)
         si
 
         load(name: System.Reflection.AssemblyName) -> Assembly? is
             let directory = _probe_directory
 
-            if !directory? \/ _shared.contains(name.name ?? "") then
+            if !directory? then
                 return null
             fi
 
@@ -111,39 +105,50 @@ namespace Ghul.Repl.Host is
             _offer_display()
         si
 
-        // display and update_display, in every cell: ghul.repl referenced
-        // for the compile, shared with the host when a cell runs, and
-        // imported until a cell defines a display of its own.
+        // display and update_display, in every cell, where the runtime the
+        // cells run against has them: imported until a cell defines a
+        // display of its own.
         _offer_display() is
-            if !_probe_directory? then
-                return
+            if _cells_display_sinks? then
+                _session.bind("display", "use Ghul.display")
+                _session.bind("update_display", "use Ghul.update_display")
             fi
-
-            let repl_assembly = (typeof Ghul.Repl.Display.DISPLAY_SINKS).assembly
-            let name = repl_assembly.get_name().name
-
-            if !name? then
-                return
-            fi
-
-            _context.share(name)
-
-            if _add_assembly(repl_assembly.location, Collections.LIST[string](), false)? then
-                return
-            fi
-
-            _session.bind("display", "use Ghul.Repl.Display.display")
-            _session.bind("update_display", "use Ghul.Repl.Display.update_display")
         si
 
-        _display_sink: Ghul.Repl.Display.DisplaySink?
+        // DISPLAY_SINKS in the runtime the cells run against. The host's
+        // own runtime is another assembly, so a sink installed through it
+        // would never reach the cells.
+        _cells_display_sinks: System.Type? => runtime?.get_type("Ghul.DISPLAY_SINKS")
+
+        _display_sink: Ghul.DisplaySink?
+
+        // What installing the display sink into the cells' runtime handed
+        // back, which is what takes it out again.
+        _installed_sink: object?
 
         // Where display shows things while this session's cells run, until
-        // the session closes.
-        set_display_sink(sink: Ghul.Repl.Display.DisplaySink) is
+        // the session closes. The sink goes into the cells' runtime as two
+        // functions, since function values cross between the two runtimes
+        // where a type implementing one runtime's DisplaySink would not.
+        set_display_sink(sink: Ghul.DisplaySink) is
             _display_sink = sink
 
-            Ghul.Repl.Display.DISPLAY_SINKS.install(sink)
+            let sinks = _cells_display_sinks
+
+            if !sinks? then
+                return
+            fi
+
+            let show: (object?, string?) -> void = (value, id) => sink.show(value, id)
+            let update: (object?, string) -> void = (value, id) => sink.update(value, id)
+
+            for method in sinks.get_methods() do
+                if method.name =~ "install" /\ method.get_parameters().count == 2 then
+                    _installed_sink = method.invoke(null, [cast object(show), cast object(update)])
+
+                    return
+                fi
+            od
         si
 
         // Assemblies added with add_reference or add_package, by name:
@@ -450,8 +455,8 @@ namespace Ghul.Repl.Host is
             _backend.close()
             _analysis?.close()
 
-            if let sink = _display_sink then
-                Ghul.Repl.Display.DISPLAY_SINKS.remove(sink)
+            if let installed = _installed_sink then
+                _cells_display_sinks?.get_method("remove")?.invoke(null, [installed])
             fi
         si
     si
@@ -482,6 +487,10 @@ namespace Ghul.Repl.Host is
                 else
                     spawn
                 fi
+
+            // The cells' runtime has to be beside them before the session
+            // looks at it to decide what the cells are offered.
+            files.prepare()
 
             let session = HOSTED_SESSION(backend, directory, want_default_use)
 

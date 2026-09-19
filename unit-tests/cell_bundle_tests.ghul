@@ -10,6 +10,19 @@ namespace Ghul.Cli.Tests is
     // A record with no text of its own, as a cell defines one.
     class BUNDLE_POINT(x: int, y: int);
 
+    // A picture offered as a PNG, and as SVG and HTML a notebook must not
+    // take.
+    class BUNDLE_PICTURE: Ghul.Renderable is
+        init() is si
+
+        representations() -> Collections.Iterable[(mime: string, content: ubyte[])] pure =>
+            [
+                (mime = "image/svg+xml", content = [60ub]),
+                (mime = "image/png", content = [1ub, 2ub, 3ub]),
+                (mime = "text/html", content = [60ub])
+            ]
+    si
+
     @TestClass()
     class CELL_BUNDLE_TESTS is
         init() is si
@@ -27,6 +40,20 @@ namespace Ghul.Cli.Tests is
         si
 
         _table(value: object?) -> string => CELL_BUNDLE().table(value) ?? ""
+
+        // Only the raster image goes into the bundle, beside the text.
+        @Test()
+        of__a_renderable_value__adds_its_raster_images_only() is
+            let bundle = CELL_BUNDLE().of(BUNDLE_PICTURE())!
+            let mimes = LIST[string]()
+
+            for part in bundle do
+                mimes.add(part.mime)
+            od
+
+            assert mimes |> Ghul.Pipes.join(",") =~ "text/plain,image/png";
+            assert bundle[1].payload =~ "AQID";
+        si
 
         @Test()
         of__starts_with_the_line_the_terminal_shows() is

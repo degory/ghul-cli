@@ -2,7 +2,7 @@ namespace Ghul.Cli.Repl is
     use IO.Std
 
     use Ghul.Repl.CELL_DISPLAY
-    use Ghul.Repl.Display.DisplaySink
+    use Ghul.DisplaySink
 
     // What display shows from a running cell, at a terminal: the line the
     // cell's value would be shown as. A terminal cannot redraw a line
