@@ -48,6 +48,16 @@ namespace Ghul.Jupyter is
             _stdin = CHANNEL("stdin", NetMQ.Sockets.RouterSocket("@{_connection.stdin_address}"), _signer)
         si
 
+        // What display publishes under: the request whose cell is running.
+        _display_parent: MESSAGE?
+
+        // Installs the sink display reaches from a cell, publishing through
+        // _publish like everything else a cell sends.
+        _install_display_sink() is
+            _session.set_display_sink(
+                KERNEL_DISPLAY_SINK((msg_type, content) => _publish(_display_parent, msg_type, content), () => _session.runtime))
+        si
+
         // Asked to stop from another thread: the loop notices on its
         // next turn and leaves by the ordinary path, which is what
         // closes the session.
@@ -72,6 +82,8 @@ namespace Ghul.Jupyter is
             // `starting` says the kernel is up at all, and the `idle`
             // after it is what a session that is waiting to become idle
             // is waiting for.
+            _install_display_sink()
+
             _publish(null, "status", CONTENT.status("starting"))
             _publish(null, "status", CONTENT.status("idle"))
 
@@ -187,6 +199,8 @@ namespace Ghul.Jupyter is
             Ghul.Repl.DIAGNOSTIC_VIEW.lines(diagnostics, label, code, ANSI_DIAGNOSTIC_COLOURS())
 
         _execute(channel: CHANNEL, request: MESSAGE) is
+            _display_parent = request
+
             let code = JSON.string_member(request.content, "code") ?? ""
             let silent = JSON.bool_member(request.content, "silent", false)
 

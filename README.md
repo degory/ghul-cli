@@ -158,6 +158,13 @@ value:
 several
 ```
 
+To show a value from partway through a cell, call `display` with it. It is
+written the same way as a cell's value, at the point the cell reaches the call.
+In a notebook, `display(value, id)` shows the value under an id, and
+`update_display(value, id)` replaces what that id shows. A terminal cannot
+redraw a line it has already written, so there `update_display` writes the new
+value as another line.
+
 ### cell numbers
 
 The prompt shows the number of the next cell. Every cell you submit takes a

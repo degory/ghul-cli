@@ -55,16 +55,26 @@ namespace Ghul.Repl.Host is
     class SESSION_LOAD_CONTEXT: System.Runtime.Loader.AssemblyLoadContext is
         _probe_directory: string?
 
+        // Assemblies the cells share with the host rather than load a copy
+        // of: a cell calling display reaches the sink the host installed
+        // only if both see one ghul.repl.
+        _shared: Collections.SET[string]
+
         init(probe_directory: string?) is
             super.init("ghul-repl", false)
 
             _probe_directory = probe_directory
+            _shared = Collections.SET[string]()
+        si
+
+        share(name: string) is
+            _shared.add(name)
         si
 
         load(name: System.Reflection.AssemblyName) -> Assembly? is
             let directory = _probe_directory
 
-            if !directory? then
+            if !directory? \/ _shared.contains(name.name ?? "") then
                 return null
             fi
 
@@ -96,6 +106,44 @@ namespace Ghul.Repl.Host is
             _context = SESSION_LOAD_CONTEXT(_probe_directory)
             _assemblies = Collections.MAP[string, Assembly]()
             _references = Collections.LIST[string]()
+            _listed_references = Collections.LIST[string]()
+
+            _offer_display()
+        si
+
+        // display and update_display, in every cell: ghul.repl referenced
+        // for the compile, shared with the host when a cell runs, and
+        // imported until a cell defines a display of its own.
+        _offer_display() is
+            if !_probe_directory? then
+                return
+            fi
+
+            let repl_assembly = (typeof Ghul.Repl.Display.DISPLAY_SINKS).assembly
+            let name = repl_assembly.get_name().name
+
+            if !name? then
+                return
+            fi
+
+            _context.share(name)
+
+            if _add_assembly(repl_assembly.location, Collections.LIST[string](), false)? then
+                return
+            fi
+
+            _session.bind("display", "use Ghul.Repl.Display.display")
+            _session.bind("update_display", "use Ghul.Repl.Display.update_display")
+        si
+
+        _display_sink: Ghul.Repl.Display.DisplaySink?
+
+        // Where display shows things while this session's cells run, until
+        // the session closes.
+        set_display_sink(sink: Ghul.Repl.Display.DisplaySink) is
+            _display_sink = sink
+
+            Ghul.Repl.Display.DISPLAY_SINKS.install(sink)
         si
 
         // Assemblies added with add_reference or add_package, by name:
@@ -104,7 +152,12 @@ namespace Ghul.Repl.Host is
         // context finds it when the cell runs.
         _references: Collections.LIST[string]
 
-        references: Collections.List[string] => _references
+        // The references added with add_reference or add_package, as a
+        // front end lists them. The session's own reference to ghul.repl,
+        // which display needs, is not among them.
+        _listed_references: Collections.LIST[string]
+
+        references: Collections.List[string] => _listed_references
 
         // An assembly file, referenced by every later cell.
         add_reference(path: string) -> ADDED_REFERENCES is
@@ -114,7 +167,7 @@ namespace Ghul.Repl.Host is
                 return ADDED_REFERENCES(names, "no such file: {path}")
             fi
 
-            if let problem = _add_assembly(IO.Path.get_full_path(path), names) then
+            if let problem = _add_assembly(IO.Path.get_full_path(path), names, true) then
                 return ADDED_REFERENCES(names, problem)
             fi
 
@@ -143,7 +196,7 @@ namespace Ghul.Repl.Host is
                 fi
 
                 for path in restored.paths do
-                    if let problem = _add_assembly(path, names) then
+                    if let problem = _add_assembly(path, names, true) then
                         return ADDED_REFERENCES(names, problem)
                     fi
                 od
@@ -167,7 +220,7 @@ namespace Ghul.Repl.Host is
         // is the name both the compile and the load context look for. One
         // that is there already, such as the session's own copy of the ghūl
         // runtime, is left as it is.
-        _add_assembly(path: string, names: Collections.LIST[string]) -> string? is
+        _add_assembly(path: string, names: Collections.LIST[string], listed: bool) -> string? is
             let directory = _probe_directory ?? ""
 
             if directory.length == 0 then
@@ -194,6 +247,10 @@ namespace Ghul.Repl.Host is
 
             _references.add(name)
             names.add(name)
+
+            if listed then
+                _listed_references.add(name)
+            fi
 
             _analysis?.add(destination)
 
@@ -392,6 +449,10 @@ namespace Ghul.Repl.Host is
         close() is
             _backend.close()
             _analysis?.close()
+
+            if let sink = _display_sink then
+                Ghul.Repl.Display.DISPLAY_SINKS.remove(sink)
+            fi
         si
     si
 

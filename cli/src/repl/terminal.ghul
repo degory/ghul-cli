@@ -264,6 +264,8 @@ namespace Ghul.Cli.Repl is
 
             let session mut = _make_session()
 
+            session.set_display_sink(TERMINAL_DISPLAY_SINK(() => session.runtime))
+
             _current = session
 
             loop: do
@@ -284,6 +286,7 @@ namespace Ghul.Cli.Repl is
                     when ":reset" then
                         session.close()
                         session = _make_session()
+                        session.set_display_sink(TERMINAL_DISPLAY_SINK(() => session.runtime))
                         _current = session
 
                         Std.write_line("session reset")

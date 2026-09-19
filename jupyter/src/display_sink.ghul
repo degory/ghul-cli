@@ -1,0 +1,31 @@
+namespace Ghul.Jupyter is
+    use Ghul.Repl.CELL_BUNDLE
+    use Ghul.Repl.Display.DisplaySink
+
+    // What display shows from a running cell, published as display_data
+    // with the same bundle a cell's value is shown with, and redrawn with
+    // update_display_data under the id it was shown with.
+    class KERNEL_DISPLAY_SINK(_publish: (string, string) -> void, _runtime: () -> System.Reflection.Assembly?): DisplaySink is
+        _bundle: CELL_BUNDLE
+
+        init(..) is
+            _bundle = CELL_BUNDLE()
+        si
+
+        show(value: object?, id: string?) is
+            _bundle.use_runtime(_runtime())
+
+            if let bundle = _bundle.of(value) then
+                _publish("display_data", CONTENT.display_data(bundle, id))
+            fi
+        si
+
+        update(value: object?, id: string) is
+            _bundle.use_runtime(_runtime())
+
+            if let bundle = _bundle.of(value) then
+                _publish("update_display_data", CONTENT.display_data(bundle, id))
+            fi
+        si
+    si
+si
