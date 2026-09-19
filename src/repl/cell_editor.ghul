@@ -24,6 +24,10 @@ namespace Ghul.Cli.Repl is
         _history: LINE_HISTORY
         _buffer: CELL_BUFFER
 
+        // The cell being typed when Up first went into history, put back
+        // when Down comes out past the newest entry.
+        _draft: CELL_SNAPSHOT?
+
         // How many screen rows down from the first drawn row the cursor
         // is, so the next redraw can go back up to the start.
         _cursor_screen_row: int
@@ -65,6 +69,7 @@ namespace Ghul.Cli.Repl is
         _read_cell() -> CELL_READ? is
             _buffer.clear()
             _end.clear()
+            _draft = null
 
             _cursor_screen_row = 0
             _top = 0
@@ -137,14 +142,25 @@ namespace Ghul.Cli.Repl is
                     _buffer.end()
                 when System.ConsoleKey.UP_ARROW then
                     if !_buffer.up() then
+                        let draft = if _history.is_at_newest then _buffer.snapshot() else null fi
+
                         if let recalled = _history.previous() then
+                            if draft? then
+                                _draft = draft
+                            fi
+
                             _buffer.replace(recalled)
                         fi
                     fi
                 when System.ConsoleKey.DOWN_ARROW then
-                    if !_buffer.down() then
+                    if !_buffer.down() /\ !_history.is_at_newest then
                         if let recalled = _history.next() then
                             _buffer.replace(recalled)
+                        elif let draft = _draft then
+                            _buffer.restore(draft)
+                            _draft = null
+                        else
+                            _buffer.clear()
                         fi
                     fi
                 when System.ConsoleKey.TAB then

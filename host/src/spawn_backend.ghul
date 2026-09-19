@@ -22,7 +22,17 @@ namespace Ghul.Repl.Host is
         // Whether typed text is complete, for a backend that can say
         // cheaply; null leaves it to the session's own check.
         check(text: string) -> Completeness? => null
+
+        // As check, and what complete text ends on where the backend can
+        // say; null leaves it to check.
+        check_ending(text: string) -> CHECK_ANSWER? => null
     si
+
+    // Whether typed text is complete, and for complete text what the last
+    // thing at its root is: "expression", "loop", "let", "assignment",
+    // "function", "definition" or "statement", or null where that is not
+    // known.
+    class CHECK_ANSWER(completeness: Completeness, last_statement: string?);
 
     // Where a session keeps its cells. Every backend writes a cell to the
     // same place, so that one backend can take over from another part way

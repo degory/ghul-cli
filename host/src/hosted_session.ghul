@@ -161,6 +161,11 @@ namespace Ghul.Repl.Host is
         check(text: string) -> Completeness =>
             _backend.check(text) ?? completeness_fallback?.check(text) ?? Completeness.COMPLETE
 
+        // As check, and what complete text ends on where the backend can
+        // say.
+        check_ending(text: string) -> CHECK_ANSWER =>
+            _backend.check_ending(text) ?? CHECK_ANSWER(check(text), null)
+
         // Ends the session's compiler, if it keeps one running.
         close() is
             _backend.close()

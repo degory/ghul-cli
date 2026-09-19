@@ -54,8 +54,8 @@ namespace Ghul.Cli.Repl is
             return _lines[_position]
         si
 
-        // The cell after the one recalled, or the empty cell past the
-        // newest.
+        // The cell after the one recalled, or null past the newest, where
+        // the cell being typed before history was entered belongs.
         next() -> string? is
             if _position >= _lines.count then
                 return null
@@ -63,8 +63,12 @@ namespace Ghul.Cli.Repl is
 
             _position = _position + 1
 
-            return if _position < _lines.count then _lines[_position] else "" fi
+            return if _position < _lines.count then _lines[_position] else null fi
         si
+
+        // Whether nothing is recalled: the cell being typed is the user's
+        // own, not a copy of an earlier one.
+        is_at_newest: bool => _position >= _lines.count
     si
 
     // Cells kept from one session to the next, in a file of one cell to a
