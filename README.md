@@ -157,7 +157,9 @@ A redefinition can read the value it replaces: after `let x = 10, y = 20`,
 
 At a terminal the whole submission is edited in place, however many lines
 it has. Up and Down move between its lines, and past the first or last line
-bring back earlier submissions, each as a whole. Enter on the last line
+bring back earlier submissions, each as a whole, including those of earlier
+sessions: the last thousand are kept in `$XDG_STATE_HOME/ghul-cli/history`
+(`~/.local/state/ghul-cli/history` when `XDG_STATE_HOME` is not set). Enter on the last line
 submits or waits for more as described above; Enter on an earlier line, or
 Alt-Enter anywhere, starts a new line there. Backspace at the start of a line
 joins it to the one above. Home and End (or Ctrl-A and Ctrl-E) go to either
