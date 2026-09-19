@@ -13,12 +13,16 @@ namespace Ghul.Cli is
     use Ghul.Pipes.map
     use Ghul.Pipes.first
 
+    // HOME where it is set, which is everywhere but Windows, and the user
+    // profile directory where it is not.
     home_directory() -> string is
         let home = System.Environment.get_environment_variable("HOME")
 
-        assert home? else "ghul: the HOME environment variable is not set";
+        if home? /\ home.length > 0 then
+            return home
+        fi
 
-        return home
+        return System.Environment.get_folder_path(System.Environment_SpecialFolder.USER_PROFILE)
     si
 
     tools_directory() -> string => "{home_directory()}/.local/share/ghul-cli/tools"

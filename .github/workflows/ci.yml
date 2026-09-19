@@ -93,6 +93,32 @@ jobs:
         name: package
         path: nupkg
 
+  # Advisory for now: not among what the release waits for, until it has
+  # shown it is reliable.
+  windows:
+    name: Windows smoke test
+    needs: [version]
+    runs-on: windows-latest
+
+    timeout-minutes: 20
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - uses: actions/setup-dotnet@v6
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Restore local tools
+      run: dotnet tool restore
+
+    - name: Run unit tests
+      run: dotnet test unit-tests
+
+    - name: Run the Windows smoke test
+      shell: pwsh
+      run: ./tests/smoke-windows.ps1
+
   publish_package:
     name: Publish package
     needs: [version, unit_tests, build_and_smoke_test]

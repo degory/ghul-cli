@@ -1,0 +1,9 @@
+namespace Ghul.Cli.Tests is
+    // Reports the calling test as inconclusive on Windows, where what it
+    // checks does not exist.
+    unix_only(reason: string) is
+        if System.OperatingSystem.is_windows() then
+            Microsoft.VisualStudio.TestTools.UnitTesting.Assert.inconclusive(reason)
+        fi
+    si
+si

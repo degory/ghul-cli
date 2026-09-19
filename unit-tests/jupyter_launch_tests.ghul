@@ -39,6 +39,8 @@ namespace Ghul.Cli.Tests is
 
         @Test()
         root_from_runtime_directory__climbs_out_of_the_framework_version() is
+            unix_only("these fixtures are Unix paths")
+
             let root = LAUNCH.root_from_runtime_directory("/home/u/.dotnet/shared/Microsoft.NETCore.App/10.0.1/")
 
             assert root =~ "/home/u/.dotnet";
@@ -46,6 +48,8 @@ namespace Ghul.Cli.Tests is
 
         @Test()
         environment__names_a_root_outside_the_default_locations() is
+            unix_only("these fixtures are Unix paths")
+
             let variables = LAUNCH.environment("/home/u/.dotnet", "/home/u/.dotnet/tools")
 
             assert variables.count == 2;
@@ -57,6 +61,8 @@ namespace Ghul.Cli.Tests is
 
         @Test()
         environment__leaves_a_default_root_to_the_host() is
+            unix_only("these fixtures are Unix paths")
+
             let variables = LAUNCH.environment("/usr/lib/dotnet/", "/home/u/.dotnet/tools")
 
             assert variables.count == 1;
@@ -71,6 +77,8 @@ namespace Ghul.Cli.Tests is
 
         @Test()
         contents__writes_the_command_and_the_environment() is
+            unix_only("these fixtures are Unix paths")
+
             let command = LIST[string]()
             command.add("/home/u/.dotnet/tools/ghul-jupyter")
 
