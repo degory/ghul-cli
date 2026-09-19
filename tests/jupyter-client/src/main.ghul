@@ -269,6 +269,14 @@ namespace Ghul.Jupyter.Tests is
                 JSON.bool_member(inspected, "found", false),
             "inspection finds that name's declaration")
 
+        Std.write_line("a cell that has to be interrupted:")
+
+        _interrupt_case(client)
+
+        Std.write_line("the session survives being interrupted:")
+
+        _execute(client, "add(x)\n", "42")
+
         Std.write_line("is_complete:")
 
         _is_complete(client, "let x = 1\n", "complete")
@@ -326,6 +334,48 @@ namespace Ghul.Jupyter.Tests is
         let reply = client.reply()
 
         return EXECUTION(published, if let answer = reply then answer.content else JSON.EMPTY_OBJECT fi)
+    si
+
+    // A cell that will not stop on its own, stopped from the control
+    // channel while the shell channel is inside it. The interrupt is
+    // repeated because one that arrives while the cell is still
+    // compiling finds nothing running and is answered without stopping
+    // anything.
+    _interrupt_case(client: CLIENT) is
+        let content = JSON.object(
+            LIST[(name: string, value: string)]([
+                (name = "code", value = JSON.quote("while true do\nod\n")),
+                (name = "silent", value = "false"),
+                (name = "store_history", value = "true"),
+                (name = "allow_stdin", value = "false"),
+                (name = "stop_on_error", value = "false")
+            ]))
+
+        let _ = client.send("execute_request", content)
+
+        let deadline = System.DateTime.utc_now.add_seconds(90.0)
+        let reply: MESSAGE? mut = null
+
+        while System.DateTime.utc_now < deadline /\ !reply? do
+            let _ = client.send_control("interrupt_request", JSON.EMPTY_OBJECT)
+
+            let _ = client.control_reply_within(System.TimeSpan.from_seconds(2.0))
+
+            reply = client.reply_within(System.TimeSpan.from_seconds(2.0))
+        od
+
+        if !reply? then
+            client.check(false, "an endless cell is stopped by interrupt_request")
+
+            return
+        fi
+
+        client.check(true, "an endless cell is stopped by interrupt_request")
+
+        client.check(
+            JSON.string_member(reply.content, "status") =~ "error" /\
+                JSON.string_member(reply.content, "ename") =~ "KeyboardInterrupt",
+            "and its execute_reply says KeyboardInterrupt")
     si
 
     _is_complete(client: CLIENT, code: string, want: string) is

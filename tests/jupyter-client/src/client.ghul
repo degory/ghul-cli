@@ -18,6 +18,7 @@ namespace Ghul.Jupyter.Tests is
         _signer: SIGNER
         _messages: MESSAGES
         _shell: CHANNEL
+        _control: CHANNEL
         _iopub: NetMQ.Sockets.SubscriberSocket
         _failures: LIST[string]
 
@@ -26,7 +27,9 @@ namespace Ghul.Jupyter.Tests is
             _messages = MESSAGES("test-session")
             _failures = LIST[string]()
 
-            _shell = CHANNEL(NetMQ.Sockets.DealerSocket(">{_connection.shell_address}"), _signer)
+            _shell = CHANNEL("shell", NetMQ.Sockets.DealerSocket(">{_connection.shell_address}"), _signer)
+
+            _control = CHANNEL("control", NetMQ.Sockets.DealerSocket(">{_connection.control_address}"), _signer)
 
             _iopub = NetMQ.Sockets.SubscriberSocket(">{_connection.iopub_address}")
 
@@ -74,6 +77,28 @@ namespace Ghul.Jupyter.Tests is
             _shell.send(message)
 
             return message.msg_id
+        si
+
+        // The same on control, which a front end uses for the requests
+        // it sends while shell is busy.
+        send_control(msg_type: string, content: string) -> string is
+            let message = request(msg_type, content)
+
+            _control.send(message)
+
+            return message.msg_id
+        si
+
+        control_reply_within(budget: System.TimeSpan) -> MESSAGE? is
+            let deadline = System.DateTime.utc_now.add(budget)
+
+            while System.DateTime.utc_now < deadline do
+                if let message = _control.try_receive(System.TimeSpan.from_milliseconds(200L)) then
+                    return message
+                fi
+            od
+
+            return null
         si
 
         // The next reply on shell, or nothing if the kernel says nothing
@@ -177,6 +202,7 @@ namespace Ghul.Jupyter.Tests is
 
         close() is
             _shell.socket.dispose()
+            _control.socket.dispose()
             _iopub.dispose()
         si
     si

@@ -95,7 +95,7 @@ namespace Ghul.Jupyter is
     // Reading and writing messages on a socket. Every socket the kernel
     // holds speaks the same framing, so the shell, control and stdin
     // channels share this.
-    class CHANNEL(_socket: NetMQ.NetMQSocket, _signer: SIGNER) is
+    class CHANNEL(_name: string, _socket: NetMQ.NetMQSocket, _signer: SIGNER) is
         socket: NetMQ.NetMQSocket => _socket
 
         // The next message, or nothing where none arrives inside the
@@ -113,7 +113,13 @@ namespace Ghul.Jupyter is
                 return null
             fi
 
-            return decode(frames, _signer)
+            let message = decode(frames, _signer)
+
+            if let received = message then
+                TRACE.received(_name, received.msg_type)
+            fi
+
+            return message
         si
 
         send(message: MESSAGE) is
@@ -139,6 +145,8 @@ namespace Ghul.Jupyter is
             frames.add(Encoding.utf8.get_bytes(message.content))
 
             NetMQ.OutgoingSocketExtensions.send_multipart_bytes(_socket, frames)
+
+            TRACE.sent(_name, message.msg_type)
         si
 
         // The frames of one message, split at the delimiter. Everything
