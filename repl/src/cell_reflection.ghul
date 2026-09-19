@@ -20,10 +20,12 @@ namespace Ghul.Repl is
     // the earlier cells, and neither wants the other's answer.
     class CELL_EXPORTS is
         // What a user could have written and a later cell can import: the
-        // public static functions, variables and properties on the
-        // namespace's globals type, less the two entry points a host
-        // calls itself, plus the public types declared directly in the
-        // namespace. A union's variants sit in a namespace of their own
+        // static functions, variables and properties on the namespace's
+        // globals type, less the two entry points a host calls itself,
+        // plus the types declared directly in the namespace. Public ones
+        // always; underscore-named ones too where the cell is marked as a
+        // session cell, since a compiler that marks cells lets a later
+        // cell use them, as a later part of one file could. A union's variants sit in a namespace of their own
         // and are reached through the union, and anything the compiler
         // generated - closures, caches, state machines, backing fields,
         // accessors - is left out. The spelling is already ghūl's.
@@ -40,10 +42,11 @@ namespace Ghul.Repl is
             od
 
             let cell_namespace = globals?.`namespace
+            let want_private = is_session_cell(assembly)
 
             for type in types do
                 if
-                    type.is_public /\ !(type.name =~ GLOBALS_TYPE_NAME) /\
+                    (type.is_public \/ (want_private /\ !type.is_nested)) /\ !(type.name =~ GLOBALS_TYPE_NAME) /\
                     (!cell_namespace? \/ type.`namespace =~ cell_namespace) /\ !_is_variant(type) /\
                     is_user_name(type.name)
                 then
@@ -52,7 +55,7 @@ namespace Ghul.Repl is
             od
 
             if let globals_type = globals then
-                let flags = static_flags(false)
+                let flags = static_flags(want_private)
 
                 for method in globals_type.get_methods(flags) do
                     if !method.is_special_name /\ !_is_entry_point_name(method.name) then
@@ -82,6 +85,25 @@ namespace Ghul.Repl is
             fi
 
             return cast BindingFlags(flags)
+        si
+
+        // Whether a compiler that treats a session's cells as one file
+        // built the cell: it marks the assembly as a session cell.
+        is_session_cell(assembly: Assembly) -> bool static is
+            for data in assembly.get_custom_attributes_data() do
+                if
+                    data.attribute_type.full_name =~ "System.Reflection.AssemblyMetadataAttribute" /\
+                    data.constructor_arguments.count == 2
+                then
+                    if let key: string = data.constructor_arguments[0].value then
+                        if key =~ SESSION_CELL_MARKER_KEY then
+                            return true
+                        fi
+                    fi
+                fi
+            od
+
+            return false
         si
 
         _is_entry_point_name(name: string) -> bool static =>
@@ -254,6 +276,9 @@ namespace Ghul.Repl is
     si
 
     GLOBALS_TYPE_NAME: string => "$globals"
+
+    // The AssemblyMetadata key a compiler marks a session cell with.
+    SESSION_CELL_MARKER_KEY: string => "ghul.submission"
 
     VARIANT_ATTRIBUTE_NAME: string => "Ghul.Internal.VARIANT_ATTRIBUTE"
     MAIN_ENTRY_NAME: string => "_entry"

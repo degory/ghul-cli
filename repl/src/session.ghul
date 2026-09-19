@@ -274,13 +274,7 @@ namespace Ghul.Repl is
             spans[request.name] = span
 
             for diagnostic in reply.diagnostics do
-                if let private_use = _private_use_in_carried(request, span, diagnostic) then
-                    if !diagnostics.contains(private_use) then
-                        diagnostics.add(private_use)
-                    fi
-                else
-                    diagnostics.add(DIAGNOSTIC_LINES.for_display(diagnostic, spans).render())
-                fi
+                diagnostics.add(DIAGNOSTIC_LINES.for_display(diagnostic, spans).render())
             od
 
             if let loaded = reply.loaded then
@@ -326,33 +320,6 @@ namespace Ghul.Repl is
                 request.carried_line_count,
                 "the earlier definition of {request.carried_names |> Ghul.Pipes.join(" and ")}",
                 anchor)
-        si
-
-        // An error in a carried definition saying an underscore name could
-        // not be found: a name private to the cell that declared it, which
-        // no later cell can see, so the type cannot be declared again
-        // anywhere else. Any other error is shown as it is.
-        _private_use_in_carried(request: CELL_REQUEST, span: CELL_SPAN, diagnostic: CELL_DIAGNOSTIC) -> string? is
-            let location = diagnostic.location
-
-            if !location? \/ !span.is_carried_line(location.start_line) \/ !(diagnostic.severity =~ "error") then
-                return null
-            fi
-
-            let m = System.Text.RegularExpressions.Regex.match(
-                diagnostic.message,
-                "^(symbol not found: (?<name>_[A-Za-z0-9_]+)|member (?<name>_[A-Za-z0-9_]+) not found in .*)$")
-
-            if !m.success then
-                return null
-            fi
-
-            let names = request.carried_names |> Ghul.Pipes.join(" and ")
-
-            return
-                "{cell_label_for(request.index)}: {span.anchor_line},1..{span.anchor_line},1: error: "
-                "{names} cannot be added to from a later cell: its definition uses {m.groups["name"].value}, which is private "
-                "to the cell that defined it; declare {names} again instead"
         si
 
         _record_type_sources(user: string, exports: Collections.List[string]) is
