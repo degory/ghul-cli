@@ -1,4 +1,4 @@
-namespace Ghul.Repl.Host is
+namespace Ghul.Repl is
     use Collections.LIST
     use System.Reflection.Assembly
     use System.Reflection.BindingFlags
@@ -77,22 +77,22 @@ namespace Ghul.Repl.Host is
                     continue
                 fi
 
-                let is_globals = type.name =~ Ghul.Repl.GLOBALS_TYPE_NAME
+                let is_globals = type.name =~ GLOBALS_TYPE_NAME
 
                 for method in type.get_methods(flags) do
-                    if !method.is_special_name /\ Ghul.Repl.CELL_EXPORTS.is_user_name(method.name) /\ _method_mentions(method, old_type) then
+                    if !method.is_special_name /\ CELL_EXPORTS.is_user_name(method.name) /\ _method_mentions(method, old_type) then
                         _add(users, if is_globals then method.name else _base_name(type.name) fi)
                     fi
                 od
 
                 for member in type.get_fields(flags) do
-                    if Ghul.Repl.CELL_EXPORTS.is_user_name(member.name) /\ _mentions(member.field_type, old_type) then
+                    if CELL_EXPORTS.is_user_name(member.name) /\ _mentions(member.field_type, old_type) then
                         _add(users, if is_globals then member.name else _base_name(type.name) fi)
                     fi
                 od
 
                 for property in type.get_properties(flags) do
-                    if Ghul.Repl.CELL_EXPORTS.is_user_name(property.name) /\ _mentions(property.property_type, old_type) then
+                    if CELL_EXPORTS.is_user_name(property.name) /\ _mentions(property.property_type, old_type) then
                         _add(users, if is_globals then property.name else _base_name(type.name) fi)
                     fi
                 od
