@@ -1,0 +1,97 @@
+namespace Ghul.Cli.Repl is
+    use Collections.LIST
+
+    // The names on offer for the word being typed, laid out in columns
+    // below the cell, one of them selected. Moving the selection past the
+    // rows that fit scrolls the rows shown.
+    class COMPLETION_MENU is
+        names: Collections.List[string]
+
+        // What was typed before the menu opened, put back if it is
+        // dismissed.
+        typed: string
+
+        selected: int
+
+        _per_row: int
+        _cell: int
+        _rows: int
+        _first_row: int
+
+        init(names: Collections.List[string], typed: string, width: int, rows: int) is
+            self.names = names
+            self.typed = typed
+
+            let widest = names |> Ghul.Pipes.map(n => n.length) |> Ghul.Pipes.reduce(0, (a, b) => System.Math.max(a, b))
+
+            _cell = widest + 2
+            _per_row = System.Math.max(1, width / _cell)
+            _rows = System.Math.max(1, rows)
+        si
+
+        chosen: string => names[selected]
+
+        next() is _select((selected + 1) % names.count) si
+
+        previous() is _select((selected + names.count - 1) % names.count) si
+
+        // A row down, or to the last name from the row above it.
+        down() is
+            if selected + _per_row < names.count then
+                _select(selected + _per_row)
+            elif selected / _per_row < (names.count - 1) / _per_row then
+                _select(names.count - 1)
+            fi
+        si
+
+        up() is
+            if selected >= _per_row then
+                _select(selected - _per_row)
+            fi
+        si
+
+        _select(index: int) is
+            selected = index
+
+            let row = selected / _per_row
+
+            if row < _first_row then
+                _first_row = row
+            elif row >= _first_row + _rows then
+                _first_row = row - _rows + 1
+            fi
+        si
+
+        // The rows shown, the selected name passed through `mark`, and
+        // where there are more rows than fit, a last line saying which
+        // name of how many is selected.
+        lines(mark: (string) -> string) -> LIST[string] is
+            let result = LIST[string]()
+            let row_count = (names.count + _per_row - 1) / _per_row
+            let last_row = System.Math.min(row_count, _first_row + _rows)
+
+            for row in _first_row..last_row do
+                let line = System.Text.StringBuilder()
+
+                for i in row * _per_row..System.Math.min(names.count, (row + 1) * _per_row) do
+                    let padded = names[i].pad_right(_cell)
+
+                    if i == selected then
+                        line.append(mark(names[i]))
+                        line.append(padded.substring(names[i].length))
+                    else
+                        line.append(padded)
+                    fi
+                od
+
+                result.add(line.to_string().trim_end())
+            od
+
+            if row_count > _rows then
+                result.add("{selected + 1} of {names.count}")
+            fi
+
+            return result
+        si
+    si
+si

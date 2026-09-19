@@ -373,6 +373,15 @@ namespace Ghul.Cli.Repl is
         is_in_indent: bool => INDENTATION.leading_spaces(line) >= column
 
         // The part of a name the cursor follows, which completion extends.
+        // The name the cursor is at the end of, replaced with `text`.
+        replace_name_before_cursor(text: string) is
+            let typed = name_before_cursor
+            let start = column - typed.length
+
+            _set_line(line.remove(start, typed.length).insert(start, text))
+            column = start + text.length
+        si
+
         name_before_cursor: string is
             let start mut = column
             let text = line
