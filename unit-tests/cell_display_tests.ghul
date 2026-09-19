@@ -106,6 +106,27 @@ namespace Ghul.Cli.Tests is
             assert _display().format(cast object(DISPLAYED(3, "x"))) =~ "DISPLAYED(count = 3, label = \"x\")";
         si
 
+        // With a runtime new enough to have it, the runtime's own
+        // `inspect` writes the value, so a type that says how it is
+        // displayed is written that way.
+        @Test()
+        format__with_a_runtime_that_has_inspect__writes_the_value_with_it() is
+            let display = CELL_DISPLAY()
+
+            display.use_runtime((typeof Ghul.DISPLAY_STATE).assembly)
+
+            assert display.format(cast object(TAGGED("a"))) =~ "<a>";
+        si
+
+        @Test()
+        format__with_no_runtime__writes_the_value_itself() is
+            let display = CELL_DISPLAY()
+
+            display.use_runtime(null)
+
+            assert display.format(cast object(TAGGED("a"))) =~ "TAGGED(label = \"a\")";
+        si
+
         @Test()
         type_name__uses_ghul_names_for_type_arguments() is
             assert CELL_DISPLAY.type_name(typeof(Collections.LIST[string])) =~ "List[string]";
@@ -115,4 +136,10 @@ namespace Ghul.Cli.Tests is
     si
 
     class DISPLAYED(count: int, label: string);
+
+    class TAGGED(label: string): Ghul.Displayable is
+        display(state: Ghul.DISPLAY_STATE) is
+            state.append("<{label}>")
+        si
+    si
 si

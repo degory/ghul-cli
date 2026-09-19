@@ -20,6 +20,12 @@ namespace Ghul.Repl is
         // there are.
         _ROWS: int static => 20
 
+        // Write the text/plain part with the `inspect` of the runtime the
+        // cells run against, when it is new enough.
+        use_runtime(runtime: System.Reflection.Assembly?) is
+            _display.use_runtime(runtime)
+        si
+
         // Null where there is nothing to show, as CELL_DISPLAY.format
         // answers null.
         of(value: object?) -> LIST[(mime: string, payload: string)]? is

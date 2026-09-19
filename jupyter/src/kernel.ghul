@@ -300,6 +300,8 @@ namespace Ghul.Jupyter is
                 return
             fi
 
+            _bundle.use_runtime(_session.runtime)
+
             if let bundle = _bundle.of(result.value) /\ !silent then
                 _publish(request, "execute_result", CONTENT.execute_result(bundle, _execution_count))
             fi

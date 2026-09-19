@@ -14,6 +14,46 @@ namespace Ghul.Repl is
     class CELL_DISPLAY is
         init() is si
 
+        // The runtime's own `inspect`, where the cells run against a
+        // runtime that has one fit to use: every value the cells produce
+        // is then written the way a ghūl program would write it with
+        // `inspect`, and the rest of this class is the fallback for an
+        // older runtime.
+        _inspect: System.Reflection.MethodInfo?
+
+        _inspecting_runtime: System.Reflection.Assembly?
+
+        // The oldest runtime whose `inspect` is used: the first that
+        // leaves a type from another language to its own to_string rather
+        // than reading its properties, which for a task means waiting on
+        // its result.
+        _INSPECT_FLOOR: System.Version static => System.Version(21, 8, 1)
+
+        // Write values with the `inspect` of the runtime the cells run
+        // against, when it is new enough.
+        use_runtime(runtime: System.Reflection.Assembly?) is
+            if runtime == _inspecting_runtime then
+                return
+            fi
+
+            _inspecting_runtime = runtime
+            _inspect = null
+
+            if !runtime? then
+                return
+            fi
+
+            let version = runtime.get_name().version
+
+            if !version? \/ version < _INSPECT_FLOOR then
+                return
+            fi
+
+            if let globals = runtime.get_type("Ghul.$globals") then
+                _inspect = globals.get_method("inspect", [typeof object])
+            fi
+        si
+
         // How many of a collection's elements are worth a line, before
         // saying how many more there are.
         _LIMIT: int static => 20
@@ -25,6 +65,15 @@ namespace Ghul.Repl is
         format(value: object?) -> string? is
             if !value? then
                 return null
+            fi
+
+            if let inspect = _inspect then
+                try
+                    if let text: string = inspect.invoke(null, [value]) then
+                        return text
+                    fi
+                catch e: System.Reflection.TargetInvocationException
+                yrt
             fi
 
             return _render(value, 0)
