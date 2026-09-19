@@ -1,0 +1,40 @@
+namespace Ghul.Cli.Tests is
+    use Ghul.Cli.Repl.CONTINUATION
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    @TestClass()
+    class CONTINUATION_TESTS is
+        init() is si
+
+        @Test()
+        strip__drops_a_lone_backslash_at_the_end() is
+            assert CONTINUATION.strip("let x = 1 \\") =~ "let x = 1";
+            assert CONTINUATION.strip("x\\") =~ "x";
+            assert CONTINUATION.strip("\\") =~ "";
+            assert CONTINUATION.strip("    f(a) \\   ") =~ "    f(a)";
+        si
+
+        // `/\` is an operator, written at the end of a wrapped line.
+        @Test()
+        strip__leaves_a_longer_operator_ending_in_a_backslash() is
+            assert !CONTINUATION.strip("x > 0 /\\")?;
+            assert !CONTINUATION.strip("a \\/")?;
+        si
+
+        @Test()
+        strip__leaves_a_backslash_in_a_string_character_or_comment() is
+            assert !CONTINUATION.strip("let s = \"\\\\\"")?;
+            assert !CONTINUATION.strip("let c = '\\\\'")?;
+            assert !CONTINUATION.strip("x // \\")?;
+            assert !CONTINUATION.strip("\"a \\")?;
+        si
+
+        @Test()
+        strip__leaves_a_line_not_ending_in_one() is
+            assert !CONTINUATION.strip("let x = 1")?;
+            assert !CONTINUATION.strip("")?;
+        si
+    si
+si

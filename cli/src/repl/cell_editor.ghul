@@ -11,7 +11,7 @@ namespace Ghul.Cli.Repl is
     // Down move between its lines, and past the first or last line recall
     // earlier cells; Left and Right cross line ends; Enter inserts a line
     // in the middle of the cell and on its last line does what CELL_END
-    // says; Alt-Enter always inserts a line. Backspace at the start of a
+    // says; Alt-Enter submits the cell from any line. Backspace at the start of a
     // line joins it to the one above, and Delete at the end of one joins
     // the next. Home and End (or Ctrl-A and Ctrl-E) go to either end of a
     // line, Tab completes, a paste is taken as it is, and Ctrl-D in an
@@ -123,7 +123,9 @@ namespace Ghul.Cli.Repl is
                     let next = Std.read_key(true)
 
                     if next.key == System.ConsoleKey.ENTER then
-                        _buffer.new_line()
+                        if let read = _submit_now() then
+                            return read
+                        fi
                     elif next.key_char == '[' /\ _follows("200~") then
                         _buffer.insert_verbatim(_read_paste())
                     fi
@@ -135,32 +137,43 @@ namespace Ghul.Cli.Repl is
 
                 case key.key
                 when System.ConsoleKey.ENTER then
-                    // Blank lines after the cursor's are no reason to treat
-                    // Enter as adding a line in the middle of the cell.
-                    if !is_alt /\ _buffer.is_on_last_written_line then
-                        _buffer.drop_blank_lines_below()
-                    fi
-
-                    if is_alt \/ !_buffer.is_on_last_line then
+                    if is_alt then
+                        if let read = _submit_now() then
+                            return read
+                        fi
+                    elif let continued = CONTINUATION.strip(_buffer.line) then
+                        // A lone backslash at the end of a line opens the
+                        // next one, whatever the cell would otherwise do.
+                        _buffer.replace_line(continued)
                         _buffer.new_line()
                     else
-                        let lines = _buffer.lines
-                        let step = _end.step_for(lines)
+                        // Blank lines after the cursor's are no reason to treat
+                        // Enter as adding a line in the middle of the cell.
+                        if _buffer.is_on_last_written_line then
+                            _buffer.drop_blank_lines_below()
+                        fi
 
-                        if step == CellStep.WAIT then
-                            _buffer.add_line()
+                        if !_buffer.is_on_last_line then
+                            _buffer.new_line()
                         else
-                            let is_command = lines.count == 1 /\ lines[0].trim().starts_with(":")
-                            let source = if is_command then lines[0] else _end.source_for(lines) fi
+                            let lines = _buffer.lines
+                            let step = _end.step_for(lines)
 
-                            _buffer.to_end()
-                            _finish("")
+                            if step == CellStep.WAIT then
+                                _buffer.add_line()
+                            else
+                                let is_command = lines.count == 1 /\ lines[0].trim().starts_with(":")
+                                let source = if is_command then lines[0] else _end.source_for(lines) fi
 
-                            if step != CellStep.NOTHING then
-                                _history.add(CELL_TEXT.without_terminator(_buffer.lines))
+                                _buffer.to_end()
+                                _finish("")
+
+                                if step != CellStep.NOTHING then
+                                    _history.add(CELL_TEXT.without_terminator(_buffer.lines))
+                                fi
+
+                                return CELL_READ(source, step, is_command)
                             fi
-
-                            return CELL_READ(source, step, is_command)
                         fi
                     fi
                 when System.ConsoleKey.BACKSPACE then
@@ -220,6 +233,26 @@ namespace Ghul.Cli.Repl is
 
                 _draw()
             od
+        si
+
+        // Alt-Enter: the whole cell submitted from whatever line the cursor
+        // is on, as it stands, showing the value it ends on. Null for a
+        // blank cell, which submits nothing.
+        _submit_now() -> CELL_READ? is
+            let text = CELL_TEXT.without_terminator(_buffer.lines)
+
+            if text.trim().length == 0 then
+                return null
+            fi
+
+            _buffer.to_end()
+            _finish("")
+
+            _history.add(text)
+
+            let is_command = !text.contains('\n') /\ text.trim().starts_with(":")
+
+            return CELL_READ(if is_command then text else "{text}\n" fi, CellStep.SUBMIT, is_command)
         si
 
         // One name on offer is written in; several are written in as far

@@ -272,6 +272,12 @@ namespace Ghul.Cli.Repl is
             column = System.Math.clamp(to_column, 0, line.length)
         si
 
+        // The cursor's line replaced, the cursor at its end.
+        replace_line(value: string) is
+            _set_line(value)
+            column = value.length
+        si
+
         // Moves the cursor to the end of the last line, for submitting.
         to_end() is
             row = _lines.count - 1

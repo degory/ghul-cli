@@ -188,9 +188,14 @@ At a terminal the whole submission is edited in place, however many lines
 it has. Up and Down move between its lines, and past the first or last line
 bring back earlier submissions, each as a whole, including those of earlier
 sessions: the last thousand are kept in `$XDG_STATE_HOME/ghul-cli/history`
-(`~/.local/state/ghul-cli/history` when `XDG_STATE_HOME` is not set). Enter on the last line
-submits or waits for more as described above; Enter on an earlier line, or
-Alt-Enter anywhere, starts a new line there. Backspace at the start of a line
+(`~/.local/state/ghul-cli/history` when `XDG_STATE_HOME` is not set). A submission is submitted
+from its last line: Enter there submits or waits for more as described
+above, while Enter on an earlier line starts a new line there. Alt-Enter
+submits the whole submission from any line, as it stands, and shows the
+value it ends on. A line ending in a `\` on its own keeps the submission
+open whatever it holds, and the `\` is dropped; a `\` ending a longer
+operator, such as `/\`, is part of the code. That works for input that is
+not a terminal too. Backspace at the start of a line
 joins it to the one above. Home and End (or Ctrl-A and Ctrl-E) go to either
 end of a line, Tab completes the name being typed from everything the session
 has defined, and Ctrl-D in an empty one leaves. Ctrl-C at the prompt does

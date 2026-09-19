@@ -59,6 +59,14 @@ namespace Ghul.Cli.Repl is
         si
 
         enter(line: string) -> CellStep is
+            // A lone backslash at the end of a line keeps the cell open,
+            // whatever the rest of it would do.
+            if let continued = CONTINUATION.strip(line) then
+                _add(continued)
+
+                return CellStep.WAIT
+            fi
+
             let trimmed = line.trim()
 
             if trimmed =~ "." then
@@ -540,8 +548,11 @@ namespace Ghul.Cli.Repl is
             Std.write_line("several lines, does not end the submission: keep typing, or end it with")
             Std.write_line("a blank line; a line that leaves something open waits for more")
             Std.write_line("a line holding only . ends the submission and shows what it ended on")
-            Std.write_line("Up and Down move between lines, then to earlier submissions; Enter on")
-            Std.write_line("an earlier line or Alt-Enter adds a line; Ctrl-D in an empty submission leaves")
+            Std.write_line("a submission is submitted from its last line; Enter on an earlier line adds")
+            Std.write_line("a line, and Alt-Enter submits from any line, showing what it ended on")
+            Std.write_line("a line ending in a lone \\ keeps the submission open; the \\ is dropped")
+            Std.write_line("Up and Down move between lines, then to earlier submissions; Ctrl-D in an")
+            Std.write_line("empty submission leaves")
             Std.write_line("Ctrl-C while a submission runs interrupts it; the session carries on")
             Std.write_line("what you end on is shown, unless you end on a statement or with a blank line")
             Std.write_line("messages call a cell cell-3; in code it is cell3, as in cell3.x")

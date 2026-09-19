@@ -1,0 +1,32 @@
+namespace Ghul.Cli.Repl is
+    // A line ending in a backslash that is a token of its own - not the end
+    // of a longer operator such as `/\`, and not inside a string, a
+    // character literal or a comment - says the cell is not finished,
+    // whatever else would decide that. The backslash is not part of the
+    // cell.
+    class CONTINUATION is
+        init() is si
+
+        // The line without its continuation backslash, or null when it
+        // does not end in one.
+        strip(line: string) -> string? static is
+            let spans = GHUL_LEXER.spans(line)
+
+            if spans.count == 0 then
+                return null
+            fi
+
+            let last = spans[spans.count - 1]
+
+            if last.kind != TokenKind.OPERATOR \/ last.length != 1 \/ line[last.start] != '\\' then
+                return null
+            fi
+
+            if line.substring(last.start + 1).trim().length > 0 then
+                return null
+            fi
+
+            return line.substring(0, last.start).trim_end()
+        si
+    si
+si

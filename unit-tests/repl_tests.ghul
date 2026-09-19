@@ -471,6 +471,17 @@ namespace Ghul.Cli.Tests is
             assert cell.enter(".") == CellStep.SUBMIT;
         si
 
+        // A lone backslash keeps the cell open, even after finished text,
+        // and is not part of it.
+        @Test()
+        enter__keeps_the_cell_open_after_a_lone_backslash() is
+            let cell = _piped()
+
+            assert cell.enter("1 + 2 \\") == CellStep.WAIT;
+            assert cell.enter("+ 3") == CellStep.SUBMIT;
+            assert cell.source =~ "1 + 2\n+ 3\n";
+        si
+
         @Test()
         clear__empties_a_held_cell() is
             let cell = _at_terminal()
