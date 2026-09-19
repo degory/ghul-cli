@@ -14,26 +14,36 @@ namespace Ghul.Cli.Repl is
         si
     si
 
-    // Earlier cells, recalled with the arrow keys, newest last.
+    // Earlier cells, recalled with the arrow keys, newest last. With a
+    // store, the cells of earlier sessions are recalled too, and each cell
+    // entered is kept for later ones.
     class LINE_HISTORY is
         _lines: LIST[string]
         _position: int
+        _store: HISTORY_STORE?
 
         init() is
             _lines = LIST[string]()
         si
 
-        // A line entered, remembered unless blank or the same as the one
+        init(store: HISTORY_STORE) is
+            _lines = LIST[string](store.load())
+            _position = _lines.count
+            _store = store
+        si
+
+        // A cell entered, remembered unless blank or the same as the one
         // before it.
         add(line: string) is
             if line.trim().length > 0 /\ (_lines.count == 0 \/ _lines[_lines.count - 1] !~ line) then
                 _lines.add(line)
+                _store?.append(line)
             fi
 
             _position = _lines.count
         si
 
-        // The line before the one recalled, or null at the oldest.
+        // The cell before the one recalled, or null at the oldest.
         previous() -> string? is
             if _position == 0 then
                 return null
@@ -44,7 +54,7 @@ namespace Ghul.Cli.Repl is
             return _lines[_position]
         si
 
-        // The line after the one recalled, or the empty line past the
+        // The cell after the one recalled, or the empty cell past the
         // newest.
         next() -> string? is
             if _position >= _lines.count then
@@ -54,6 +64,85 @@ namespace Ghul.Cli.Repl is
             _position = _position + 1
 
             return if _position < _lines.count then _lines[_position] else "" fi
+        si
+    si
+
+    // Cells kept from one session to the next, in a file of one cell to a
+    // line, a cell's own line breaks and backslashes escaped. The newest
+    // `limit` cells are kept; the file is cut back to them as it is read,
+    // once it has grown to twice that. Nothing here is allowed to stop the
+    // session: a file that cannot be read or written is left alone.
+    class HISTORY_STORE(_path: string, _limit: int) is
+        // Where the history lives: under XDG_STATE_HOME, or ~/.local/state.
+        default_path() -> string static is
+            let state = System.Environment.get_environment_variable("XDG_STATE_HOME")
+            let home = System.Environment.get_folder_path(System.Environment_SpecialFolder.USER_PROFILE)
+            let root = if state? /\ state.length > 0 then state else IO.Path.combine(home, ".local", "state") fi
+
+            return IO.Path.combine(root, "ghul-cli", "history")
+        si
+
+        load() -> Collections.List[string] is
+            let cells = LIST[string]()
+
+            try
+                if !IO.File.exists(_path) then
+                    return cells
+                fi
+
+                let lines = IO.File.read_all_lines(_path)
+
+                for line in lines do
+                    if line.length > 0 then
+                        cells.add(decode(line))
+                    fi
+                od
+
+                if cells.count > _limit then
+                    cells.remove_range(0, cells.count - _limit)
+
+                    if lines.count >= 2 * _limit then
+                        IO.File.write_all_lines(_path, cells |> Ghul.Pipes.map(c => encode(c)))
+                    fi
+                fi
+            catch e: System.Exception
+            yrt
+
+            return cells
+        si
+
+        append(cell: string) is
+            try
+                IO.Directory.create_directory(IO.Path.get_directory_name(_path)!)
+                IO.File.append_all_text(_path, "{encode(cell)}\n")
+            catch e: System.Exception
+            yrt
+        si
+
+        encode(cell: string) -> string static =>
+            cell.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "")
+
+        decode(line: string) -> string static is
+            let result = System.Text.StringBuilder()
+            let i mut = 0
+
+            while i < line.length do
+                let c = line[i]
+
+                if c == '\\' /\ i + 1 < line.length then
+                    let next = line[i + 1]
+
+                    result.append(if next == 'n' then '\n' else next fi)
+
+                    i = i + 2
+                else
+                    result.append(c)
+
+                    i = i + 1
+                fi
+            od
+
+            return result.to_string()
         si
     si
 si

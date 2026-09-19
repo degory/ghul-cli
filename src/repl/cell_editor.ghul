@@ -32,7 +32,7 @@ namespace Ghul.Cli.Repl is
         _top: int
 
         init(..) is
-            _history = LINE_HISTORY()
+            _history = LINE_HISTORY(HISTORY_STORE(HISTORY_STORE.default_path(), 1000))
             _buffer = CELL_BUFFER()
 
             // Pasted text arrives between markers, so it can be told apart
