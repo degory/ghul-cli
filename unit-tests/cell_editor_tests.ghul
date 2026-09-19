@@ -5,6 +5,7 @@ namespace Ghul.Cli.Tests is
     use Ghul.Cli.Repl.BLOCK_DEPTH
     use Ghul.Cli.Repl.CELL_END
     use Ghul.Cli.Repl.CELL_LAYOUT
+    use Ghul.Cli.Repl.CELL_TEXT
     use Ghul.Cli.Repl.CellStep
     use Ghul.Repl.Host.CHECK_ANSWER
     use Ghul.Repl.Host.Completeness
@@ -162,6 +163,33 @@ namespace Ghul.Cli.Tests is
             buffer.insert("fi")
 
             assert buffer.lines[1] =~ "fi";
+        si
+
+        @Test()
+        is_on_last_written_line__ignores_blank_lines_below() is
+            let buffer = _cell(["let a = 1", "a", "", "  "])
+
+            buffer.move_to(1, 1)
+
+            assert buffer.is_on_last_written_line;
+
+            buffer.drop_blank_lines_below()
+
+            assert buffer.lines.count == 2;
+            assert buffer.is_on_last_line;
+
+            buffer.move_to(0, 0)
+
+            assert !buffer.is_on_last_written_line;
+        si
+
+        // A cell goes into history without the line that ended it, so a
+        // recalled cell ends on its code.
+        @Test()
+        without_terminator__drops_a_dot_or_blank_lines_at_the_end() is
+            assert CELL_TEXT.without_terminator(LIST[string](["f(1,", "2", ""])) =~ "f(1,\n2";
+            assert CELL_TEXT.without_terminator(LIST[string](["if x then", "fi", "."])) =~ "if x then\nfi";
+            assert CELL_TEXT.without_terminator(LIST[string](["1 + 1"])) =~ "1 + 1";
         si
 
         @Test()

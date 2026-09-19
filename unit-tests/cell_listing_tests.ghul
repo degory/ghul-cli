@@ -2,6 +2,7 @@ namespace Ghul.Cli.Tests is
     use Collections.LIST
 
     use Ghul.Cli.Repl.CELL_LISTING
+    use Ghul.Cli.Repl.REPLAY
     use Ghul.Repl.Host.CELL_RECORD
     use Ghul.Repl.Host.CellStatus
 
@@ -14,10 +15,10 @@ namespace Ghul.Cli.Tests is
 
         _cells() -> LIST[CELL_RECORD] =>
             LIST[CELL_RECORD]([
-                CELL_RECORD(1, "let x = 1\n", CellStatus.OK),
-                CELL_RECORD(2, "let y = \n", CellStatus.FAILED),
-                CELL_RECORD(3, "for i in 0..3 do\n    write_line(i)\nod\n", CellStatus.OK),
-                CELL_RECORD(4, "while true do od\n", CellStatus.INTERRUPTED)
+                CELL_RECORD(1, "let x = 1\n", CellStatus.OK, null),
+                CELL_RECORD(2, "let y = \n", CellStatus.FAILED, null),
+                CELL_RECORD(3, "for i in 0..3 do\n    write_line(i)\nod\n", CellStatus.OK, null),
+                CELL_RECORD(4, "while true do od\n", CellStatus.INTERRUPTED, null)
             ])
 
         @Test()
@@ -58,6 +59,35 @@ namespace Ghul.Cli.Tests is
         cell__says_when_there_is_no_such_cell() is
             assert CELL_LISTING.cell(_cells(), "9")[0] =~ "no cell 9";
             assert CELL_LISTING.cell(_cells(), "x")[0] =~ "usage: :cells N";
+        si
+
+        @Test()
+        summary__says_which_cell_a_rerun_repeated() is
+            let cells = _cells()
+
+            cells.add(CELL_RECORD(5, "let x = 1\n", CellStatus.OK, 1))
+
+            assert CELL_LISTING.summary(cells, 20)[4] =~ "5  ok          let x = 1  (rerun of 1)";
+        si
+
+        // N itself however it ended, then the later cells that ran to the
+        // end, leaving out failures, interruptions and earlier reruns.
+        @Test()
+        replay__takes_the_cell_and_every_later_one_that_ran_to_the_end() is
+            let cells = _cells()
+
+            cells.add(CELL_RECORD(5, "let x = 1\n", CellStatus.OK, 1))
+            cells.add(CELL_RECORD(6, "x + 1\n", CellStatus.OK, null))
+
+            let numbers = REPLAY.from(cells, 2) |> Ghul.Pipes.map(c => c.number) |> Ghul.Pipes.collect_list()
+
+            assert numbers.count == 3;
+            assert numbers[0] == 2 /\ numbers[1] == 3 /\ numbers[2] == 6;
+        si
+
+        @Test()
+        replay__is_empty_for_a_cell_that_does_not_exist() is
+            assert REPLAY.from(_cells(), 9).count == 0;
         si
     si
 si
