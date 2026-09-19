@@ -728,8 +728,15 @@ namespace Ghul.Cli is
     run_closing_on_signal(terminal: Repl.TERMINAL) -> int is
         let on_signal = (context: System.Runtime.InteropServices.PosixSignalContext) -> void => terminal.close()
 
+        // Ctrl-C interrupts a running cell rather than ending the session.
+        let on_interrupt = (context: System.Runtime.InteropServices.PosixSignalContext) -> void is
+            if terminal.on_interrupt() then
+                context.cancel = true
+            fi
+        si
+
         let use interrupt = System.Runtime.InteropServices.PosixSignalRegistration.create(
-            System.Runtime.InteropServices.PosixSignal.SIGINT, on_signal)
+            System.Runtime.InteropServices.PosixSignal.SIGINT, on_interrupt)
 
         let use terminate = System.Runtime.InteropServices.PosixSignalRegistration.create(
             System.Runtime.InteropServices.PosixSignal.SIGTERM, on_signal)

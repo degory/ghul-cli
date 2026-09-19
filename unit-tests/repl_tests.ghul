@@ -196,6 +196,27 @@ namespace Ghul.Cli.Tests is
 
             assert DIAGNOSTIC_LINES.strip_prelude(line, 2) =~ line;
         si
+
+        @Test()
+        without_cell_names__takes_the_cell_off_a_name() is
+            assert DIAGNOSTIC_LINES.without_cell_names("tried cell4.fact(n: long) -> long") =~ "tried fact(n: long) -> long";
+        si
+
+        // The generated prelude is the session's text, not the user's,
+        // so an error in it is reported as the session's own failure.
+        @Test()
+        for_display__reports_an_error_in_the_prelude_as_internal() is
+            let cells = Collections.MAP[string, Ghul.Repl.CELL_SPAN]()
+
+            cells["cell3"] = Ghul.Repl.CELL_SPAN(3, 2)
+
+            let shown = DIAGNOSTIC_LINES.for_display(
+                Ghul.Repl.CELL_DIAGNOSTIC.parse("cell3.ghul: 2,10..2,12: error: syntax error"),
+                cells)
+
+            assert !shown.location?;
+            assert shown.render().starts_with("internal: the session prelude failed: ");
+        si
     si
 
     @TestClass()

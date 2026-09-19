@@ -73,6 +73,10 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
   when the server fails. The server also answers completeness checks
   once it is ready, which `HOSTED_SESSION.check` asks before falling back
   to `COMPLETENESS_CHECK`;
+  `CELL_RUNNER` runs each cell on a background thread of its own so
+  `HOSTED_SESSION.interrupt()` (any thread) can stop waiting for it, and
+  `DETACHED_START` starts the long-lived compiler and analyser under
+  `setsid` so the terminal's Ctrl-C does not reach them.
   `SESSION_LOAD_CONTEXT` resolves the cells' own ghūl runtime, which is
   not the one this tool was built against; `HOSTED_SESSION` is the three
   steps in order, running an accepted cell after it has joined the
