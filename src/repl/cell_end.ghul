@@ -1,0 +1,170 @@
+namespace Ghul.Cli.Repl is
+    use Collections.LIST
+    use Collections.MAP
+    use Ghul.Repl.Host.Completeness
+
+    // What Enter on the last line of a cell edited at a terminal does,
+    // judged from the whole cell, since any line of it can have been
+    // edited since the last Enter:
+    //
+    // - A line holding only `.` submits what is above it and shows the
+    //   value it ends on.
+    // - A blank line submits what is above it, showing the value unless
+    //   that ends on a held construct.
+    // - Finished text is submitted, unless its last statement is an if,
+    //   a case, a loop, a try or a definition written over several
+    //   lines, which holds the cell open for more.
+    // - Unfinished text waits for another line. Text that can never be
+    //   finished is submitted so its errors are reported, once every block
+    //   it opens has been closed.
+    //
+    // A cell that is one line starting with `:` is a command, handed back
+    // as it is.
+    class CELL_END(_check: (string) -> Completeness) is
+        // Completeness asked of the compiler, by text, for this cell:
+        // finding where the last statement starts asks about every
+        // prefix, and all but the newest have been asked about before.
+        _asked: MAP[string, Completeness]
+
+        init(..) is
+            _asked = MAP[string, Completeness]()
+        si
+
+        // Forgets what was asked, for a new cell.
+        clear() is
+            _asked.clear()
+        si
+
+        step_for(lines: Collections.List[string]) -> CellStep is
+            let count = lines.count
+            let last = lines[count - 1].trim()
+
+            if count == 1 /\ last.starts_with(":") then
+                return CellStep.SUBMIT
+            fi
+
+            if last =~ "." \/ last.length == 0 then
+                let content = _prefix(lines, count - 1)
+
+                if content |> Ghul.Pipes.all(l => l.trim().length == 0) then
+                    return CellStep.NOTHING
+                fi
+
+                if last =~ "." then
+                    return CellStep.SUBMIT
+                fi
+
+                return if is_held(content) then CellStep.SUBMIT_QUIETLY else CellStep.SUBMIT fi
+            fi
+
+            case _completeness(lines)
+            when Completeness.INCOMPLETE then
+                return CellStep.WAIT
+            when Completeness.INVALID then
+                // A mistake inside a block that is still open is reported
+                // once the block is closed, rather than cutting the cell
+                // off with its closing lines still to come.
+                return if BLOCK_DEPTH.of(lines) > 0 then CellStep.WAIT else CellStep.SUBMIT fi
+            else
+                return if is_held(lines) then CellStep.WAIT else CellStep.SUBMIT fi
+            esac
+        si
+
+        // The text a step submits: the cell without the blank or `.` line
+        // that ended it.
+        source_for(lines: Collections.List[string]) -> string is
+            let last = lines[lines.count - 1].trim()
+            let content =
+                if lines.count > 1 /\ (last =~ "." \/ last.length == 0) then
+                    _prefix(lines, lines.count - 1)
+                else
+                    LIST[string](lines)
+                fi
+
+            return "{content |> Ghul.Pipes.join("\n")}\n"
+        si
+
+        // Whether finished text ends on a construct over several lines that
+        // holds the cell open. The last statement starts after the longest
+        // prefix of the cell that is itself finished.
+        is_held(lines: Collections.List[string]) -> bool is
+            if lines.count < 2 \/ _completeness(lines) != Completeness.COMPLETE then
+                return false
+            fi
+
+            let start mut = 0
+
+            for k in 1..lines.count do
+                let at = lines.count - k
+
+                if _completeness(_prefix(lines, at)) == Completeness.COMPLETE then
+                    start = at
+
+                    break
+                fi
+            od
+
+            return lines.count - start > 1 /\ HELD_CONSTRUCT.starts(lines, start)
+        si
+
+        _completeness(lines: Collections.List[string]) -> Completeness is
+            let text = "{lines |> Ghul.Pipes.join("\n")}\n"
+
+            if lines |> Ghul.Pipes.all(l => l.trim().length == 0) then
+                return Completeness.COMPLETE
+            fi
+
+            let known mut = Completeness.COMPLETE
+
+            if _asked.try_get_value(text, known ref) then
+                return known
+            fi
+
+            let answer = _check(text)
+
+            _asked[text] = answer
+
+            return answer
+        si
+
+        _prefix(lines: Collections.List[string], count: int) -> LIST[string] is
+            let result = LIST[string]()
+
+            for i in 0..count do
+                result.add(lines[i])
+            od
+
+            return result
+        si
+    si
+
+    // How many blocks the text opens and leaves open, counting the words
+    // that open one against the words that close one, outside strings and
+    // comments. A guide for text that does not parse, so it does not have
+    // to be exact.
+    class BLOCK_DEPTH is
+        init() is si
+
+        _openers: string[] static => ["if", "case", "do", "try", "val", "is"]
+        _closers: string[] static => ["fi", "esac", "od", "yrt", "lav", "si"]
+
+        of(lines: Collections.List[string]) -> int static is
+            let text = lines |> Ghul.Pipes.join("\n")
+            let depth mut = 0
+
+            for span in GHUL_LEXER.spans(text) do
+                if span.kind == TokenKind.KEYWORD \/ span.kind == TokenKind.CONTROL then
+                    let word = text.substring(span.start, span.length)
+
+                    if _openers |> Ghul.Pipes.any(w => w =~ word) then
+                        depth = depth + 1
+                    elif _closers |> Ghul.Pipes.any(w => w =~ word) then
+                        depth = depth - 1
+                    fi
+                fi
+            od
+
+            return depth
+        si
+    si
+si

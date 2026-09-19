@@ -1,0 +1,335 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+
+    use Ghul.Cli.Repl.CELL_BUFFER
+    use Ghul.Cli.Repl.BLOCK_DEPTH
+    use Ghul.Cli.Repl.CELL_END
+    use Ghul.Cli.Repl.CELL_LAYOUT
+    use Ghul.Cli.Repl.CellStep
+    use Ghul.Repl.Host.Completeness
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    @TestClass()
+    class CELL_BUFFER_TESTS is
+        init() is si
+
+        // A cell holding `lines`, the cursor at the end of the last one.
+        _cell(lines: string[]) -> CELL_BUFFER is
+            let buffer = CELL_BUFFER()
+
+            buffer.replace(lines |> Ghul.Pipes.join("\n"))
+
+            return buffer
+        si
+
+        @Test()
+        new_line__indents_after_a_line_opening_a_block() is
+            let buffer = CELL_BUFFER()
+
+            buffer.insert("if x then")
+            buffer.new_line()
+
+            assert buffer.lines.count == 2;
+            assert buffer.line =~ "    ";
+            assert buffer.row == 1 /\ buffer.column == 4;
+        si
+
+        @Test()
+        new_line__in_the_middle_of_a_line_carries_the_rest() is
+            let buffer = _cell(["if x then y fi"])
+
+            buffer.move_to(0, 9)
+            buffer.new_line()
+
+            assert buffer.lines[0] =~ "if x then";
+            assert buffer.lines[1] =~ "    y fi";
+        si
+
+        // An earlier line edited: the lines after it stay as they are.
+        @Test()
+        insert__on_an_earlier_line_leaves_the_rest_alone() is
+            let buffer = _cell(["let a = 1", "let b = 2"])
+
+            buffer.move_to(0, 9)
+            buffer.insert("0")
+
+            assert buffer.text =~ "let a = 10\nlet b = 2";
+            assert buffer.row == 0;
+        si
+
+        // A recalled line keeps the indent it came with.
+        @Test()
+        insert__does_not_reindent_a_recalled_line() is
+            let buffer = _cell(["if x then", "    f"])
+
+            buffer.insert("i")
+
+            assert buffer.line =~ "    fi";
+        si
+
+        @Test()
+        backspace__at_the_start_of_a_line_joins_it_to_the_one_above() is
+            let buffer = _cell(["ab", "cd"])
+
+            buffer.move_to(1, 0)
+            buffer.backspace()
+
+            assert buffer.text =~ "abcd";
+            assert buffer.row == 0 /\ buffer.column == 2;
+        si
+
+        @Test()
+        delete__at_the_end_of_a_line_joins_the_next() is
+            let buffer = _cell(["ab", "cd"])
+
+            buffer.move_to(0, 2)
+            buffer.delete()
+
+            assert buffer.text =~ "abcd";
+        si
+
+        @Test()
+        up_and_down__move_between_lines_and_say_when_there_is_none() is
+            let buffer = _cell(["first line", "x"])
+
+            assert buffer.up();
+            assert buffer.row == 0 /\ buffer.column == 1;
+            assert !buffer.up();
+            assert buffer.down();
+            assert !buffer.down();
+        si
+
+        @Test()
+        left_and_right__cross_line_ends() is
+            let buffer = _cell(["ab", "cd"])
+
+            buffer.move_to(1, 0)
+            buffer.left()
+
+            assert buffer.row == 0 /\ buffer.column == 2;
+
+            buffer.right()
+
+            assert buffer.row == 1 /\ buffer.column == 0;
+        si
+
+        @Test()
+        insert_verbatim__splits_at_line_breaks_without_reindenting() is
+            let buffer = CELL_BUFFER()
+
+            buffer.insert_verbatim("if x then\n        y\n\nfi")
+
+            assert buffer.lines.count == 4;
+            assert buffer.lines[1] =~ "        y";
+            assert buffer.lines[2] =~ "";
+            assert buffer.row == 3 /\ buffer.column == 2;
+        si
+
+        @Test()
+        insert_verbatim__keeps_what_followed_the_cursor() is
+            let buffer = _cell(["f()"])
+
+            buffer.move_to(0, 2)
+            buffer.insert_verbatim("a,\nb")
+
+            assert buffer.text =~ "f(a,\nb)";
+            assert buffer.row == 1 /\ buffer.column == 1;
+        si
+
+        @Test()
+        replace__recalls_a_whole_cell() is
+            let buffer = CELL_BUFFER()
+
+            buffer.replace("a\nb")
+
+            assert buffer.lines.count == 2;
+            assert buffer.row == 1 /\ buffer.column == 1;
+        si
+    si
+
+    @TestClass()
+    class CELL_END_TESTS is
+        init() is si
+
+        // Stands in for the compiler as REPL_CELL_INPUT_TESTS' check does:
+        // `then` and `do` open, `fi` and `od` close, `oops` never finishes.
+        _check(text: string) -> Completeness is
+            if text.contains("oops") then
+                return Completeness.INVALID
+            fi
+
+            let depth mut = 0
+
+            for line in text.split(['\n']) do
+                let trimmed = line.trim()
+
+                if trimmed.ends_with(" then") \/ trimmed.ends_with(" do") then
+                    depth = depth + 1
+                elif trimmed =~ "fi" \/ trimmed =~ "od" then
+                    depth = depth - 1
+                fi
+            od
+
+            return if depth > 0 then Completeness.INCOMPLETE else Completeness.COMPLETE fi
+        si
+
+        _end() -> CELL_END => CELL_END(text => _check(text))
+
+        _step(lines: string[]) -> CellStep => _end().step_for(LIST[string](lines))
+
+        @Test()
+        step_for__submits_finished_text() is
+            assert _step(["1 + 2"]) == CellStep.SUBMIT;
+        si
+
+        @Test()
+        step_for__waits_for_unfinished_text() is
+            assert _step(["if x then"]) == CellStep.WAIT;
+        si
+
+        @Test()
+        step_for__submits_text_that_can_never_be_finished() is
+            assert _step(["let x = oops"]) == CellStep.SUBMIT;
+        si
+
+        // A mistake inside a block that is still open waits for the block
+        // to close, so the lines closing it are part of the same cell.
+        @Test()
+        step_for__waits_for_the_block_around_text_that_can_never_be_finished() is
+            assert _step(["for i in xs do", "oops"]) == CellStep.WAIT;
+            assert _step(["for i in xs do", "oops", "od"]) == CellStep.SUBMIT;
+        si
+
+        @Test()
+        step_for__holds_a_block_construct_over_several_lines() is
+            assert _step(["if x then", "    1", "fi"]) == CellStep.WAIT;
+        si
+
+        @Test()
+        step_for__submits_a_statement_after_a_held_construct() is
+            assert _step(["for i in xs do", "od", "total"]) == CellStep.SUBMIT;
+        si
+
+        @Test()
+        step_for__submits_a_held_construct_quietly_at_a_blank_line() is
+            assert _step(["if x then", "fi", ""]) == CellStep.SUBMIT_QUIETLY;
+        si
+
+        @Test()
+        step_for__submits_showing_the_value_at_a_dot() is
+            assert _step(["if x then", "fi", "."]) == CellStep.SUBMIT;
+        si
+
+        @Test()
+        step_for__submits_unfinished_text_at_a_blank_line() is
+            assert _step(["if x then", ""]) == CellStep.SUBMIT;
+        si
+
+        @Test()
+        step_for__does_nothing_for_a_blank_cell() is
+            assert _step([""]) == CellStep.NOTHING;
+            assert _step(["."]) == CellStep.NOTHING;
+            assert _step(["  ", ""]) == CellStep.NOTHING;
+        si
+
+        // Held or not is judged from the cell as it now reads, so an
+        // earlier line edited into a block construct holds it.
+        @Test()
+        step_for__judges_the_whole_cell_as_it_now_reads() is
+            let end = _end()
+
+            assert end.step_for(LIST[string](["let a = 1", "a"])) == CellStep.SUBMIT;
+            assert end.step_for(LIST[string](["if a then", "fi"])) == CellStep.WAIT;
+        si
+
+        @Test()
+        step_for__hands_back_a_command() is
+            assert _step([":help"]) == CellStep.SUBMIT;
+        si
+
+        @Test()
+        source_for__leaves_out_the_line_that_ended_the_cell() is
+            let end = _end()
+
+            assert end.source_for(LIST[string](["if x then", "fi", "."])) =~ "if x then\nfi\n";
+            assert end.source_for(LIST[string](["if x then", "fi", ""])) =~ "if x then\nfi\n";
+            assert end.source_for(LIST[string](["1 + 2"])) =~ "1 + 2\n";
+        si
+
+        // Every prefix of the cell is asked about once, however often the
+        // question comes up.
+        @Test()
+        step_for__asks_about_each_text_once() is
+            let asked = LIST[string]()
+            let end = CELL_END(text => (asked.add(text); _check(text)))
+            let lines = LIST[string](["if x then", "fi"])
+
+            end.step_for(lines)
+            end.step_for(lines)
+
+            assert asked.count == 2;
+        si
+    si
+
+    @TestClass()
+    class CELL_LAYOUT_TESTS is
+        init() is si
+
+        @Test()
+        rows__counts_the_rows_a_line_wraps_over() is
+            let layout = CELL_LAYOUT(10, 2)
+
+            assert layout.rows("") == 1;
+            assert layout.rows("12345678") == 1;
+            assert layout.rows("123456789") == 2;
+        si
+
+        @Test()
+        cursor__is_counted_from_the_first_line_drawn() is
+            let layout = CELL_LAYOUT(10, 2)
+            let lines = LIST[string](["123456789", "ab"])
+            let cursor = layout.cursor(lines, 0, 1, 1)
+
+            assert cursor.row == 2 /\ cursor.column == 3;
+        si
+
+        @Test()
+        top__moves_down_to_keep_the_cursor_line_in_view() is
+            let layout = CELL_LAYOUT(80, 2)
+            let lines = LIST[string](["a", "b", "c", "d", "e"])
+
+            assert layout.top(lines, 4, 0, 3) == 2;
+            assert layout.top(lines, 1, 2, 3) == 1;
+        si
+
+        @Test()
+        bottom__draws_as_many_lines_as_fit() is
+            let layout = CELL_LAYOUT(80, 2)
+            let lines = LIST[string](["a", "b", "c", "d", "e"])
+
+            assert layout.bottom(lines, 1, 3) == 4;
+        si
+    si
+
+    @TestClass()
+    class BLOCK_DEPTH_TESTS is
+        init() is si
+
+        _depth(lines: string[]) -> int => BLOCK_DEPTH.of(LIST[string](lines))
+
+        @Test()
+        of__counts_blocks_opened_and_not_closed() is
+            assert _depth(["broken(n: int) is", "    let y = n +"]) == 1;
+            assert _depth(["broken(n: int) is", "    let y = n +", "si"]) == 0;
+            assert _depth(["if a then", "    for i in xs do"]) == 2;
+            assert _depth(["let x = if a then 1 else 2 fi"]) == 0;
+        si
+
+        @Test()
+        of__ignores_words_in_strings_and_comments() is
+            assert _depth(["let s = \"if x then\" // do"]) == 0;
+        si
+    si
+si

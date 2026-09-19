@@ -191,11 +191,11 @@ namespace Ghul.Cli.Repl is
         _display: CELL_DISPLAY
         _current: HOSTED_SESSION?
 
+        // At a terminal the whole cell is edited in place; anything else
+        // is read a line at a time and judged by CELL_INPUT as it comes.
+        _editor: CELL_EDITOR?
         _cell: CELL_INPUT
-
-        // Lines are edited in place when a person is typing them at a
-        // terminal, and read as they come otherwise.
-        _reader: LineReader
+        _reader: PLAIN_READER
 
         init(..) is
             _display = CELL_DISPLAY()
@@ -204,16 +204,15 @@ namespace Ghul.Cli.Repl is
 
             // Asked of the session in use, whose compile server answers
             // it once it is ready.
-            _cell = CELL_INPUT(
-                text => if let session = _current then session.check(text) else Completeness.COMPLETE fi,
-                is_interactive)
+            let check = (text: string) -> Completeness =>
+                if let session = _current then session.check(text) else Completeness.COMPLETE fi
 
-            _reader =
-                if is_interactive then
-                    CONSOLE_EDITOR((text, line, column) => _names(text, line, column), _palette())
-                else
-                    PLAIN_READER()
-                fi
+            _cell = CELL_INPUT(check, is_interactive)
+            _reader = PLAIN_READER()
+
+            if is_interactive then
+                _editor = CELL_EDITOR((text, line, column) => _names(text, line, column), _palette(), CELL_END(check))
+            fi
         si
 
         // What the input is coloured with at a terminal, if anything.
@@ -235,24 +234,18 @@ namespace Ghul.Cli.Repl is
             _current = session
 
             loop: do
-                let line = _reader.read_line(if _cell.is_empty then "> " else "| " fi, _cell.lines)
+                let read = _read()
 
-                if !line? then
+                if !read? then
                     Std.write_line("")
 
                     break loop
                 fi
 
-                // Ctrl-C at the prompt abandons what has been typed of the
-                // cell, and the session carries on.
-                if _reader.was_interrupted then
-                    _cell.clear()
+                if read.is_command then
+                    let command = read.source.trim()
 
-                    continue
-                fi
-
-                if _cell.is_empty /\ !line.contains('\n') /\ line.trim().starts_with(":") then
-                    case line.trim()
+                    case command
                     when ":quit", ":q" then
                         break loop
                     when ":reset" then
@@ -264,8 +257,6 @@ namespace Ghul.Cli.Repl is
                     when ":help" then
                         _write_help()
                     else
-                        let command = line.trim()
-
                         if command.starts_with(":complete ") then
                             _complete(session, command.substring(":complete ".length))
                         elif command.starts_with(":hover ") then
@@ -278,32 +269,46 @@ namespace Ghul.Cli.Repl is
                     continue
                 fi
 
-                // A pasted block arrives as several lines at once: those
-                // before the last are taken as they are, and the last is
-                // entered like any typed line.
-                let parts = line.split(['\n'])
-
-                for i in 0..parts.count - 1 do
-                    _cell.append(parts[i])
-                od
-
-                let step = _cell.enter(parts[parts.count - 1])
-
-                if step == CellStep.NOTHING \/ step == CellStep.WAIT then
+                if read.step == CellStep.NOTHING then
                     continue
                 fi
 
-                let source = _cell.source
-
-                _cell.clear()
-
-                _report(session.submit(source), step == CellStep.SUBMIT)
+                _report(session.submit(read.source), read.step == CellStep.SUBMIT)
             od
 
             session.close()
-            _reader.close()
+            _editor?.close()
 
             return 0
+        si
+
+        // The next cell, or null when the input has ended.
+        _read() -> CELL_READ? is
+            if let editor = _editor then
+                return editor.read_cell()
+            fi
+
+            do
+                let line = _reader.read_line(if _cell.is_empty then "> " else "| " fi)
+
+                if !line? then
+                    return null
+                fi
+
+                if _cell.is_empty /\ line.trim().starts_with(":") then
+                    return CELL_READ(line, CellStep.SUBMIT, true)
+                fi
+
+                let step = _cell.enter(line)
+
+                if step != CellStep.NOTHING /\ step != CellStep.WAIT then
+                    let source = _cell.source
+
+                    _cell.clear()
+
+                    return CELL_READ(source, step, false)
+                fi
+            od
         si
 
         // For a signal that ends the process: closes the session in use
@@ -394,6 +399,8 @@ namespace Ghul.Cli.Repl is
             Std.write_line("an if, case, loop, try or definition that takes several lines does not end")
             Std.write_line("the submission: keep typing, or end it with a blank line")
             Std.write_line("a line holding only . ends the submission and shows what it ended on")
+            Std.write_line("Up and Down move between lines, then to earlier submissions; Enter on")
+            Std.write_line("an earlier line or Alt-Enter adds a line; Ctrl-C abandons the submission")
             Std.write_line("what you end on is shown, unless you end on a statement or with a blank line")
             Std.write_line("messages call a cell cell-3; in code it is cell3, as in cell3.x")
 
