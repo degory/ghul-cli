@@ -71,12 +71,12 @@ the whole compiled-script cache outright.
 ## The REPL
 
 `ghul repl` starts an interactive session. What you type is compiled and
-run as soon as it is finished, and what it declares stays available to
+run once it is finished, and what it declares stays available to
 everything you type afterwards:
 
 ```
 > let names mut = LIST[string]()
-> names.add("first")
+| names.add("first")
 > for name in ["second", "third"] do
 |     names.add(name)
 | od
@@ -84,17 +84,26 @@ everything you type afterwards:
 [first, second, third]
 ```
 
-A line that finishes what you have typed submits it. One that leaves
-something open - a block with no closing keyword, an open bracket, an
-operator with nothing after it - waits for more with a `|` prompt. Text
-that can never be finished is submitted straight away, so its errors are
-reported at once.
+A line that finishes an expression or a call submits what you have typed
+and shows the value, so a short program can be written as one submission
+ending on the value it is for:
 
-An `if`, `case`, loop, `try` or definition written over several lines
-does not end the submission when it closes: the `|` prompt stays, and the next
-line joins the same submission, as `names` does above. A line that
-finishes a statement of its own then submits the lot. A blank line
-submits whatever is there, and a line holding only `.` does the same.
+```
+> let x = 123
+| let y = 2
+| x * y
+246
+```
+
+A line that finishes a `let`, an assignment or a definition does not end
+the submission, since those set something up for what follows: the `|`
+prompt stays, and the next line joins the same submission. Nor does an
+`if`, `case`, loop or `try` written over several lines when it closes. A
+line that leaves something open - a block with no closing keyword, an
+open bracket, an operator with nothing after it - waits for more too. A
+blank line submits whatever is there, and a line holding only `.` does
+the same. Text that can never be finished is submitted as soon as every
+block it opens is closed, so its errors are reported then.
 
 A submission that ends on a value shows it, so `names` above needs no
 `write_line`. A submission that ends on a statement shows nothing, and

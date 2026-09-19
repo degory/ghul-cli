@@ -1,6 +1,9 @@
 namespace Ghul.Cli.Repl is
     use Collections.LIST
 
+    // A cell as it stood, for putting back.
+    class CELL_SNAPSHOT(lines: Collections.List[string], expected: Collections.List[int], row: int, column: int);
+
     // The cell being edited at the prompt: its lines, and the line and
     // column the cursor is at. A line added by Enter starts indented as
     // INDENTATION says and keeps following it - stepping out for a closing
@@ -33,6 +36,21 @@ namespace Ghul.Cli.Repl is
 
             _lines.add("")
             _expected.add(0)
+        si
+
+        // Everything about the cell, to put back exactly as it was.
+        snapshot() -> CELL_SNAPSHOT =>
+            CELL_SNAPSHOT(LIST[string](_lines), LIST[int](_expected), row, column)
+
+        restore(snapshot: CELL_SNAPSHOT) is
+            _lines.clear()
+            _lines.add_range(snapshot.lines)
+
+            _expected.clear()
+            _expected.add_range(snapshot.expected)
+
+            row = snapshot.row
+            column = snapshot.column
         si
 
         // Starts a fresh cell, its first line at the margin.

@@ -134,7 +134,9 @@ namespace Ghul.Cli.Tests is
             assert history.previous() =~ "one";
             assert !history.previous()?;
             assert history.next() =~ "two";
-            assert history.next() =~ "";
+            assert !history.is_at_newest;
+            assert !history.next()?;
+            assert history.is_at_newest;
             assert !history.next()?;
         si
 

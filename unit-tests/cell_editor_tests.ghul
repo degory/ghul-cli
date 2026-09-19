@@ -6,6 +6,7 @@ namespace Ghul.Cli.Tests is
     use Ghul.Cli.Repl.CELL_END
     use Ghul.Cli.Repl.CELL_LAYOUT
     use Ghul.Cli.Repl.CellStep
+    use Ghul.Repl.Host.CHECK_ANSWER
     use Ghul.Repl.Host.Completeness
 
     use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
@@ -139,6 +140,31 @@ namespace Ghul.Cli.Tests is
         si
 
         @Test()
+        restore__puts_back_the_cell_as_it_was() is
+            let buffer = CELL_BUFFER()
+
+            buffer.insert("if x then")
+            buffer.new_line()
+            buffer.insert("y")
+            buffer.move_to(0, 3)
+
+            let snapshot = buffer.snapshot()
+
+            buffer.replace("something else")
+            buffer.restore(snapshot)
+
+            assert buffer.text =~ "if x then\n    y";
+            assert buffer.row == 0 /\ buffer.column == 3;
+
+            // The second line still follows the indent it was given.
+            buffer.move_to(1, 5)
+            buffer.backspace()
+            buffer.insert("fi")
+
+            assert buffer.lines[1] =~ "fi";
+        si
+
+        @Test()
         replace__recalls_a_whole_cell() is
             let buffer = CELL_BUFFER()
 
@@ -155,7 +181,9 @@ namespace Ghul.Cli.Tests is
 
         // Stands in for the compiler as REPL_CELL_INPUT_TESTS' check does:
         // `then` and `do` open, `fi` and `od` close, `oops` never finishes.
-        _check(text: string) -> Completeness is
+        // Finished text ends on a let, an assignment or a definition when
+        // its last line says so, and on an expression otherwise.
+        _completeness(text: string) -> Completeness is
             if text.contains("oops") then
                 return Completeness.INVALID
             fi
@@ -175,9 +203,53 @@ namespace Ghul.Cli.Tests is
             return if depth > 0 then Completeness.INCOMPLETE else Completeness.COMPLETE fi
         si
 
+        _check(text: string) -> CHECK_ANSWER is
+            let completeness = _completeness(text)
+
+            if completeness != Completeness.COMPLETE then
+                return CHECK_ANSWER(completeness, null)
+            fi
+
+            let lines = text.trim_end().split(['\n'])
+            let last = lines[lines.count - 1].trim()
+
+            let kind =
+                if last.starts_with("let ") then
+                    "let"
+                elif last.starts_with("class ") \/ last.starts_with("use ") \/ last.contains(") =>") then
+                    "definition"
+                elif last.contains(" = ") then
+                    "assignment"
+                else
+                    "expression"
+                fi
+
+            return CHECK_ANSWER(completeness, kind)
+        si
+
         _end() -> CELL_END => CELL_END(text => _check(text))
 
         _step(lines: string[]) -> CellStep => _end().step_for(LIST[string](lines))
+
+        // A let, an assignment or a definition sets something up for what
+        // follows, so it holds the cell open even on one line.
+        @Test()
+        step_for__holds_after_a_statement_that_sets_something_up() is
+            assert _step(["let x = 123"]) == CellStep.WAIT;
+            assert _step(["let x mut = 1", "x = 2"]) == CellStep.WAIT;
+            assert _step(["double(n: int) => n * 2"]) == CellStep.WAIT;
+            assert _step(["use IO.Std.write_line"]) == CellStep.WAIT;
+        si
+
+        @Test()
+        step_for__submits_a_program_ending_on_a_value() is
+            assert _step(["let x = 123", "let y = 2", "x * y"]) == CellStep.SUBMIT;
+        si
+
+        @Test()
+        step_for__submits_a_setup_cell_quietly_at_a_blank_line() is
+            assert _step(["let x = 123", ""]) == CellStep.SUBMIT_QUIETLY;
+        si
 
         @Test()
         step_for__submits_finished_text() is

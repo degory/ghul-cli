@@ -203,7 +203,7 @@ namespace Ghul.Repl.Host is
         // Asked of the server once it is ready, which answers in a few
         // milliseconds. Until then the check is left to the fallback, so
         // the first line typed does not wait for the server to warm up.
-        check(text: string) -> Completeness? is
+        _check_reply(text: string) -> COMPILE_SERVER_REPLY? is
             let server = _server
 
             if !server? then
@@ -242,14 +242,31 @@ namespace Ghul.Repl.Host is
                 return null
             fi
 
-            return
-                case reply.completeness
-                when "complete" then Completeness.COMPLETE
-                when "incomplete" then Completeness.INCOMPLETE
-                when "invalid" then Completeness.INVALID
-                else null
-                esac
+            return reply
         si
+
+        check(text: string) -> Completeness? =>
+            _completeness(_check_reply(text))
+
+        // Whether typed text is complete, and when it is, what it ends
+        // on, as the server names it; older servers name nothing.
+        check_ending(text: string) -> CHECK_ANSWER? is
+            let reply = _check_reply(text)
+
+            if let completeness = _completeness(reply) then
+                return CHECK_ANSWER(completeness, reply?.last_statement)
+            fi
+
+            return null
+        si
+
+        _completeness(reply: COMPILE_SERVER_REPLY?) -> Completeness? =>
+            case reply?.completeness
+            when "complete" then Completeness.COMPLETE
+            when "incomplete" then Completeness.INCOMPLETE
+            when "invalid" then Completeness.INVALID
+            else null
+            esac
 
         _give_up(server: ServerConnection, reason: string) -> COMPILE_RESULT? is
             // A reason can name a cell's file, which is shown by its label.
@@ -318,12 +335,13 @@ namespace Ghul.Repl.Host is
 
     // One reply from the compile server: its status, why it could not
     // compile if it says, the compile's diagnostics, and for a check,
-    // whether the text was complete.
+    // whether the text was complete and what complete text ends on.
     class COMPILE_SERVER_REPLY(
         status: int,
         message: string?,
         diagnostics: Collections.List[CELL_DIAGNOSTIC],
-        completeness: string?
+        completeness: string?,
+        last_statement: string?
     ) is
         parse(line: string, file: string) -> COMPILE_SERVER_REPLY? static is
             try
@@ -353,7 +371,7 @@ namespace Ghul.Repl.Host is
                     od
                 fi
 
-                return COMPILE_SERVER_REPLY(status.get_int32(), text, parsed, _string(root, "completeness"))
+                return COMPILE_SERVER_REPLY(status.get_int32(), text, parsed, _string(root, "completeness"), _string(root, "last_statement"))
             catch e: System.Exception
                 return null
             yrt
