@@ -220,9 +220,14 @@ word before the cursor, and Ctrl-L clears the screen. Tab completes the name
 being typed from everything the session has defined; where more than one name
 fits, it writes in as much as they share and lists them below the
 submission. Shift-Tab shows what the name at the cursor is below the
-submission, as `:hover` does. Ctrl-D in an empty submission leaves. Ctrl-C at the prompt does
-nothing; while a submission is running, Ctrl-C interrupts it and brings the
-prompt back with the session intact. .NET cannot stop a running thread from
+submission, as `:hover` does. Ctrl-D in an empty submission leaves.
+
+Ctrl-C at the prompt sets aside what you have typed: it stays on the screen
+marked `^C`, a new prompt with the same number takes its place, and Up brings
+it back whole from history. It was never submitted, so it takes no number and
+`:cells` does not list it. With nothing typed, Ctrl-C does nothing. While a
+submission is running, Ctrl-C interrupts it and brings the prompt back with
+the session intact. .NET cannot stop a running thread from
 outside, so an interrupted submission is abandoned rather than ended: it
 keeps its definitions, and may go on running in the background, using a
 core or writing output, until it finishes or the session ends. A block pasted in is taken as it is, with its own indentation and any

@@ -448,8 +448,8 @@ namespace Ghul.Cli.Repl is
 
         // For Ctrl-C, from the signal it raises: interrupts the cell running
         // now and says the signal is dealt with. At a terminal it is dealt
-        // with regardless, since Ctrl-C does nothing when no cell runs;
-        // for other input it ends the session.
+        // with regardless, since the cell editor reads Ctrl-C as a key when
+        // no cell runs; for other input it ends the session.
         on_interrupt() -> bool is
             if let session = _current /\ session.interrupt() then
                 return true
@@ -653,6 +653,7 @@ namespace Ghul.Cli.Repl is
             Std.write_line("cursor; Ctrl-L clears the screen; Tab completes, listing the names on offer;")
             Std.write_line("Shift-Tab shows what the name at the cursor is")
             Std.write_line("Ctrl-C while a submission runs interrupts it; the session carries on")
+            Std.write_line("Ctrl-C at the prompt sets what you have typed aside in history and starts again")
             Std.write_line("what you end on is shown, unless you end on a statement or with a blank line")
             Std.write_line("messages call a cell cell-3; in code it is cell3, as in cell3.x")
 
