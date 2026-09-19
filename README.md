@@ -115,6 +115,14 @@ submissions so far, each with how it ended - `ok`, `failed`, `threw` or
 `interrupted` - and its first line, and `:cells 3` shows the whole of the
 third.
 
+`:rerun 3` submits the third cell's text again, as a new cell with a number
+of its own; `:cells` lists it as a rerun of 3. `:rerun 3..` submits the
+third cell and then every later one that ran to the end, in order, stopping
+at the first that does not: after redefining something an earlier cell
+used, that brings everything built on it up to date. `:edit 3` brings the
+third cell's text back as the cell at the next prompt, to change and submit
+as a new cell.
+
 A submission that ends on a value shows it, so `names` above needs no
 `write_line`. A submission that ends on a statement shows nothing, and
 neither does one ended by a blank line after a construct over several
