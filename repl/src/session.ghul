@@ -205,8 +205,14 @@ namespace Ghul.Repl is
             let carried_names = carried_by(source)
             let carried = LIST[string]()
 
+            let written = _extension_texts(source)
+
             for name in carried_names do
-                carried.add_range(_type_sources[name])
+                for block in _type_sources[name] do
+                    if !_replaced_by_any(block, written) then
+                        carried.add(block)
+                    fi
+                od
             od
 
             let carried_text = if carried.count == 0 then "" else "{carried |> Ghul.Pipes.join("\n")}\n" fi
@@ -333,9 +339,70 @@ namespace Ghul.Repl is
 
             for d in declarations do
                 if d.is_extension /\ _type_sources.contains_key(d.name) then
-                    _type_sources[d.name].add(d.text_in(user))
+                    let block = d.text_in(user)
+                    let sources = _type_sources[d.name]
+
+                    // The type's own declaration comes first and is never
+                    // replaced; a block after it can be.
+                    let i mut = sources.count - 1
+
+                    while i >= 1 do
+                        if _replaces(block, sources[i]) then
+                            sources.remove_at(i)
+                        fi
+
+                        i = i - 1
+                    od
+
+                    sources.add(block)
                 fi
             od
+        si
+
+        _extension_texts(source: string) -> LIST[string] static is
+            let result = LIST[string]()
+
+            for d in DECLARATION_SPANS.of(source) do
+                if d.is_extension then
+                    result.add(d.text_in(source))
+                fi
+            od
+
+            return result
+        si
+
+        _replaced_by_any(earlier: string, written: Collections.List[string]) -> bool static is
+            for block in written do
+                if _replaces(block, earlier) then
+                    return true
+                fi
+            od
+
+            return false
+        si
+
+        // Whether a block a cell writes replaces one an earlier cell added
+        // to the same type, as a redefinition replaces a definition: an
+        // impl of the same trait for the same type, or the same partial
+        // block written again. Either added a second time would declare
+        // its members twice.
+        _replaces(written: string, earlier: string) -> bool static is
+            let written_header = _impl_header(written)
+
+            if written_header? then
+                return written_header =~ _impl_header(earlier)
+            fi
+
+            return USE_DIRECTIVES.normalise(written) =~ USE_DIRECTIVES.normalise(earlier)
+        si
+
+        // `impl Trait for Type`, with its whitespace collapsed, or null for
+        // any other block.
+        _impl_header(block: string) -> string? static is
+            let m = System.Text.RegularExpressions.Regex.match(
+                block, "^\\s*(impl\\s.*?)\\s+is\\b", System.Text.RegularExpressions.RegexOptions.SINGLELINE)
+
+            return if m.success then USE_DIRECTIVES.normalise(m.groups[1].value) else null fi
         si
 
         _has(names: Collections.List[string], name: string) -> bool static is
