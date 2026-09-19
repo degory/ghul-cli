@@ -14,6 +14,8 @@ namespace Ghul.Repl.Host is
 
         PROJECT_NAME: string static => "ghul_repl_package_restore"
 
+        TIMEOUT_MS: int static => 300000
+
         // The package's assemblies, or why there are none. With no version
         // the latest stable release is taken.
         assemblies(package: string, version: string?, directory: string) -> (paths: LIST[string], problem: string?) static is
@@ -52,7 +54,16 @@ namespace Ghul.Repl.Host is
             let output_read = process.standard_output.read_to_end_async()
             let error_read = process.standard_error.read_to_end_async()
 
-            process.wait_for_exit()
+            // A feed that stops answering would otherwise keep the session
+            // waiting for good.
+            if !process.wait_for_exit(TIMEOUT_MS) then
+                try
+                    process.kill(true)
+                catch e: System.Exception
+                yrt
+
+                return (paths = paths, problem = "restoring {package} took longer than {TIMEOUT_MS / 60000} minutes, so it was stopped")
+            fi
 
             let said = output_read.result
             let _ = error_read.result
