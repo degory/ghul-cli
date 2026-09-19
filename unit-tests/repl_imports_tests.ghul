@@ -279,6 +279,36 @@ namespace Ghul.Cli.Tests is
             assert request.carried_line_count == 0;
         si
 
+        // A carried definition that uses a name private to the cell that
+        // declared it cannot be declared anywhere else, and says so.
+        @Test()
+        accept__reports_a_private_name_a_carried_definition_uses() is
+            let session = SESSION(false)
+
+            _accept(session, "class Q(v: int)\n", LIST[string](["Q"]));
+
+            let request = session.prepare("partial Q is\n    f() -> int => v\nsi\n")
+            let outcome = session.accept(request, CELL_REPLY(LIST[string](["cell2.ghul: 2,1..2,8: error: symbol not found: _helper"]), null))
+
+            assert outcome.diagnostics.count == 1;
+            assert outcome.diagnostics[0].contains("its definition uses _helper, which is private to the cell that defined it");
+        si
+
+        // Any other error in a carried definition is shown as it is, even
+        // one that mentions a private name.
+        @Test()
+        accept__shows_other_errors_in_a_carried_definition_as_they_are() is
+            let session = SESSION(false)
+
+            _accept(session, "class Q(v: int)\n", LIST[string](["Q"]));
+
+            let request = session.prepare("partial Q is\n    f() -> int => v\nsi\n")
+            let outcome = session.accept(request, CELL_REPLY(LIST[string](["cell2.ghul: 2,1..2,8: error: _secret is not assignable to string"]), null))
+
+            assert outcome.diagnostics.count == 1;
+            assert outcome.diagnostics[0] =~ "cell-2: 1,1..1,1: error: in the earlier definition of Q: _secret is not assignable to string";
+        si
+
         // Declaring the type again starts its text over.
         @Test()
         prepare__forgets_blocks_added_before_a_type_is_declared_again() is

@@ -316,9 +316,10 @@ namespace Ghul.Repl is
                 anchor)
         si
 
-        // An error in a carried definition naming an underscore name: a
-        // name private to the cell that declared it, which no later cell
-        // can see, so the type cannot be declared again anywhere else.
+        // An error in a carried definition saying an underscore name could
+        // not be found: a name private to the cell that declared it, which
+        // no later cell can see, so the type cannot be declared again
+        // anywhere else. Any other error is shown as it is.
         _private_use_in_carried(request: CELL_REQUEST, span: CELL_SPAN, diagnostic: CELL_DIAGNOSTIC) -> string? is
             let location = diagnostic.location
 
@@ -326,7 +327,9 @@ namespace Ghul.Repl is
                 return null
             fi
 
-            let m = System.Text.RegularExpressions.Regex.match(diagnostic.message, "(?<![A-Za-z0-9_])_[A-Za-z0-9_]+")
+            let m = System.Text.RegularExpressions.Regex.match(
+                diagnostic.message,
+                "^(symbol not found: (?<name>_[A-Za-z0-9_]+)|member (?<name>_[A-Za-z0-9_]+) not found in .*)$")
 
             if !m.success then
                 return null
@@ -336,7 +339,7 @@ namespace Ghul.Repl is
 
             return
                 "{cell_label_for(request.index)}: {span.anchor_line},1..{span.anchor_line},1: error: "
-                "{names} cannot be added to from a later cell: its definition uses {m.value}, which is private "
+                "{names} cannot be added to from a later cell: its definition uses {m.groups["name"].value}, which is private "
                 "to the cell that defined it; declare {names} again instead"
         si
 
