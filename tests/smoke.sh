@@ -423,6 +423,37 @@ for expected in "carried 32 8 1 end" "area still takes the earlier POINT"; do
     fi
 done
 
+echo "smoke: 'ghul repl' lets a later cell use an earlier cell's underscore names..." >&2
+repl_private_in="$scratch/repl-private-in.txt"
+cat > "$repl_private_in" <<'REPL'
+_helper(n: int) -> int => n + 1
+
+class _HIDDEN(value: int)
+
+class Q(v: int) is
+    bump() -> int => _helper(v)
+si
+
+partial Q is
+    twice() -> int => _helper(v) * 2
+si
+
+"private {_helper(1)} {_HIDDEN(42).value} {Q(3).twice()}"
+
+:quit
+REPL
+repl_private_out="$(dotnet "$cli" repl < "$repl_private_in" 2>"$scratch/repl-private.err")" || {
+    echo "smoke: ghul repl exited non-zero:" >&2
+    cat "$scratch/repl-private.err" >&2
+    exit 1
+}
+if [[ "$repl_private_out" != *"private 2 42 8"* ]]; then
+    echo "smoke: expected the repl to show 'private 2 42 8', got:" >&2
+    echo "$repl_private_out" >&2
+    cat "$scratch/repl-private.err" >&2
+    exit 1
+fi
+
 echo "smoke: 'ghul repl' extends a class declared in an earlier submission..." >&2
 repl_extend_in="$scratch/repl-extend-in.txt"
 cat > "$repl_extend_in" <<'REPL'
