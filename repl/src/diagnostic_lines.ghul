@@ -2,8 +2,32 @@ namespace Ghul.Repl is
     use System.Text.RegularExpressions.Regex
 
     // Where a cell sits in the session, and how many generated lines
-    // come before what the user wrote.
-    class CELL_SPAN(index: int, prelude_lines: int);
+    // come before what the user wrote. The last `carried_lines` of those
+    // are earlier definitions the cell declares again; what goes wrong
+    // there is shown against `anchor_line` of the user's text, saying
+    // which definition it was in.
+    class CELL_SPAN(index: int, prelude_lines: int) is
+        carried_lines: int
+        carried_note: string
+        anchor_line: int
+
+        init(..) is
+            carried_lines = 0
+            carried_note = ""
+            anchor_line = 1
+        si
+
+        init(.., carried_lines: int, carried_note: string, anchor_line: int) is
+            self.carried_lines = carried_lines
+            self.carried_note = carried_note
+            self.anchor_line = anchor_line
+        si
+
+        // The lines the session generated for itself.
+        is_generated_line(line: int) -> bool => line <= prelude_lines - carried_lines
+
+        is_carried_line(line: int) -> bool => !is_generated_line(line) /\ line <= prelude_lines
+    si
 
     // The compiler is given the generated prelude and the user's text as
     // one file, so every line it reports is that many lines further down
@@ -64,11 +88,13 @@ namespace Ghul.Repl is
                 related.add(CELL_RELATED(without_cell_names(r.message), _for_display(r.location, cells)))
             od
 
+            let message = without_cell_names(diagnostic.message)
+
             return CELL_DIAGNOSTIC(
                 _for_display(diagnostic.location, cells),
                 diagnostic.severity,
                 diagnostic.code,
-                without_cell_names(diagnostic.message),
+                if let note = _carried_note(diagnostic.location, cells) then "in {note}: {message}" else message fi,
                 related)
         si
 
@@ -77,6 +103,28 @@ namespace Ghul.Repl is
         // cell that happened to make it.
         without_cell_names(message: string) -> string static =>
             Regex.replace(message, "\\b{CELL_NAME_STEM}[0-9]+\\.", "")
+
+        // Which carried definition a location is in, for a diagnostic
+        // shown against the block that carried it.
+        _carried_note(location: CELL_LOCATION?, cells: Collections.Map[string, CELL_SPAN]) -> string? static is
+            if !location? then
+                return null
+            fi
+
+            let file = IO.Path.get_file_name(location.path) ?? ""
+
+            if !file.ends_with(".ghul") then
+                return null
+            fi
+
+            let name = file.substring(0, file.length - 5)
+
+            if cells.contains_key(name) /\ cells[name].is_carried_line(location.start_line) then
+                return cells[name].carried_note
+            fi
+
+            return null
+        si
 
         _is_in_prelude(location: CELL_LOCATION?, cells: Collections.Map[string, CELL_SPAN]) -> bool static is
             if !location? then
@@ -91,7 +139,7 @@ namespace Ghul.Repl is
 
             let name = file.substring(0, file.length - 5)
 
-            return cells.contains_key(name) /\ location.start_line <= cells[name].prelude_lines
+            return cells.contains_key(name) /\ cells[name].is_generated_line(location.start_line)
         si
 
         _for_display(location: CELL_LOCATION?, cells: Collections.Map[string, CELL_SPAN]) -> CELL_LOCATION? static is
@@ -112,6 +160,10 @@ namespace Ghul.Repl is
             fi
 
             let span = cells[name]
+
+            if span.is_carried_line(location.start_line) then
+                return CELL_LOCATION(cell_label_for(span.index), span.anchor_line, 1, span.anchor_line, 1)
+            fi
 
             if location.start_line <= span.prelude_lines then
                 return location

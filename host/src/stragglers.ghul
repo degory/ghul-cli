@@ -1,0 +1,160 @@
+namespace Ghul.Repl.Host is
+    use Collections.LIST
+    use System.Reflection.Assembly
+    use System.Reflection.BindingFlags
+
+    // When a cell declares a type again to add to it, what earlier cells
+    // defined still uses the type as it was: a function taking the old
+    // type does not take the new one. Found from the earlier cells'
+    // assemblies, so the user can be told which to declare again.
+    class STRAGGLERS is
+        // How many names are worth listing before saying there are more.
+        _LIMIT: int static => 5
+
+        // A line naming what still uses the earlier `name` declared by
+        // `previous_cell`, or null when nothing does.
+        note(name: string, previous_cell: string, assemblies: Collections.Map[string, Assembly]) -> string? static is
+            if !assemblies.contains_key(previous_cell) then
+                return null
+            fi
+
+            let old_type = _find_type(assemblies[previous_cell], previous_cell, name)
+
+            if !old_type? then
+                return null
+            fi
+
+            let users = LIST[string]()
+
+            for entry in assemblies do
+                _collect_users(entry.value, entry.key, old_type, users)
+            od
+
+            users.remove(name)
+
+            if users.count == 0 then
+                return null
+            fi
+
+            let shown = users |> Ghul.Pipes.take(_LIMIT) |> Ghul.Pipes.join(", ")
+            let more = if users.count > _LIMIT then " and {users.count - _LIMIT} more" else "" fi
+            let verb = if users.count == 1 then "takes" else "take" fi
+            let them = if users.count == 1 then "it" else "them" fi
+
+            return "ghul: {shown}{more} still {verb} the earlier {name}; redefine {them} to use the new one"
+        si
+
+        _find_type(assembly: Assembly, cell: string, name: string) -> System.Type? static is
+            for type in assembly.get_types() do
+                if type.`namespace =~ cell /\ _base_name(type.name) =~ name then
+                    return type
+                fi
+            od
+
+            return null
+        si
+
+        _base_name(name: string) -> string static is
+            let tick = name.index_of('`')
+
+            return if tick >= 0 then name.substring(0, tick) else name fi
+        si
+
+        // Every public name a cell exports whose signature or members
+        // mention the old type.
+        _collect_users(assembly: Assembly, cell: string, old_type: System.Type, users: LIST[string]) static is
+            let flags = cast BindingFlags(
+                cast int(BindingFlags.PUBLIC) | cast int(BindingFlags.STATIC) |
+                cast int(BindingFlags.INSTANCE) | cast int(BindingFlags.DECLARED_ONLY))
+
+            for type in assembly.get_types() do
+                if !type.is_public \/ type == old_type then
+                    continue
+                fi
+
+                // A variant of the old type is part of it, not a user.
+                if type.`namespace =~ "{cell}.{_base_name(old_type.name)}" /\ type.assembly == old_type.assembly then
+                    continue
+                fi
+
+                let is_globals = type.name =~ Ghul.Repl.GLOBALS_TYPE_NAME
+
+                for method in type.get_methods(flags) do
+                    if !method.is_special_name /\ Ghul.Repl.CELL_EXPORTS.is_user_name(method.name) /\ _method_mentions(method, old_type) then
+                        _add(users, if is_globals then method.name else _base_name(type.name) fi)
+                    fi
+                od
+
+                for member in type.get_fields(flags) do
+                    if Ghul.Repl.CELL_EXPORTS.is_user_name(member.name) /\ _mentions(member.field_type, old_type) then
+                        _add(users, if is_globals then member.name else _base_name(type.name) fi)
+                    fi
+                od
+
+                for property in type.get_properties(flags) do
+                    if Ghul.Repl.CELL_EXPORTS.is_user_name(property.name) /\ _mentions(property.property_type, old_type) then
+                        _add(users, if is_globals then property.name else _base_name(type.name) fi)
+                    fi
+                od
+
+                if !is_globals then
+                    for constructor in type.get_constructors() do
+                        for parameter in constructor.get_parameters() do
+                            if _mentions(parameter.parameter_type, old_type) then
+                                _add(users, _base_name(type.name))
+                            fi
+                        od
+                    od
+                fi
+            od
+        si
+
+        _method_mentions(method: System.Reflection.MethodInfo, old_type: System.Type) -> bool static is
+            if _mentions(method.return_type, old_type) then
+                return true
+            fi
+
+            for parameter in method.get_parameters() do
+                if _mentions(parameter.parameter_type, old_type) then
+                    return true
+                fi
+            od
+
+            return false
+        si
+
+        _mentions(type: System.Type?, old_type: System.Type) -> bool static is
+            if !type? then
+                return false
+            fi
+
+            if type == old_type then
+                return true
+            fi
+
+            if type.has_element_type then
+                return _mentions(type.get_element_type(), old_type)
+            fi
+
+            if type.is_generic_type then
+                if type.get_generic_type_definition() == old_type then
+                    return true
+                fi
+
+                for argument in type.get_generic_arguments() do
+                    if _mentions(argument, old_type) then
+                        return true
+                    fi
+                od
+            fi
+
+            return false
+        si
+
+        _add(users: LIST[string], name: string) static is
+            if !users.contains(name) then
+                users.add(name)
+            fi
+        si
+    si
+si

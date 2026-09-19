@@ -1,0 +1,247 @@
+namespace Ghul.Repl is
+    use Collections.LIST
+
+    // A type declared at the top level of a cell, or a partial or impl
+    // block adding to one: what it is, the type it names, and where its
+    // text runs, as character offsets into the cell, end exclusive.
+    class DECLARATION(kind: string, name: string, start: int, end: int) is
+        is_extension: bool => kind =~ "partial" \/ kind =~ "impl"
+
+        text_in(source: string) -> string => source.substring(start, end - start)
+    si
+
+    // Finds the top-level type declarations in the text of a cell that
+    // compiled. Compiled text is complete, so every block keyword has its
+    // closer and counting them finds where each declaration ends; this is
+    // not a parser, and says nothing useful about text that did not
+    // compile.
+    class DECLARATION_SPANS is
+        _TYPE_KINDS: string[] static => ["class", "struct", "union", "trait", "enum", "partial", "impl"]
+        _OPENERS: string[] static => ["is", "if", "do", "case", "try", "val", "(", "["]
+        _CLOSERS: string[] static => ["si", "fi", "od", "esac", "yrt", "lav", ")", "]"]
+
+        of(source: string) -> Collections.List[DECLARATION] static is
+            let tokens = SOURCE_TOKENS.of(source)
+            let result = LIST[DECLARATION]()
+
+            let i mut = 0
+            let pragma_start mut = -1
+
+            while i < tokens.count do
+                let token = tokens[i]
+
+                if token.text =~ "\n" \/ token.text =~ ";" then
+                    i = i + 1
+                    continue
+                fi
+
+                if token.text =~ "@" then
+                    if pragma_start < 0 then
+                        pragma_start = token.start
+                    fi
+
+                    i = _statement_end(tokens, i)
+                    continue
+                fi
+
+                let start = if pragma_start >= 0 then pragma_start else token.start fi
+                pragma_start = -1
+
+                let end = _statement_end(tokens, i)
+
+                if _contains(_TYPE_KINDS, token.text) /\ !token.is_escaped then
+                    if let name = _target_name(tokens, i, end) then
+                        result.add(DECLARATION(token.text, name, start, tokens[end - 1].end))
+                    fi
+                fi
+
+                i = end
+            od
+
+            return result
+        si
+
+        // One past the last token of the statement starting at `i`: the
+        // first line break or `;` outside any bracket or block.
+        _statement_end(tokens: LIST[SOURCE_TOKEN], i: int) -> int static is
+            let depth mut = 0
+            let j mut = i
+
+            while j < tokens.count do
+                let token = tokens[j]
+
+                if !token.is_escaped then
+                    if _contains(_OPENERS, token.text) then
+                        depth = depth + 1
+                    elif _contains(_CLOSERS, token.text) then
+                        depth = depth - 1
+                    elif depth == 0 /\ (token.text =~ "\n" \/ token.text =~ ";") then
+                        return j
+                    fi
+                fi
+
+                j = j + 1
+            od
+
+            return j
+        si
+
+        // The type a declaration names: the word after its keyword, or for
+        // an impl block the word after `for`.
+        _target_name(tokens: LIST[SOURCE_TOKEN], i: int, end: int) -> string? static is
+            let kind = tokens[i].text
+            let j mut = i + 1
+
+            if kind =~ "impl" then
+                while j < end /\ !(tokens[j].text =~ "for" /\ !tokens[j].is_escaped) do
+                    j = j + 1
+                od
+
+                j = j + 1
+            fi
+
+            if j < end /\ tokens[j].is_word then
+                return tokens[j].text
+            fi
+
+            return null
+        si
+
+        _contains(words: string[], word: string) -> bool static is
+            for w in words do
+                if w =~ word then
+                    return true
+                fi
+            od
+
+            return false
+        si
+    si
+
+    // A word, a bracket, `;`, `@` or a line break, with where it is.
+    // Everything else - comments, strings, characters, operators - is
+    // passed over.
+    class SOURCE_TOKEN(text: string, start: int, end: int, is_word: bool, is_escaped: bool);
+
+    class SOURCE_TOKENS is
+        of(source: string) -> LIST[SOURCE_TOKEN] static is
+            let result = LIST[SOURCE_TOKEN]()
+            let i mut = 0
+
+            while i < source.length do
+                let c = source[i]
+
+                if c == '\n' then
+                    result.add(SOURCE_TOKEN("\n", i, i + 1, false, false))
+                    i = i + 1
+                elif c == '/' /\ _at(source, i + 1, '/') then
+                    while i < source.length /\ source[i] != '\n' do
+                        i = i + 1
+                    od
+                elif c == '/' /\ _at(source, i + 1, '*') then
+                    let close = source.index_of("*/", i + 2)
+
+                    i = if close < 0 then source.length else close + 2 fi
+                elif c == '"' then
+                    i = _after_string(source, i)
+                elif c == '\'' then
+                    i = _after_char(source, i)
+                elif c == '`' /\ i + 1 < source.length /\ _is_word_char(source[i + 1]) then
+                    let end = _word_end(source, i + 1)
+
+                    result.add(SOURCE_TOKEN(source.substring(i + 1, end - i - 1), i, end, true, true))
+                    i = end
+                elif _is_word_char(c) then
+                    let end = _word_end(source, i)
+
+                    result.add(SOURCE_TOKEN(source.substring(i, end - i), i, end, !char.is_digit(c), false))
+                    i = end
+                elif c == '(' \/ c == ')' \/ c == '[' \/ c == ']' \/ c == ';' \/ c == '@' then
+                    result.add(SOURCE_TOKEN("{c}", i, i + 1, false, false))
+                    i = i + 1
+                else
+                    i = i + 1
+                fi
+            od
+
+            return result
+        si
+
+        // Past a string literal starting at its opening quote, including
+        // any interpolated expressions and the strings nested in them.
+        _after_string(source: string, start: int) -> int static is
+            let i mut = start + 1
+
+            while i < source.length do
+                let c = source[i]
+
+                if c == '\\' then
+                    i = i + 2
+                elif c == '"' then
+                    return i + 1
+                elif c == '{' /\ _at(source, i + 1, '{') then
+                    i = i + 2
+                elif c == '{' then
+                    i = _after_interpolation(source, i + 1)
+                else
+                    i = i + 1
+                fi
+            od
+
+            return i
+        si
+
+        _after_interpolation(source: string, start: int) -> int static is
+            let i mut = start
+            let depth mut = 0
+
+            while i < source.length do
+                let c = source[i]
+
+                if c == '"' then
+                    i = _after_string(source, i)
+                elif c == '\'' then
+                    i = _after_char(source, i)
+                elif c == '{' then
+                    depth = depth + 1
+                    i = i + 1
+                elif c == '}' then
+                    if depth == 0 then
+                        return i + 1
+                    fi
+
+                    depth = depth - 1
+                    i = i + 1
+                else
+                    i = i + 1
+                fi
+            od
+
+            return i
+        si
+
+        _after_char(source: string, start: int) -> int static is
+            let i mut = start + 1
+
+            while i < source.length /\ source[i] != '\'' /\ source[i] != '\n' do
+                i = i + if source[i] == '\\' then 2 else 1 fi
+            od
+
+            return i + 1
+        si
+
+        _word_end(source: string, start: int) -> int static is
+            let i mut = start
+
+            while i < source.length /\ _is_word_char(source[i]) do
+                i = i + 1
+            od
+
+            return i
+        si
+
+        _is_word_char(c: char) -> bool static => char.is_letter_or_digit(c) \/ c == '_'
+
+        _at(source: string, i: int, c: char) -> bool static => i < source.length /\ source[i] == c
+    si
+si

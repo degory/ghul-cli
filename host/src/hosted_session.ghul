@@ -67,7 +67,11 @@ namespace Ghul.Repl.Host is
             _runner = CELL_RUNNER()
             _session = SESSION(_want_default_use)
             _context = SESSION_LOAD_CONTEXT(_probe_directory)
+            _assemblies = Collections.MAP[string, Assembly]()
         si
+
+        // Each accepted cell's assembly, by cell name.
+        _assemblies: Collections.MAP[string, Assembly]
 
         submit(source: string) -> SUBMIT_RESULT is
             let request mut = _session.prepare(source)
@@ -88,15 +92,29 @@ namespace Ghul.Repl.Host is
             fi
 
             let loaded: LOADED_CELL? mut = null
+            let assembly: Assembly? mut = null
 
             if let assembly_path = compiled.assembly_path then
-                loaded = CELL_EXPORTS.read(
-                    _context.load_from_assembly_path(IO.Path.get_full_path(assembly_path)))
+                assembly = _context.load_from_assembly_path(IO.Path.get_full_path(assembly_path))
+                loaded = CELL_EXPORTS.read(assembly)
             fi
 
+            let visible_before = _session.visible_names()
             let outcome = _session.accept(request, CELL_REPLY(compiled.diagnostics, loaded))
 
             let diagnostics = Collections.LIST[string](outcome.diagnostics)
+
+            if outcome.is_accepted /\ assembly? then
+                _assemblies[request.name] = assembly
+
+                for name in request.carried_names do
+                    if visible_before.contains_key(name) then
+                        if let note = STRAGGLERS.note(name, visible_before[name].name, _assemblies) then
+                            diagnostics.add(note)
+                        fi
+                    fi
+                od
+            fi
 
             for directive in dropped do
                 diagnostics.add("ghul: dropped an import of an earlier cell that no longer resolves: {directive}")
