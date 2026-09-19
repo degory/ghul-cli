@@ -137,6 +137,19 @@ namespace Ghul.Cli.Tests is
         si
 
         @Test()
+        for_next_line__goes_a_step_deeper_after_an_arm_written_on_one_line() is
+            assert _after(["    when c: CIRCLE then c.radius"]) == 8;
+            assert _after(["if x then 1"]) == 4;
+            assert _after(["elif y then 2"]) == 4;
+            assert _after(["else 3"]) == 4;
+
+            let arm = INDENTATION.for_next_line(LIST[string](["    case s", "    when c: CIRCLE then c.radius"]))
+
+            assert INDENTATION.adjust("{string(' ', arm)}when r: RECT then r.width", arm) =~ "    when r: RECT then r.width";
+            assert INDENTATION.adjust("{string(' ', arm)}esac", arm) =~ "    esac";
+        si
+
+        @Test()
         for_next_line__ignores_a_comment_and_a_blank_line() is
             assert _after(["if x then // why", "   "]) == 4;
             assert _after(["let s = \"// then\""]) == 0;
