@@ -1,0 +1,42 @@
+namespace Ghul.Repl.Host is
+    // How a process the session keeps running for its whole length is
+    // started. A terminal sends Ctrl-C to every process in its foreground
+    // process group, which would take the session's compiler and analyser
+    // with it when all that was meant was to stop a cell. Started through
+    // `setsid`, where there is one, a child has a session of its own and
+    // the terminal's signals do not reach it; it still ends when its
+    // input closes.
+    class DETACHED_START is
+        init() is si
+
+        _setsid_paths: string[] static => ["/usr/bin/setsid", "/bin/setsid"]
+
+        // A start for `file_name`, arguments to be added after.
+        of(file_name: string) -> System.Diagnostics.ProcessStartInfo static is
+            let start_info = System.Diagnostics.ProcessStartInfo()
+
+            if let setsid = _setsid() then
+                start_info.file_name = setsid
+                start_info.argument_list.add(file_name)
+            else
+                start_info.file_name = file_name
+            fi
+
+            return start_info
+        si
+
+        _setsid() -> string? static is
+            if !System.OperatingSystem.is_linux() then
+                return null
+            fi
+
+            for path in _setsid_paths do
+                if IO.File.exists(path) then
+                    return path
+                fi
+            od
+
+            return null
+        si
+    si
+si

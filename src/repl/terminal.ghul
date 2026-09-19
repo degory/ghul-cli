@@ -425,6 +425,7 @@ namespace Ghul.Cli.Repl is
             Std.write_line("a line holding only . ends the submission and shows what it ended on")
             Std.write_line("Up and Down move between lines, then to earlier submissions; Enter on")
             Std.write_line("an earlier line or Alt-Enter adds a line; Ctrl-D in an empty submission leaves")
+            Std.write_line("Ctrl-C while a submission runs interrupts it; the session carries on")
             Std.write_line("what you end on is shown, unless you end on a statement or with a blank line")
             Std.write_line("messages call a cell cell-3; in code it is cell3, as in cell3.x")
 
