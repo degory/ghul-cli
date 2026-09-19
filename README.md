@@ -52,7 +52,9 @@ to capture with `$(...)`. It never runs the result.
 `ghul install-compiler` installs `ghul.compiler` into `ghul`'s own private
 tool directory ahead of time, optionally pinned to a given version, so the
 first real script run doesn't pay for it. Given no version it installs (or
-updates to) the latest; given one already installed, it's a no-op.
+updates to) the latest, so upgrading needs no version looked up; given a
+version, it installs exactly that one, older or newer, and is a no-op when
+that version is already there.
 
 A `-` in place of `<script>` reads the source from standard input instead
 of a file, for both running and compiling:
