@@ -23,6 +23,11 @@ Or run it directly without the shebang:
 ghul greet.ghul world
 ```
 
+A script with no namespace of its own gets the compiler's default imports
+(`use default`), as the REPL does, so `write_line`, the pipes and the
+collections need no `use`. This needs `ghul.compiler` 60.2.0 or newer; with an
+older one a script imports what it names itself.
+
 ## Commands
 
 ```sh
