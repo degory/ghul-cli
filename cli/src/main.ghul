@@ -636,6 +636,13 @@ namespace Ghul.Cli is
     wants_implicit_default_use(version: string) -> bool =>
         !is_older_than(version, MINIMUM_IMPLICIT_DEFAULT_USE_COMPILER)
 
+    // The oldest compiler that completes a partly typed member with the
+    // cursor at its end. An older one is asked at the start of the name.
+    MINIMUM_COMPLETION_AT_CURSOR_COMPILER: string => "60.2.2"
+
+    completes_at_cursor(version: string) -> bool =>
+        !is_older_than(version, MINIMUM_COMPLETION_AT_CURSOR_COMPILER)
+
     // Whether `version` is a release older than `minimum`. A version that
     // does not parse is a build of the compiler rather than a release, and
     // is taken to be current.
@@ -733,7 +740,7 @@ namespace Ghul.Cli is
                     say)
 
             let terminal =
-                Repl.TERMINAL(make_session, options.want_default_use, options.theme)
+                Repl.TERMINAL(make_session, options.want_default_use, options.theme, completes_at_cursor(compiler_version))
 
             return run_closing_on_signal(terminal)
         fi

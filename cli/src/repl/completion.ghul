@@ -1,10 +1,12 @@
 namespace Ghul.Cli.Repl is
     use Collections.LIST
 
-    // Asking for completions of a name partly typed. The analyser is asked
-    // at the start of the name rather than after it, where what follows a
-    // `.` is answered as a member access, and the answer is narrowed here
-    // to the names that start with what has been typed.
+    // Asking for completions of a name partly typed. The analyser answers
+    // with every name that fits where the name is, and the answer is
+    // narrowed here to the names that start with what has been typed.
+    // A compiler older than 60.2.2 misreads a partly typed member that ends
+    // the text, so with one of those the analyser is asked at the start of
+    // the name instead.
     class COMPLETION_QUERY is
         init() is si
 
