@@ -163,6 +163,12 @@ namespace Ghul.Cli is
         if let v: string = version then
             start_info.argument_list.add("--version")
             start_info.argument_list.add(v)
+
+            // A named version is the one wanted, older or not, and an
+            // update refuses to go backwards unless told it can.
+            if installed_compiler_version(tools_dir)? then
+                start_info.argument_list.add("--allow-downgrade")
+            fi
         fi
 
         start_info.argument_list.add("ghul.compiler")
@@ -434,11 +440,31 @@ namespace Ghul.Cli is
         let version: string? = if rest.count > 0 then rest[0] else null fi
         let tools_dir = tools_directory()
 
-        if let current: string = installed_compiler_version(tools_dir) then
-            if !version? \/ current =~ version then
-                Std.error.write_line("ghul: ghul.compiler {current} is already installed")
+        let before = installed_compiler_version(tools_dir)
+
+        if let current: string = before /\ version? /\ current =~ version then
+            Std.error.write_line("ghul: ghul.compiler {current} is already installed")
+            return 0
+        fi
+
+        // With no version named, the latest is wanted whatever is
+        // installed, so an installed compiler does not end the matter
+        // the way it does for a script run.
+        if before? /\ !version? then
+            Std.error.write_line("ghul: checking for a newer ghul.compiler than {before}...")
+
+            if let installed: string = update_compiler_to_latest(tools_dir) then
+                if installed =~ before then
+                    Std.error.write_line("ghul: ghul.compiler {installed} is already installed and is the latest")
+                else
+                    Std.error.write_line("ghul: ghul.compiler updated from {before} to {installed}")
+                fi
+
                 return 0
             fi
+
+            Std.error.write_line("ghul: failed to update ghul.compiler")
+            return 1
         fi
 
         Std.error.write_line("ghul: installing ghul.compiler{if version? then " {version}" else "" fi}...")
@@ -450,6 +476,24 @@ namespace Ghul.Cli is
 
         Std.error.write_line("ghul: failed to install ghul.compiler")
         return 1
+    si
+
+    // Under the install lock, since a script run elsewhere may be
+    // installing or reading the compiler at the same time.
+    update_compiler_to_latest(tools_dir: string) -> string? is
+        let lock_stream = acquire_lock(
+            "{tools_dir}/.install.lock",
+            "ghul: waiting for another ghul process to finish installing the compiler...")
+
+        try
+            if !install_compiler(tools_dir, null, true) then
+                return null
+            fi
+
+            return installed_compiler_version(tools_dir)
+        finally
+            lock_stream.close()
+        yrt
     si
 
     cmd_cache(rest: Collections.List[string]) -> int is
@@ -648,7 +692,7 @@ namespace Ghul.Cli is
             Std.error.write_line(
                 "ghul: the session needs ghul.compiler {MINIMUM_REPL_COMPILER} or newer; {installed} is installed")
 
-            Std.error.write_line("ghul: install-compiler {MINIMUM_REPL_COMPILER} to update it")
+            Std.error.write_line("ghul: run ghul install-compiler to update it")
 
             return 1
         fi

@@ -103,10 +103,10 @@ fi
 out="$(dotnet "$compiled_path")"
 check "$out" "compiled" "output of the binary 'ghul compile' produced"
 
-echo "smoke: 'ghul install-compiler' is a no-op when already installed..." >&2
+echo "smoke: 'ghul install-compiler' with no version looks for the latest..." >&2
 out="$(dotnet "$cli" install-compiler 2>&1)"
-if [[ "$out" != *"already installed"* ]]; then
-    echo "smoke: expected 'ghul install-compiler' to report the compiler already installed, got: $out" >&2
+if [[ "$out" != *"is the latest"* && "$out" != *"updated from"* ]]; then
+    echo "smoke: expected 'ghul install-compiler' to report the latest compiler or an update, got: $out" >&2
     exit 1
 fi
 
