@@ -384,6 +384,32 @@ if [[ "$repl_redefine_out" != *"30"* ]]; then
     exit 1
 fi
 
+echo "smoke: a line holding only . ends a cell and is not compiled..." >&2
+repl_dot_in="$scratch/repl-dot-in.txt"
+cat > "$repl_dot_in" <<'REPL'
+.
+41
+.
+let unfinished = (1 +
+.
+"after the dot"
+:quit
+REPL
+repl_dot_out="$(dotnet "$cli" repl < "$repl_dot_in" 2>"$scratch/repl-dot.err")" || true
+for expected in "41" "after the dot"; do
+    if [[ "$repl_dot_out" != *"$expected"* ]]; then
+        echo "smoke: expected the repl to show '$expected' around a . line, got:" >&2
+        echo "$repl_dot_out" >&2
+        cat "$scratch/repl-dot.err" >&2
+        exit 1
+    fi
+done
+if ! grep -q "^cell-2: " "$scratch/repl-dot.err"; then
+    echo "smoke: expected the . line to end the unfinished cell and report it, stderr was:" >&2
+    cat "$scratch/repl-dot.err" >&2
+    exit 1
+fi
+
 echo "smoke: a cell that does not compile leaves the session unchanged..." >&2
 repl_bad_in="$scratch/repl-bad-in.txt"
 cat > "$repl_bad_in" <<'REPL'

@@ -80,18 +80,41 @@ everything you type afterwards:
 > for name in ["second", "third"] do
 |     names.add(name)
 | od
-> names
+| names
 [first, second, third]
 ```
 
 A line that finishes what you have typed submits it. One that leaves
 something open - a block with no closing keyword, an open bracket, an
-operator with nothing after it - waits for more with a `|` prompt, and a
-blank line submits whatever is there regardless. Text that can never be
-finished is submitted straight away, so its errors are reported at once.
+operator with nothing after it - waits for more with a `|` prompt. Text
+that can never be finished is submitted straight away, so its errors are
+reported at once.
 
-A submission that ends on a value shows it, so the last line above needs
-no `write_line`. A submission that ends on a statement shows nothing.
+An `if`, `case`, loop or definition written over several lines does not
+end the submission when it closes: the `|` prompt stays, and the next
+line joins the same submission, as `names` does above. A line that
+finishes a statement of its own then submits the lot. A blank line
+submits whatever is there, and a line holding only `.` does the same.
+
+A submission that ends on a value shows it, so `names` above needs no
+`write_line`. A submission that ends on a statement shows nothing, and
+neither does one ended by a blank line after a construct over several
+lines, since such a construct is usually there for what it does. End
+it with `.` instead to see its value:
+
+```
+> if names.count > 2 then
+|     "several"
+| else
+|     "few"
+| fi
+| .
+several
+```
+
+Read from a pipe or a file rather than typed at a terminal, a construct
+over several lines ends the submission when it closes, and a `.` line
+ends one too.
 
 The compiler's default imports (`use default`) are in force in every
 submission, so `write_line`, the pipes and the collections need no `use`.

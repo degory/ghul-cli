@@ -1,7 +1,8 @@
 namespace Ghul.Cli.Tests is
     use Collections.LIST
 
-    use Ghul.Cli.Repl.SUBMISSION_END
+    use Ghul.Cli.Repl.CELL_INPUT
+    use Ghul.Cli.Repl.CellStep
     use Ghul.Repl.Host.Completeness
 
     use Ghul.Repl.CELL_REPLY
@@ -197,60 +198,186 @@ namespace Ghul.Cli.Tests is
     si
 
     @TestClass()
-    class REPL_SUBMISSION_END_TESTS is
+    class REPL_CELL_INPUT_TESTS is
         init() is si
 
-        _asking(is_unfinished: bool) -> SUBMISSION_END =>
-            SUBMISSION_END(text => if is_unfinished then Completeness.INCOMPLETE else Completeness.COMPLETE fi)
+        // Stands in for the compiler: a line ending in `then` or `do`
+        // opens a block and a line holding `fi` or `od` closes one, so
+        // text is finished when every block it opens is closed. Text
+        // mentioning `oops` can never be finished.
+        _check(text: string) -> Completeness is
+            if text.contains("oops") then
+                return Completeness.INVALID
+            fi
 
-        @Test()
-        is_complete__is_true_for_a_line_the_compiler_calls_finished() is
-            assert _asking(false).is_complete(LIST[string](), "let x = 1");
+            let depth mut = 0
+
+            for line in text.split(['\n']) do
+                let trimmed = line.trim()
+
+                if trimmed.ends_with(" then") \/ trimmed.ends_with(" do") then
+                    depth = depth + 1
+                elif trimmed =~ "fi" \/ trimmed =~ "od" then
+                    depth = depth - 1
+                fi
+            od
+
+            return if depth > 0 then Completeness.INCOMPLETE else Completeness.COMPLETE fi
+        si
+
+        _at_terminal() -> CELL_INPUT => CELL_INPUT(text => _check(text), true)
+
+        _piped() -> CELL_INPUT => CELL_INPUT(text => _check(text), false)
+
+        // Enters each line in turn and returns the step the last one took.
+        _enter(cell: CELL_INPUT, lines: string[]) -> CellStep is
+            let step mut = CellStep.NOTHING
+
+            for line in lines do
+                step = cell.enter(line)
+            od
+
+            return step
         si
 
         @Test()
-        is_complete__is_false_for_a_line_the_compiler_calls_unfinished() is
-            assert !_asking(true).is_complete(LIST[string](), "if x then");
+        enter__submits_a_finished_line_at_once() is
+            let cell = _at_terminal()
+
+            assert cell.enter("1 + 2") == CellStep.SUBMIT;
+            assert cell.source =~ "1 + 2\n";
         si
 
-        // What is asked about is everything typed so far, the latest
-        // line included, as one text.
         @Test()
-        is_complete__asks_about_every_line_typed_so_far() is
+        enter__waits_for_an_unfinished_line() is
+            assert _at_terminal().enter("if x then") == CellStep.WAIT;
+        si
+
+        @Test()
+        enter__submits_text_that_can_never_be_finished_at_once() is
+            let cell = _at_terminal()
+
+            assert _enter(cell, ["if x then", "oops"]) == CellStep.SUBMIT;
+        si
+
+        // A construct that took several lines does not end the cell when
+        // it closes, at a terminal.
+        @Test()
+        enter__holds_a_cell_ending_on_a_construct_over_several_lines() is
+            let cell = _at_terminal()
+
+            assert _enter(cell, ["if x then", "    1", "fi"]) == CellStep.WAIT;
+            assert !cell.is_empty;
+        si
+
+        @Test()
+        enter__submits_a_held_cell_quietly_at_a_blank_line() is
+            let cell = _at_terminal()
+
+            assert _enter(cell, ["if x then", "    1", "fi", ""]) == CellStep.SUBMIT_QUIETLY;
+            assert cell.source =~ "if x then\n    1\nfi\n";
+        si
+
+        @Test()
+        enter__submits_a_held_cell_showing_its_value_at_a_dot() is
+            let cell = _at_terminal()
+
+            assert _enter(cell, ["if x then", "    1", "fi", "."]) == CellStep.SUBMIT;
+            assert cell.source =~ "if x then\n    1\nfi\n";
+        si
+
+        // A one-line statement typed after a held construct ends the cell,
+        // shown as a one-line statement is anywhere else.
+        @Test()
+        enter__submits_a_held_cell_when_a_one_line_statement_follows() is
+            let cell = _at_terminal()
+
+            assert _enter(cell, ["for i in xs do", "    total = total + i", "od", "total"]) == CellStep.SUBMIT;
+            assert cell.source =~ "for i in xs do\n    total = total + i\nod\ntotal\n";
+        si
+
+        @Test()
+        enter__holds_again_when_a_second_construct_closes() is
+            let cell = _at_terminal()
+
+            assert _enter(cell, ["if x then", "fi", "if y then", "fi"]) == CellStep.WAIT;
+            assert _enter(cell, [""]) == CellStep.SUBMIT_QUIETLY;
+        si
+
+        // A construct written on one line is a one-line statement.
+        @Test()
+        enter__submits_a_construct_written_on_one_line_at_once() is
+            assert _at_terminal().enter("if x then 1 else 2 fi") == CellStep.SUBMIT;
+        si
+
+        @Test()
+        enter__submits_unfinished_text_at_a_blank_line() is
+            let cell = _at_terminal()
+
+            assert _enter(cell, ["if x then", ""]) == CellStep.SUBMIT;
+            assert cell.source =~ "if x then\n";
+        si
+
+        @Test()
+        enter__submits_unfinished_text_at_a_dot() is
+            assert _enter(_at_terminal(), ["if x then", "."]) == CellStep.SUBMIT;
+        si
+
+        @Test()
+        enter__does_nothing_for_a_blank_line_or_a_dot_with_nothing_typed() is
+            let cell = _at_terminal()
+
+            assert cell.enter("") == CellStep.NOTHING;
+            assert cell.enter("   ") == CellStep.NOTHING;
+            assert cell.enter(".") == CellStep.NOTHING;
+            assert cell.is_empty;
+        si
+
+        // Only a line that is a dot and nothing else ends the cell; a line
+        // continuing a member chain is part of it.
+        @Test()
+        enter__treats_a_line_starting_with_a_dot_as_part_of_the_cell() is
+            let cell = _at_terminal()
+
+            assert _enter(cell, ["if x then", ".to_string()"]) == CellStep.WAIT;
+            assert cell.source =~ "if x then\n.to_string()\n";
+        si
+
+        @Test()
+        enter__submits_a_construct_over_several_lines_at_once_when_piped() is
+            let cell = _piped()
+
+            assert _enter(cell, ["if x then", "    1", "fi"]) == CellStep.SUBMIT;
+        si
+
+        @Test()
+        enter__submits_at_a_dot_when_piped() is
+            assert _enter(_piped(), ["if x then", "."]) == CellStep.SUBMIT;
+        si
+
+        // What is asked about is everything typed so far, the latest line
+        // included, as one text.
+        @Test()
+        enter__asks_about_every_line_typed_so_far() is
             let asked = LIST[string]()
-            let end = SUBMISSION_END(text => (asked.add(text); Completeness.COMPLETE))
+            let cell = CELL_INPUT(text => (asked.add(text); Completeness.INCOMPLETE), true)
 
-            end.is_complete(LIST[string](["let y = x +"]), "    1");
+            cell.enter("let y = x +");
+            cell.enter("    1");
 
-            assert asked.count == 1;
-            assert asked[0] =~ "let y = x +\n    1\n";
-        si
-
-        // Text that can never be finished is submitted for its errors
-        // rather than waiting for more.
-        @Test()
-        is_complete__is_true_for_invalid_text() is
-            assert SUBMISSION_END(text => Completeness.INVALID).is_complete(LIST[string](), "let = )");
+            assert asked.count == 2;
+            assert asked[1] =~ "let y = x +\n    1\n";
         si
 
         @Test()
-        is_complete__is_false_for_a_blank_line() is
-            assert !_asking(false).is_complete(LIST[string](["if x then"]), "");
-        si
+        clear__empties_a_held_cell() is
+            let cell = _at_terminal()
 
-        @Test()
-        is_forced__is_true_for_a_blank_line_after_something() is
-            assert _asking(true).is_forced(LIST[string](["if x then"]), "");
-        si
+            _enter(cell, ["if x then", "fi"]);
+            cell.clear();
 
-        @Test()
-        is_forced__is_false_for_a_blank_line_with_nothing_typed() is
-            assert !_asking(true).is_forced(LIST[string](), "");
-        si
-
-        @Test()
-        is_forced__is_false_for_a_line_with_content() is
-            assert !_asking(true).is_forced(LIST[string](["if x then"]), "fi");
+            assert cell.is_empty;
+            assert cell.enter("") == CellStep.NOTHING;
         si
     si
 si
