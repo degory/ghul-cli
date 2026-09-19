@@ -1,0 +1,86 @@
+namespace Ghul.Repl.Host is
+    use Ghul.Repl.RUN_RESULT
+
+    use System.Threading.ManualResetEventSlim
+    use System.Threading.Thread
+    use System.Threading.WaitHandle
+
+    // How a cell's run ended: with the value it ended on or the error it
+    // raised, or interrupted, when nothing it produced is kept.
+    class CELL_RUN(value: object?, error: string?, was_interrupted: bool);
+
+    // Runs one cell at a time on a thread of its own, so that the thread
+    // asking can stop waiting for it. .NET cannot stop a thread from
+    // outside, so an interrupted cell is abandoned rather than ended: it
+    // runs on in the background until it finishes or the process does,
+    // and whatever it produces then is thrown away. Its thread is a
+    // background one, so it never keeps the process alive.
+    class CELL_RUNNER is
+        // Set while a cell runs; interrupting sets it.
+        _interrupt: ManualResetEventSlim?
+
+        // Deeply recursive cells need more than a thread's default stack.
+        STACK_SIZE: int static => 64 * 1024 * 1024
+
+        init() is si
+
+        // Whether a cell is running now.
+        is_running: bool => _interrupt?
+
+        // Runs `body` to the end, or until `interrupt` is called from any
+        // thread.
+        run(body: () -> RUN_RESULT) -> CELL_RUN is
+            let interrupt = ManualResetEventSlim(false)
+            let finished = ManualResetEventSlim(false)
+
+            let outcome: RUN_RESULT? mut = null
+
+            let start: System.Threading.ThreadStart = () -> void is
+                try
+                    outcome = body()
+                catch e: System.Exception
+                    outcome = RUN_RESULT(null, e.message)
+                finally
+                    finished.set()
+                yrt
+            si
+
+            let thread = Thread(start, STACK_SIZE)
+
+            thread.is_background = true
+            thread.name = "ghul cell"
+
+            _interrupt = interrupt
+
+            try
+                thread.start()
+
+                WaitHandle.wait_any([finished.wait_handle, interrupt.wait_handle])
+            finally
+                _interrupt = null
+            yrt
+
+            if finished.is_set then
+                if let result = outcome then
+                    return CELL_RUN(result.value, result.error, false)
+                fi
+
+                return CELL_RUN(null, null, false)
+            fi
+
+            return CELL_RUN(null, null, true)
+        si
+
+        // Stops waiting for the cell running now; false when none is.
+        // Safe to call from any thread, a signal handler's included.
+        interrupt() -> bool is
+            if let current = _interrupt then
+                current.set()
+
+                return true
+            fi
+
+            return false
+        si
+    si
+si

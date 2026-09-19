@@ -311,6 +311,24 @@ namespace Ghul.Cli.Repl is
             od
         si
 
+        // For Ctrl-C, from the signal it raises: interrupts the cell running
+        // now and says the signal is dealt with. At a terminal it is dealt
+        // with regardless, since Ctrl-C does nothing when no cell runs;
+        // for other input it ends the session.
+        on_interrupt() -> bool is
+            if let session = _current /\ session.interrupt() then
+                return true
+            fi
+
+            if _editor? then
+                return true
+            fi
+
+            close()
+
+            return false
+        si
+
         // For a signal that ends the process: closes the session in use
         // now, whatever the loop is doing.
         close() is
@@ -328,6 +346,12 @@ namespace Ghul.Cli.Repl is
                 if let shown = _display.format(result.value) then
                     Std.write_line(shown)
                 fi
+            fi
+
+            if result.was_interrupted then
+                Std.error.write_line("ghul: interrupted; the cell kept its definitions, and may still be running in the background until the session ends")
+
+                return
             fi
 
             if let error = result.run_error then

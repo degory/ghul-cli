@@ -1,0 +1,75 @@
+namespace Ghul.Cli.Tests is
+    use Ghul.Repl.RUN_RESULT
+    use Ghul.Repl.Host.CELL_RUNNER
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    @TestClass()
+    class CELL_RUNNER_TESTS is
+        init() is si
+
+        @Test()
+        run__hands_back_what_the_cell_produced() is
+            let run = CELL_RUNNER().run(() => RUN_RESULT(42, null))
+
+            assert !run.was_interrupted;
+            assert cast int(run.value!) == 42;
+        si
+
+        @Test()
+        run__hands_back_the_error_a_cell_raised() is
+            let run = CELL_RUNNER().run(() => RUN_RESULT(null, "went wrong"))
+
+            assert run.error =~ "went wrong";
+        si
+
+        // A cell that never finishes is abandoned when interrupted, and the
+        // run that was waiting for it comes back straight away.
+        @Test()
+        interrupt__abandons_a_cell_that_does_not_finish() is
+            let runner = CELL_RUNNER()
+            let hang = System.Threading.ManualResetEventSlim(false)
+
+            let interrupter: System.Threading.ThreadStart = () -> void is
+                while !runner.is_running do
+                    System.Threading.Thread.sleep(5)
+                od
+
+                runner.interrupt()
+            si
+
+            System.Threading.Thread(interrupter).start()
+
+            let started = System.DateTime.utc_now
+
+            let run = runner.run(() -> RUN_RESULT is
+                hang.wait()
+
+                return RUN_RESULT(1, null)
+            si)
+
+            assert run.was_interrupted;
+            assert !run.value?;
+            assert (System.DateTime.utc_now - started).total_seconds < 10.0;
+            assert !runner.is_running;
+
+            hang.set()
+        si
+
+        @Test()
+        interrupt__is_false_with_no_cell_running() is
+            assert !CELL_RUNNER().interrupt();
+        si
+
+        // Deep recursion needs more than a default thread stack.
+        @Test()
+        run__gives_the_cell_a_deep_stack() is
+            let run = CELL_RUNNER().run(() => RUN_RESULT(_depth(200_000), null))
+
+            assert cast int(run.value!) == 200_000;
+        si
+
+        _depth(n: int) -> int => if n == 0 then 0 else 1 + _depth(n - 1) fi
+    si
+si

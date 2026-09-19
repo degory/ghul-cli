@@ -197,7 +197,7 @@ namespace Ghul.Jupyter is
             let previous_out = IO.Std.out
             let previous_error = IO.Std.error
 
-            let result mut = Ghul.Repl.Host.SUBMIT_RESULT(false, LIST[string](), null, null)
+            let result mut = Ghul.Repl.Host.SUBMIT_RESULT(false, LIST[string](), null, null, false)
 
             try
                 IO.Std.set_out(out)

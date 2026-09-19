@@ -8,11 +8,15 @@ namespace Ghul.Repl.Host is
     use System.Reflection.Assembly
 
     // What a submission did, for a front end to report.
+    // `was_interrupted` means the cell was accepted and started, then
+    // interrupted before it finished: its definitions are in the session,
+    // and it may still be running.
     class SUBMIT_RESULT(
         is_accepted: bool,
         diagnostics: Collections.List[string],
         value: object?,
-        run_error: string?
+        run_error: string?,
+        was_interrupted: bool
     );
 
     // The cells' own load context. The tool is itself a ghūl program, so
@@ -60,6 +64,7 @@ namespace Ghul.Repl.Host is
         _context: SESSION_LOAD_CONTEXT
 
         init(..) is
+            _runner = CELL_RUNNER()
             _session = SESSION(_want_default_use)
             _context = SESSION_LOAD_CONTEXT(_probe_directory)
         si
@@ -98,17 +103,28 @@ namespace Ghul.Repl.Host is
             od
 
             if !outcome.is_accepted \/ !loaded? then
-                return SUBMIT_RESULT(false, diagnostics, null, null)
+                return SUBMIT_RESULT(false, diagnostics, null, null, false)
             fi
 
             if let assembly_path = compiled.assembly_path then
                 _analysis?.add(IO.Path.get_full_path(assembly_path))
             fi
 
-            let run = CELL_ENTRY.run(loaded)
+            let run = _runner.run(() => CELL_ENTRY.run(loaded))
 
-            return SUBMIT_RESULT(true, diagnostics, run.value, run.error)
+            return SUBMIT_RESULT(true, diagnostics, run.value, run.error, run.was_interrupted)
         si
+
+        _runner: CELL_RUNNER
+
+        // Stops waiting for the cell running now, so its submit returns
+        // at once as interrupted; false when no cell is running. The cell
+        // itself is abandoned rather than ended. Safe to call from any
+        // thread.
+        interrupt() -> bool => _runner.interrupt()
+
+        // Whether a cell is running now.
+        is_running: bool => _runner.is_running
 
         _analysis: ANALYSIS_SESSION?
 
