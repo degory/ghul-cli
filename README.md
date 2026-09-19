@@ -90,8 +90,8 @@ operator with nothing after it - waits for more with a `|` prompt. Text
 that can never be finished is submitted straight away, so its errors are
 reported at once.
 
-An `if`, `case`, loop or definition written over several lines does not
-end the submission when it closes: the `|` prompt stays, and the next
+An `if`, `case`, loop, `try` or definition written over several lines
+does not end the submission when it closes: the `|` prompt stays, and the next
 line joins the same submission, as `names` does above. A line that
 finishes a statement of its own then submits the lot. A blank line
 submits whatever is there, and a line holding only `.` does the same.
@@ -158,8 +158,11 @@ A redefinition can read the value it replaces: after `let x = 10, y = 20`,
 At a terminal each line can be edited as it is typed: the arrow keys move
 along it and bring back earlier lines, Home and End (or Ctrl-A and Ctrl-E)
 go to either end, Tab completes the name being typed from everything the
-session has defined, and Ctrl-D on an empty line leaves. Input that is not a
-terminal, such as a script piped in, is read a line at a time as before.
+session has defined, Ctrl-C abandons what has been typed of a submission,
+and Ctrl-D on an empty line leaves. A block pasted in is taken as it is,
+with its own indentation and any blank lines in it, and Enter submits it.
+Input that is not a terminal, such as a script piped in, is read a line at
+a time as before.
 
 `:help` lists the commands, `:reset` starts a fresh session, and `:quit`
 leaves. `:complete TEXT` lists what could follow TEXT, and `:hover TEXT`

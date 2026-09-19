@@ -27,13 +27,12 @@ namespace Ghul.Cli.Repl is
     // nothing after it - waits for another line, and text that can never
     // be finished is submitted straight away so its errors are reported.
     //
-    // Finished text ending on a statement that took one line is submitted
-    // at once. At a terminal, finished text ending on a statement that took
-    // several lines - an if, a case, a loop, a definition - is not: the
-    // cell stays open for more. A blank line then submits it without
-    // showing a value, and a line holding only `.` submits it showing
-    // the value it ends on. Read from anything else, finished text is
-    // always submitted at once.
+    // Finished text is submitted at once, with one exception at a
+    // terminal: text ending on an if, a case, a loop, a try or a
+    // definition written over several lines keeps the cell open for more.
+    // A blank line then submits it without showing a value, and a line
+    // holding only `.` submits it showing the value it ends on. Read from
+    // anything else, finished text is always submitted at once.
     //
     // A blank line submits unfinished text regardless, and so does a
     // `.` line. Neither is part of the cell.
@@ -41,8 +40,11 @@ namespace Ghul.Cli.Repl is
         _lines: LIST[string]
 
         // Whether the lines so far are finished text ending on a
-        // statement that took several lines.
+        // construct over several lines that holds the cell open.
         _is_held: bool
+
+        // Where the statement the latest line belongs to starts.
+        _statement_start: int
 
         is_empty: bool => _lines.count == 0
 
@@ -73,8 +75,7 @@ namespace Ghul.Cli.Repl is
 
             let was_finished = is_empty \/ _is_held
 
-            _lines.add(line)
-            _is_held = false
+            _add(line)
 
             case _check(source)
             when Completeness.INCOMPLETE then
@@ -82,7 +83,7 @@ namespace Ghul.Cli.Repl is
             when Completeness.INVALID then
                 return CellStep.SUBMIT
             else
-                if !_is_interactive \/ was_finished then
+                if !_is_interactive \/ was_finished \/ !HELD_CONSTRUCT.starts(_lines, _statement_start) then
                     return CellStep.SUBMIT
                 fi
 
@@ -92,9 +93,93 @@ namespace Ghul.Cli.Repl is
             esac
         si
 
+        // A line pasted as part of a block, taken as it is: it neither
+        // submits nor holds, and whatever is entered after the paste
+        // decides that for the whole cell.
+        append(line: string) is
+            _add(line)
+        si
+
+        _add(line: string) is
+            if is_empty \/ _is_held then
+                _statement_start = _lines.count
+            fi
+
+            _lines.add(line)
+            _is_held = false
+        si
+
         clear() is
             _lines.clear()
             _is_held = false
+            _statement_start = 0
+        si
+    si
+
+    // Whether a statement over several lines is one that holds the cell
+    // open when it closes: an if, a case, a loop, a try, or a
+    // definition. Anything else - a let, an assignment, a call spread
+    // over lines - is submitted as soon as it is finished.
+    class HELD_CONSTRUCT is
+        init() is si
+
+        _openers: string[] static => ["if", "case", "for", "while", "do", "try"]
+
+        _definitions: string[] static => [
+            "class", "struct", "trait", "union", "enum", "namespace", "partial", "impl"
+        ]
+
+        starts(lines: Collections.List[string], start: int) -> bool static is
+            let i mut = start
+
+            // Pragmas written above a definition belong to it.
+            while i < lines.count /\ (lines[i].trim().starts_with("@") \/ lines[i].trim().length == 0) do
+                i = i + 1
+            od
+
+            if i >= lines.count then
+                return false
+            fi
+
+            let first = lines[i].trim()
+            let word mut = INDENTATION.first_word(first)
+
+            // A labelled loop: `outer: for ...`.
+            if first.length > word.length /\ first[word.length] == ':' then
+                word = INDENTATION.first_word(first.substring(word.length + 1))
+            fi
+
+            for opener in _openers do
+                if word =~ opener then
+                    return true
+                fi
+            od
+
+            for definition in _definitions do
+                if word =~ definition then
+                    return true
+                fi
+            od
+
+            return _is_function_definition(first, word)
+        si
+
+        // A named function or method: a name and a parameter list, with
+        // the line ending on the body's `is` or `=>`, or a return type.
+        _is_function_definition(first: string, word: string) -> bool static is
+            if word.length == 0 \/ first.length <= word.length then
+                return false
+            fi
+
+            let after = first[word.length]
+
+            if after != '(' /\ after != '[' then
+                return false
+            fi
+
+            let code = first.trim_end()
+
+            return code.ends_with(" is") \/ code.ends_with("=>") \/ code.contains(") ->")
         si
     si
 
@@ -158,7 +243,15 @@ namespace Ghul.Cli.Repl is
                     break loop
                 fi
 
-                if _cell.is_empty /\ line.trim().starts_with(":") then
+                // Ctrl-C at the prompt abandons what has been typed of the
+                // cell, and the session carries on.
+                if _reader.was_interrupted then
+                    _cell.clear()
+
+                    continue
+                fi
+
+                if _cell.is_empty /\ !line.contains('\n') /\ line.trim().starts_with(":") then
                     case line.trim()
                     when ":quit", ":q" then
                         break loop
@@ -185,7 +278,16 @@ namespace Ghul.Cli.Repl is
                     continue
                 fi
 
-                let step = _cell.enter(line)
+                // A pasted block arrives as several lines at once: those
+                // before the last are taken as they are, and the last is
+                // entered like any typed line.
+                let parts = line.split(['\n'])
+
+                for i in 0..parts.count - 1 do
+                    _cell.append(parts[i])
+                od
+
+                let step = _cell.enter(parts[parts.count - 1])
 
                 if step == CellStep.NOTHING \/ step == CellStep.WAIT then
                     continue
@@ -199,6 +301,7 @@ namespace Ghul.Cli.Repl is
             od
 
             session.close()
+            _reader.close()
 
             return 0
         si
@@ -288,7 +391,7 @@ namespace Ghul.Cli.Repl is
             Std.write_line("")
             Std.write_line("a line that finishes what you have typed submits it; one that leaves")
             Std.write_line("something open waits for more, and a blank line submits regardless")
-            Std.write_line("an if, case, loop or definition that takes several lines does not end")
+            Std.write_line("an if, case, loop, try or definition that takes several lines does not end")
             Std.write_line("the submission: keep typing, or end it with a blank line")
             Std.write_line("a line holding only . ends the submission and shows what it ended on")
             Std.write_line("what you end on is shown, unless you end on a statement or with a blank line")

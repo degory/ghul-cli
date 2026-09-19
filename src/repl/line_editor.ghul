@@ -4,8 +4,16 @@ namespace Ghul.Cli.Repl is
 
     // How the terminal reads one line of a submission. `before` is what
     // has been typed of the submission so far, the lines ahead of this one.
+    // A pasted block comes back as several lines joined with newlines, and
+    // null means the input has ended.
     trait LineReader is
         read_line(prompt: string, before: Collections.List[string]) -> string?;
+
+        // Whether the last read ended with the user abandoning the cell.
+        was_interrupted: bool;
+
+        // Leaves the terminal as it was found.
+        close();
     si
 
     // A line at a time from standard input, as typed: for input that is
@@ -18,6 +26,10 @@ namespace Ghul.Cli.Repl is
 
             return Std.read_line()
         si
+
+        was_interrupted: bool => false
+
+        close() is si
     si
 
     // The line being edited, and where in it the cursor is.
@@ -197,11 +209,40 @@ namespace Ghul.Cli.Repl is
     class CONSOLE_EDITOR(_complete: (string, int, int) -> Collections.List[string]?, _palette: PALETTE?): LineReader is
         _history: LINE_HISTORY
 
+        was_interrupted: bool
+
         init(..) is
             _history = LINE_HISTORY()
+
+            // Pasted text arrives between markers, so it can be told
+            // apart from typing.
+            Std.write("{_escape}[?2004h")
         si
 
+        _escape: char static => cast char(27)
+
         read_line(prompt: string, before: Collections.List[string]) -> string? is
+            // Ctrl-C is read as a key while a line is edited, rather than
+            // ending the process.
+            let was_control_c_input = Std.treat_control_c_as_input
+
+            Std.treat_control_c_as_input = true
+
+            try
+                return _read_line(prompt, before)
+            finally
+                Std.treat_control_c_as_input = was_control_c_input
+            yrt
+        si
+
+        // The terminal back as it was found, for when the session ends.
+        close() is
+            Std.write("{_escape}[?2004l")
+        si
+
+        _read_line(prompt: string, before: Collections.List[string]) -> string? is
+            was_interrupted = false
+
             let buffer = LINE_BUFFER()
             let expected = INDENTATION.for_next_line(before)
 
@@ -211,17 +252,66 @@ namespace Ghul.Cli.Repl is
             // line keeps whatever indent it is given.
             let is_indent_automatic mut = true
 
-            _redraw(prompt, buffer, before)
+            // Whole lines of a pasted block, ahead of the line being
+            // edited, and what they and the lines before them read as.
+            let pasted = LIST[string]()
+            let context = LIST[string](before)
+            let prompt_now mut = prompt
+
+            _redraw(prompt_now, buffer, context)
 
             do
                 let key = Std.read_key(true)
                 let is_control = (key.modifiers & System.ConsoleModifiers.CONTROL) == System.ConsoleModifiers.CONTROL
+
+                if is_control /\ key.key == System.ConsoleKey.C then
+                    Std.write_line("^C")
+
+                    was_interrupted = true
+
+                    return ""
+                fi
+
+                if key.key == System.ConsoleKey.ESCAPE /\ _follows("[200~") then
+                    let text = _read_paste()
+                    let lines = text.split(['\n'])
+
+                    if buffer.text.trim().length == 0 then
+                        buffer.replace("")
+                    fi
+
+                    buffer.insert(lines[0])
+
+                    for i in 1..lines.count do
+                        _redraw(prompt_now, buffer, context)
+                        Std.write_line("")
+
+                        pasted.add(buffer.text)
+                        context.add(buffer.text)
+
+                        prompt_now = "| "
+
+                        buffer.replace(lines[i])
+                    od
+
+                    is_indent_automatic = false
+
+                    _redraw(prompt_now, buffer, context)
+
+                    continue
+                fi
 
                 case key.key
                 when System.ConsoleKey.ENTER then
                     Std.write_line("")
 
                     _history.add(buffer.text)
+
+                    if pasted.count > 0 then
+                        pasted.add(buffer.text)
+
+                        return pasted |> Ghul.Pipes.join("\n")
+                    fi
 
                     return buffer.text
                 when System.ConsoleKey.BACKSPACE then
@@ -253,7 +343,7 @@ namespace Ghul.Cli.Repl is
                         buffer.replace(recalled)
                     fi
                 when System.ConsoleKey.TAB then
-                    _complete_at(prompt, buffer, before)
+                    _complete_at(prompt_now, buffer, context)
                 else
                     if is_control /\ key.key == System.ConsoleKey.A then
                         buffer.home()
@@ -276,7 +366,54 @@ namespace Ghul.Cli.Repl is
                     buffer.reindent(expected)
                 fi
 
-                _redraw(prompt, buffer, before)
+                _redraw(prompt_now, buffer, context)
+            od
+        si
+
+        // Whether the keys waiting to be read are `expected`, which they
+        // are only when a terminal sent them together; anything else
+        // waiting is consumed with them.
+        _follows(expected: string) -> bool is
+            for c in expected do
+                if !_key_arrives_soon() then
+                    return false
+                fi
+
+                if Std.read_key(true).key_char != c then
+                    return false
+                fi
+            od
+
+            return true
+        si
+
+        _key_arrives_soon() -> bool is
+            for i in 0..20 do
+                if Std.key_available then
+                    return true
+                fi
+
+                System.Threading.Thread.sleep(1)
+            od
+
+            return false
+        si
+
+        // The text of a paste, up to the marker that ends it, with every
+        // line break as a newline.
+        _read_paste() -> string is
+            let text = System.Text.StringBuilder()
+            let end_marker = "{_escape}[201~"
+
+            do
+                let key = Std.read_key(true)
+                let c = if key.key == System.ConsoleKey.ENTER then '\n' else key.key_char fi
+
+                text.append(c)
+
+                if text.length >= end_marker.length /\ text.to_string().ends_with(end_marker, System.StringComparison.ORDINAL) then
+                    return text.to_string(0, text.length - end_marker.length).replace("\r\n", "\n").replace('\r', '\n')
+                fi
             od
         si
 
