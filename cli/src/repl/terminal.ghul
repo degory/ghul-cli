@@ -482,8 +482,14 @@ namespace Ghul.Cli.Repl is
             fi
         si
 
+        // The names that could complete the one being typed at a line and
+        // column of text, both from 1.
         _names(text: string, line: int, column: int) -> Collections.List[string]? is
-            let offered = _current?.complete(text, line, column)
+            let lines = text.split(['\n'])
+            let line_text = if line >= 1 /\ line <= lines.count then lines[line - 1] else "" fi
+            let typed = COMPLETION_QUERY.prefix(line_text, column - 1)
+
+            let offered = _current?.complete(text, line, column - typed.length)
 
             if !offered? then
                 return null
@@ -495,22 +501,12 @@ namespace Ghul.Cli.Repl is
                 names.add(item.name)
             od
 
-            names.sort(System.StringComparer.ordinal)
-
-            return names
+            return COMPLETION_QUERY.narrow(names, typed)
         si
 
         // What could follow some text, one name to a line.
         _complete(session: HOSTED_SESSION, text: string) is
-            if let offered = session.complete(text, 1, text.length + 1) then
-                let names = LIST[string]()
-
-                for item in offered do
-                    names.add(item.name)
-                od
-
-                names.sort(System.StringComparer.ordinal)
-
+            if let names = _names(text, 1, text.length + 1) then
                 for name in names do
                     Std.write_line(name)
                 od
@@ -553,6 +549,9 @@ namespace Ghul.Cli.Repl is
             Std.write_line("a line ending in a lone \\ keeps the submission open; the \\ is dropped")
             Std.write_line("Up and Down move between lines, then to earlier submissions; Ctrl-D in an")
             Std.write_line("empty submission leaves")
+            Std.write_line("Ctrl-Left and Ctrl-Right (or Alt-B and Alt-F) move by a word; Ctrl-U and")
+            Std.write_line("Ctrl-K delete to the start or end of the line, Ctrl-W the word before the")
+            Std.write_line("cursor; Ctrl-L clears the screen; Tab completes, listing the names on offer")
             Std.write_line("Ctrl-C while a submission runs interrupts it; the session carries on")
             Std.write_line("what you end on is shown, unless you end on a statement or with a blank line")
             Std.write_line("messages call a cell cell-3; in code it is cell3, as in cell3.x")

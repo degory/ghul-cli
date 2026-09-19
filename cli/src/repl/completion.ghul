@@ -1,0 +1,71 @@
+namespace Ghul.Cli.Repl is
+    use Collections.LIST
+
+    // Asking for completions of a name partly typed. The analyser is asked
+    // at the start of the name rather than after it, where what follows a
+    // `.` is answered as a member access, and the answer is narrowed here
+    // to the names that start with what has been typed.
+    class COMPLETION_QUERY is
+        init() is si
+
+        // The part of a name that ends at `column` (from 0) of `line`.
+        prefix(line: string, column: int) -> string static is
+            let end = System.Math.clamp(column, 0, line.length)
+            let start mut = end
+
+            while start > 0 /\ (char.is_letter_or_digit(line[start - 1]) \/ line[start - 1] == '_') do
+                start = start - 1
+            od
+
+            return line.substring(start, end - start)
+        si
+
+        // The names on offer that extend `typed`, each once, in order.
+        narrow(names: Collections.Iterable[string], typed: string) -> LIST[string] static is
+            let result = LIST[string]()
+            let seen = Collections.SET[string]()
+
+            for name in names do
+                if name.starts_with(typed, System.StringComparison.ORDINAL) /\ seen.add(name) then
+                    result.add(name)
+                fi
+            od
+
+            result.sort(System.StringComparer.ordinal)
+
+            return result
+        si
+
+        // `names` laid out in columns across `width`, at most `rows` rows,
+        // with a last line saying how many more there are.
+        columns(names: Collections.List[string], width: int, rows: int) -> LIST[string] static is
+            let lines = LIST[string]()
+
+            if names.count == 0 then
+                return lines
+            fi
+
+            let widest = names |> Ghul.Pipes.map(n => n.length) |> Ghul.Pipes.reduce(0, (a, b) => System.Math.max(a, b))
+            let cell = widest + 2
+            let per_row = System.Math.max(1, width / cell)
+            let shown = System.Math.min(names.count, per_row * rows)
+
+            let row = System.Text.StringBuilder()
+
+            for i in 0..shown do
+                row.append(names[i].pad_right(cell))
+
+                if (i + 1) % per_row == 0 \/ i == shown - 1 then
+                    lines.add(row.to_string().trim_end())
+                    row.clear()
+                fi
+            od
+
+            if shown < names.count then
+                lines.add("and {names.count - shown} more")
+            fi
+
+            return lines
+        si
+    si
+si

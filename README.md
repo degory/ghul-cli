@@ -197,8 +197,12 @@ open whatever it holds, and the `\` is dropped; a `\` ending a longer
 operator, such as `/\`, is part of the code. That works for input that is
 not a terminal too. Backspace at the start of a line
 joins it to the one above. Home and End (or Ctrl-A and Ctrl-E) go to either
-end of a line, Tab completes the name being typed from everything the session
-has defined, and Ctrl-D in an empty one leaves. Ctrl-C at the prompt does
+end of a line, Ctrl-Left and Ctrl-Right (or Alt-B and Alt-F) move by a word,
+Ctrl-U and Ctrl-K delete to the start or end of the line, Ctrl-W deletes the
+word before the cursor, and Ctrl-L clears the screen. Tab completes the name
+being typed from everything the session has defined; where more than one name
+fits, it writes in as much as they share and lists them below the
+submission. Ctrl-D in an empty submission leaves. Ctrl-C at the prompt does
 nothing; while a submission is running, Ctrl-C interrupts it and brings the
 prompt back with the session intact. .NET cannot stop a running thread from
 outside, so an interrupted submission is abandoned rather than ended: it
