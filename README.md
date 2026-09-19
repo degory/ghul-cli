@@ -163,7 +163,12 @@ written the same way as a cell's value, at the point the cell reaches the call.
 In a notebook, `display(value, id)` shows the value under an id, and
 `update_display(value, id)` replaces what that id shows. A terminal cannot
 redraw a line it has already written, so there `update_display` writes the new
-value as another line.
+value as another line. `display` and `update_display` come from the ghūl
+runtime, so a session offers them when its compiler ships ghul.runtime
+21.11.0 or newer.
+
+In a notebook, a value that offers an image through `Ghul.Renderable`, such as
+a ghul.raster `IMAGE`, shows as that image beside its text.
 
 ### cell numbers
 
