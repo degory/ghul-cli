@@ -28,12 +28,19 @@ namespace Ghul.Jupyter is
         _iopub: CHANNEL
         _stdin: CHANNEL
 
+        // Control is read on a thread of its own, so that an interrupt
+        // arrives while a cell is running rather than after it. Both
+        // threads publish, and a NetMQ socket belongs to one thread at a
+        // time, so every send on iopub goes through this.
+        _iopub_lock: object
+
         init(..) is
             _messages = MESSAGES("{System.Guid.new_guid()}")
             _display = CELL_DISPLAY()
             _signer = SIGNER(_connection.key)
             _execution_count = 0
             _is_running = true
+            _iopub_lock = object()
 
             _shell = CHANNEL("shell", NetMQ.Sockets.RouterSocket("@{_connection.shell_address}"), _signer)
             _control = CHANNEL("control", NetMQ.Sockets.RouterSocket("@{_connection.control_address}"), _signer)
@@ -68,18 +75,31 @@ namespace Ghul.Jupyter is
             _publish(null, "status", CONTENT.status("starting"))
             _publish(null, "status", CONTENT.status("idle"))
 
-            // Control first on every turn: it carries shutdown and
-            // interrupt, which a front end sends precisely when the
-            // shell channel is busy.
             let wait = System.TimeSpan.from_milliseconds(50L)
 
-            while _is_running do
-                _handle(_control, wait)
+            // Control carries shutdown and interrupt, which a front end
+            // sends precisely when the shell channel is busy running the
+            // cell they are about to stop. Reading it on the same thread
+            // would leave an interrupt in the socket until the cell it
+            // meant to interrupt had finished.
+            let control_thread =
+                System.Threading.Thread(
+                    System.Threading.ThreadStart(
+                        () -> void is
+                            while _is_running do
+                                _handle(_control, wait)
+                            od
+                        si))
 
-                if _is_running then
-                    _handle(_shell, wait)
-                fi
+            control_thread.is_background = true
+
+            control_thread.start()
+
+            while _is_running do
+                _handle(_shell, wait)
             od
+
+            control_thread.join()
 
             heartbeat.stop()
             parent_watch.stop()
@@ -147,9 +167,11 @@ namespace Ghul.Jupyter is
 
                 _is_running = false
             when "interrupt_request" then
-                // Nothing to interrupt between cells, and a cell runs to
-                // the end on this thread. Answering keeps the front end
-                // from waiting for a reply that never comes.
+                // False means no cell was running, which is what the
+                // stop button on an idle kernel asks. Either way the
+                // front end gets its reply.
+                let _ = _session.interrupt()
+
                 channel.send(_messages.reply(request, "interrupt_reply", CONTENT.ok()))
             else
                 // A kernel is not required to implement everything, and
@@ -225,6 +247,22 @@ namespace Ghul.Jupyter is
                         request,
                         "execute_reply",
                         CONTENT.execute_reply_error(_execution_count, name, value)))
+
+                return
+            fi
+
+            if result.was_interrupted then
+                let name = "KeyboardInterrupt"
+
+                if !silent then
+                    _publish(request, "error", CONTENT.error(name, INTERRUPTED_NOTE, LIST[string]([INTERRUPTED_NOTE])))
+                fi
+
+                channel.send(
+                    _messages.reply(
+                        request,
+                        "execute_reply",
+                        CONTENT.execute_reply_error(_execution_count, name, INTERRUPTED_NOTE)))
 
                 return
             fi
@@ -351,8 +389,22 @@ namespace Ghul.Jupyter is
         si
 
         _publish(parent: MESSAGE?, msg_type: string, content: string) is
-            _iopub.send(_messages.published(parent, msg_type, content))
+            let message = _messages.published(parent, msg_type, content)
+
+            System.Threading.Monitor.enter(_iopub_lock)
+
+            try
+                _iopub.send(message)
+            finally
+                System.Threading.Monitor.exit(_iopub_lock)
+            yrt
         si
+
+        // What an interrupted cell is told. The cell was accepted and
+        // started, so its definitions are in the session; .NET cannot
+        // stop a thread, so the run itself may carry on unseen.
+        INTERRUPTED_NOTE: string static =>
+            "interrupted; the cell kept its definitions, and may still be running in the background until the session ends"
 
         _int_member(content: string, name: string) -> int static is
             try
