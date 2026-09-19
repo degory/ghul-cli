@@ -177,6 +177,18 @@ Messages name a submission by its label, `cell-3` for the third. Its name
 in code is `cell3`, which is what `cell3.x` reaches an earlier submission's
 `x` through.
 
+An error or warning in a submission is shown with the line it points at and
+carets under the part it means, in red or yellow at a terminal with colour.
+The same message at several places on one line is shown once, with a caret
+under each:
+
+```
+5> nope + nope
+cell-5: 1,1..1,5: error: symbol not found: nope
+ 1 | nope + nope
+   | ^^^^   ^^^^
+```
+
 Redefining something replaces it going forward, rather than editing what has
 already run: a later cell sees the new one, and code compiled earlier keeps
 the behaviour it was compiled against. Redefining at a new type is allowed,
