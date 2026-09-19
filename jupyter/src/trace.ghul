@@ -10,7 +10,8 @@ namespace Ghul.Jupyter is
         // The kernel swaps IO.Std.error for a writer that publishes what
         // a running cell writes, so tracing through it would trace the
         // publication of its own trace line and never stop. This is the
-        // real stderr, taken once and kept.
+        // real stderr, taken once and kept - and synchronized, because
+        // shell and control both trace and a writer holds one buffer.
         _stderr: IO.TextWriter static
 
         init() static is
@@ -20,7 +21,7 @@ namespace Ghul.Jupyter is
 
             writer.auto_flush = true
 
-            _stderr = writer
+            _stderr = IO.TextWriter.synchronized(writer)
         si
 
         is_enabled: bool static => _is_enabled
