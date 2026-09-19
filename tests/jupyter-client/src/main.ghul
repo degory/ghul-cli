@@ -239,6 +239,10 @@ namespace Ghul.Jupyter.Tests is
             JSON.string_member(broken.reply_content, "status") =~ "error",
             "and its execute_reply says error")
 
+        client.check(
+            _traceback(broken.published).contains("^^^"),
+            "and its traceback shows the line it points at, with carets under it")
+
         Std.write_line("the session survives it:")
 
         _execute(client, "add(x)\n", "42")
@@ -484,6 +488,24 @@ namespace Ghul.Jupyter.Tests is
         for message in published do
             if message.msg_type =~ "execute_result" then
                 return _plain_text(message.content)
+            fi
+        od
+
+        return ""
+    si
+
+    // The traceback of the first error published, a line to a line.
+    _traceback(published: Collections.List[MESSAGE]) -> string is
+        for message in published do
+            if message.msg_type =~ "error" then
+                let document = System.Text.Json.JsonDocument.parse(message.content, _)
+                let lines = LIST[string]()
+
+                for line in document.root_element.get_property("traceback").enumerate_array() do
+                    lines.add(line.get_string() ?? "")
+                od
+
+                return lines |> Ghul.Pipes.join("\n")
             fi
         od
 

@@ -1,8 +1,14 @@
-namespace Ghul.Cli.Repl is
+namespace Ghul.Repl is
     use Collections.LIST
 
-    use Ghul.Repl.CELL_DIAGNOSTIC
-    use Ghul.Repl.CELL_LOCATION
+    // How a front end colours what DIAGNOSTIC_VIEW writes: text in the
+    // colour for a diagnostic of some severity, and a line of the cell's
+    // source as code. A front end with no colour passes none.
+    trait DiagnosticColours open is
+        severity(severity: string, text: string) -> string
+
+        code(line: string) -> string
+    si
 
     // A cell's diagnostics as the terminal shows them: each one's line as
     // the compiler wrote it, then the line of the cell it points at with
@@ -13,7 +19,7 @@ namespace Ghul.Cli.Repl is
     class DIAGNOSTIC_VIEW is
         init() is si
 
-        lines(diagnostics: Collections.List[string], label: string, source: string, palette: PALETTE?) -> LIST[string] static is
+        lines(diagnostics: Collections.List[string], label: string, source: string, colours: DiagnosticColours?) -> LIST[string] static is
             let source_lines = source.trim_end().split(['\n'])
             let groups = LIST[DIAGNOSTIC_GROUP]()
             let seen = Collections.SET[string]()
@@ -42,10 +48,10 @@ namespace Ghul.Cli.Repl is
             let result = LIST[string]()
 
             for group in groups do
-                result.add(_header(group, palette))
+                result.add(_header(group, colours))
 
                 if let at = group.at then
-                    _excerpt(source_lines[at.start_line - 1], at.start_line, group, palette, result)
+                    _excerpt(source_lines[at.start_line - 1], at.start_line, group, colours, result)
                 fi
             od
 
@@ -69,11 +75,11 @@ namespace Ghul.Cli.Repl is
             return CELL_LOCATION(location.path, location.start_line, location.start_column, location.start_line, end_column)
         si
 
-        _header(group: DIAGNOSTIC_GROUP, palette: PALETTE?) -> string static is
+        _header(group: DIAGNOSTIC_GROUP, colours: DiagnosticColours?) -> string static is
             let text = group.text
             let severity = group.diagnostic.severity
 
-            if !palette? \/ severity.length == 0 then
+            if !colours? \/ severity.length == 0 then
                 return text
             fi
 
@@ -86,10 +92,10 @@ namespace Ghul.Cli.Repl is
 
             let start = at + 2
 
-            return "{text.substring(0, start)}{palette.severity(severity, severity)}{text.substring(start + severity.length)}"
+            return "{text.substring(0, start)}{colours.severity(severity, severity)}{text.substring(start + severity.length)}"
         si
 
-        _excerpt(line: string, number: int, group: DIAGNOSTIC_GROUP, palette: PALETTE?, result: LIST[string]) static is
+        _excerpt(line: string, number: int, group: DIAGNOSTIC_GROUP, colours: DiagnosticColours?, result: LIST[string]) static is
             let gutter = number.to_string()
             let blank = string(' ', gutter.length)
             let carets = System.Text.StringBuilder()
@@ -107,8 +113,8 @@ namespace Ghul.Cli.Repl is
                 fi
             od
 
-            let shown_line = if let p = palette then p.paint(line, GHUL_LEXER.spans(line)) else line fi
-            let shown_carets = if let p = palette then p.severity(group.diagnostic.severity, carets.to_string()) else carets.to_string() fi
+            let shown_line = if let c = colours then c.code(line) else line fi
+            let shown_carets = if let c = colours then c.severity(group.diagnostic.severity, carets.to_string()) else carets.to_string() fi
 
             result.add(" {gutter} | {shown_line}".trim_end())
             result.add(" {blank} | {shown_carets}")

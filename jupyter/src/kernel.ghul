@@ -180,6 +180,12 @@ namespace Ghul.Jupyter is
             esac
         si
 
+        // Diagnostics as the terminal shows them: each with the line of the
+        // cell it points at and carets under it, coloured as a notebook
+        // renders a traceback.
+        _diagnostic_lines(diagnostics: Collections.List[string], label: string, code: string) -> Collections.List[string] =>
+            Ghul.Repl.DIAGNOSTIC_VIEW.lines(diagnostics, label, code, ANSI_DIAGNOSTIC_COLOURS())
+
         _execute(channel: CHANNEL, request: MESSAGE) is
             let code = JSON.string_member(request.content, "code") ?? ""
             let silent = JSON.bool_member(request.content, "silent", false)
@@ -219,6 +225,8 @@ namespace Ghul.Jupyter is
             let previous_out = IO.Std.out
             let previous_error = IO.Std.error
 
+            let label = "cell-{_session.next_cell_number}"
+
             let result mut = Ghul.Repl.Host.SUBMIT_RESULT(false, LIST[string](), null, null, false)
 
             try
@@ -239,7 +247,7 @@ namespace Ghul.Jupyter is
                 let value = "the cell did not compile"
 
                 if !silent then
-                    _publish(request, "error", CONTENT.error(name, value, result.diagnostics))
+                    _publish(request, "error", CONTENT.error(name, value, _diagnostic_lines(result.diagnostics, label, code)))
                 fi
 
                 channel.send(
@@ -273,19 +281,21 @@ namespace Ghul.Jupyter is
                 _publish(
                     request,
                     "stream",
-                    CONTENT.stream("stderr", "{result.diagnostics |> Ghul.Pipes.join("\n")}\n"))
+                    CONTENT.stream("stderr", "{_diagnostic_lines(result.diagnostics, label, code) |> Ghul.Pipes.join("\n")}\n"))
             fi
 
             if let error = result.run_error then
+                let thrown = ERROR_TRACEBACK.name_and_message(error)
+
                 if !silent then
-                    _publish(request, "error", CONTENT.error("Exception", error, LIST[string]([error])))
+                    _publish(request, "error", CONTENT.error(thrown.name, thrown.message, ERROR_TRACEBACK.of_exception(error)))
                 fi
 
                 channel.send(
                     _messages.reply(
                         request,
                         "execute_reply",
-                        CONTENT.execute_reply_error(_execution_count, "Exception", error)))
+                        CONTENT.execute_reply_error(_execution_count, thrown.name, thrown.message)))
 
                 return
             fi

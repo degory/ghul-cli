@@ -1,7 +1,7 @@
 namespace Ghul.Cli.Tests is
     use Collections.LIST
 
-    use Ghul.Cli.Repl.DIAGNOSTIC_VIEW
+    use Ghul.Repl.DIAGNOSTIC_VIEW
 
     use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
     use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;

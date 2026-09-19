@@ -328,4 +328,12 @@ namespace Ghul.Cli.Repl is
             yrt
         si
     si
+
+    // A terminal's colours for DIAGNOSTIC_VIEW: its theme's error and
+    // warning colours, and the cell's source coloured as it was typed.
+    class PALETTE_DIAGNOSTIC_COLOURS(_palette: PALETTE): Ghul.Repl.DiagnosticColours is
+        severity(severity: string, text: string) -> string => _palette.severity(severity, text)
+
+        code(line: string) -> string => _palette.paint(line, GHUL_LEXER.spans(line))
+    si
 si
