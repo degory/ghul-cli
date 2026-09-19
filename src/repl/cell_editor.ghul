@@ -14,8 +14,8 @@ namespace Ghul.Cli.Repl is
     // says; Alt-Enter always inserts a line. Backspace at the start of a
     // line joins it to the one above, and Delete at the end of one joins
     // the next. Home and End (or Ctrl-A and Ctrl-E) go to either end of a
-    // line, Tab completes, a paste is taken as it is, Ctrl-C abandons the
-    // cell, and Ctrl-D in an empty cell ends the input.
+    // line, Tab completes, a paste is taken as it is, and Ctrl-D in an
+    // empty cell ends the input. Ctrl-C does nothing here.
     class CELL_EDITOR(
         _complete: (string, int, int) -> Collections.List[string]?,
         _palette: PALETTE?,
@@ -32,7 +32,7 @@ namespace Ghul.Cli.Repl is
         _top: int
 
         init(..) is
-            _history = LINE_HISTORY()
+            _history = LINE_HISTORY(HISTORY_STORE(HISTORY_STORE.default_path(), 1000))
             _buffer = CELL_BUFFER()
 
             // Pasted text arrives between markers, so it can be told apart
@@ -47,8 +47,7 @@ namespace Ghul.Cli.Repl is
             Std.write("{_escape}[?2004l")
         si
 
-        // The next cell, or null when the input has ended. An abandoned
-        // cell comes back as a step of NOTHING.
+        // The next cell, or null when the input has ended.
         read_cell() -> CELL_READ? is
             // Ctrl-C is read as a key while a cell is edited, rather than
             // ending the process.
@@ -78,10 +77,10 @@ namespace Ghul.Cli.Repl is
                 let is_control = (modifiers & System.ConsoleModifiers.CONTROL) == System.ConsoleModifiers.CONTROL
                 let is_alt = (modifiers & System.ConsoleModifiers.ALT) == System.ConsoleModifiers.ALT
 
+                // Ctrl-C stops a running cell and nothing else: at the
+                // prompt it leaves the cell as it is.
                 if is_control /\ key.key == System.ConsoleKey.C then
-                    _finish("^C")
-
-                    return CELL_READ("", CellStep.NOTHING, false)
+                    continue
                 fi
 
                 // A terminal sends Alt-Enter as Escape then Enter, and a

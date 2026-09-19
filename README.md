@@ -157,13 +157,15 @@ A redefinition can read the value it replaces: after `let x = 10, y = 20`,
 
 At a terminal the whole submission is edited in place, however many lines
 it has. Up and Down move between its lines, and past the first or last line
-bring back earlier submissions, each as a whole. Enter on the last line
+bring back earlier submissions, each as a whole, including those of earlier
+sessions: the last thousand are kept in `$XDG_STATE_HOME/ghul-cli/history`
+(`~/.local/state/ghul-cli/history` when `XDG_STATE_HOME` is not set). Enter on the last line
 submits or waits for more as described above; Enter on an earlier line, or
 Alt-Enter anywhere, starts a new line there. Backspace at the start of a line
 joins it to the one above. Home and End (or Ctrl-A and Ctrl-E) go to either
 end of a line, Tab completes the name being typed from everything the session
-has defined, Ctrl-C abandons the submission, and Ctrl-D in an empty one
-leaves. A block pasted in is taken as it is, with its own indentation and any
+has defined, and Ctrl-D in an empty one leaves. Ctrl-C at the prompt does
+nothing. A block pasted in is taken as it is, with its own indentation and any
 blank lines in it. A mistake inside an `if`, a loop or a definition is
 reported once the block is closed rather than as soon as it is typed, so the
 closing lines stay part of the same submission.

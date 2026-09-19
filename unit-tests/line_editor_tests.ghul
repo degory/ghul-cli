@@ -2,6 +2,7 @@ namespace Ghul.Cli.Tests is
     use Collections.LIST
 
     use Ghul.Cli.Repl.CELL_BUFFER
+    use Ghul.Cli.Repl.HISTORY_STORE
     use Ghul.Cli.Repl.LINE_HISTORY
 
     use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
@@ -147,6 +148,69 @@ namespace Ghul.Cli.Tests is
 
             assert history.previous() =~ "one";
             assert !history.previous()?;
+        si
+    si
+
+    @TestClass()
+    class HISTORY_STORE_TESTS is
+        init() is si
+
+        _path() -> string => IO.Path.combine(IO.Path.get_temp_path(), "ghul-cli-history-{System.Guid.new_guid()}", "history")
+
+        @Test()
+        encode_and_decode__round_trip_line_breaks_and_backslashes() is
+            let cell = "if x then\n    \"a\\n\"\nfi"
+            let encoded = HISTORY_STORE.encode(cell)
+
+            assert !encoded.contains('\n');
+            assert HISTORY_STORE.decode(encoded) =~ cell;
+        si
+
+        @Test()
+        append_and_load__carry_cells_to_a_later_session() is
+            let path = _path()
+
+            try
+                let first = LINE_HISTORY(HISTORY_STORE(path, 10))
+
+                first.add("let a = 1")
+                first.add("if a > 0 then\n    a\nfi")
+
+                let later = LINE_HISTORY(HISTORY_STORE(path, 10))
+
+                assert later.previous() =~ "if a > 0 then\n    a\nfi";
+                assert later.previous() =~ "let a = 1";
+                assert !later.previous()?;
+            finally
+                IO.Directory.delete(IO.Path.get_directory_name(path)!, true)
+            yrt
+        si
+
+        @Test()
+        load__keeps_the_newest_cells_up_to_the_limit() is
+            let path = _path()
+
+            try
+                let store = HISTORY_STORE(path, 3)
+
+                for i in 0..7 do
+                    store.append("cell {i}")
+                od
+
+                let cells = HISTORY_STORE(path, 3).load()
+
+                assert cells.count == 3;
+                assert cells[0] =~ "cell 4";
+                assert cells[2] =~ "cell 6";
+                assert IO.File.read_all_lines(path).count == 3;
+            finally
+                IO.Directory.delete(IO.Path.get_directory_name(path)!, true)
+            yrt
+        si
+
+        @Test()
+        load__is_empty_without_a_file() is
+            assert HISTORY_STORE(_path(), 3).load().count == 0;
         si
     si
 si
