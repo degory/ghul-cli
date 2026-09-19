@@ -17,7 +17,12 @@ namespace Ghul.Repl.Host is
         value: object?,
         run_error: string?,
         was_interrupted: bool
-    );
+    ) is
+        // What a front end tells the user about an interrupted cell, so
+        // the terminal and a notebook say the same thing.
+        INTERRUPTED_NOTE: string static =>
+            "interrupted; the cell kept its definitions, and may still be running in the background until the session ends"
+    si
 
     // How a submission ended.
     enum CellStatus is

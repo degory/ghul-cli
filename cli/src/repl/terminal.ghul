@@ -460,7 +460,7 @@ namespace Ghul.Cli.Repl is
             fi
 
             if result.was_interrupted then
-                Std.error.write_line("ghul: interrupted; the cell kept its definitions, and may still be running in the background until the session ends")
+                Std.error.write_line("ghul: {SUBMIT_RESULT.INTERRUPTED_NOTE}")
 
                 return
             fi

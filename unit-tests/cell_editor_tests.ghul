@@ -165,6 +165,24 @@ namespace Ghul.Cli.Tests is
         si
 
         @Test()
+        is_on_last_written_line__ignores_blank_lines_below() is
+            let buffer = _cell(["let a = 1", "a", "", "  "])
+
+            buffer.move_to(1, 1)
+
+            assert buffer.is_on_last_written_line;
+
+            buffer.drop_blank_lines_below()
+
+            assert buffer.lines.count == 2;
+            assert buffer.is_on_last_line;
+
+            buffer.move_to(0, 0)
+
+            assert !buffer.is_on_last_written_line;
+        si
+
+        @Test()
         replace__recalls_a_whole_cell() is
             let buffer = CELL_BUFFER()
 

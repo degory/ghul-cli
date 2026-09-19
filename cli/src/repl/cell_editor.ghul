@@ -135,6 +135,12 @@ namespace Ghul.Cli.Repl is
 
                 case key.key
                 when System.ConsoleKey.ENTER then
+                    // Blank lines after the cursor's are no reason to treat
+                    // Enter as adding a line in the middle of the cell.
+                    if !is_alt /\ _buffer.is_on_last_written_line then
+                        _buffer.drop_blank_lines_below()
+                    fi
+
                     if is_alt \/ !_buffer.is_on_last_line then
                         _buffer.new_line()
                     else
