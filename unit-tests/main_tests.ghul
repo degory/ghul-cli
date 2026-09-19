@@ -84,6 +84,8 @@ namespace Ghul.Cli.Tests is
 
         @Test()
         is_runnable_by_default__accepts_an_executable_file_starting_with_a_shebang() is
+            unix_only("Windows has no execute permission")
+
             _with_temp_script("#!/usr/bin/env ghul\nentry() is si", path is
                 _make_executable(path);
 
@@ -100,6 +102,8 @@ namespace Ghul.Cli.Tests is
 
         @Test()
         is_runnable_by_default__rejects_an_executable_file_with_no_shebang() is
+            unix_only("Windows has no execute permission")
+
             _with_temp_script("entry() is si", path is
                 _make_executable(path);
 
