@@ -165,7 +165,11 @@ Alt-Enter anywhere, starts a new line there. Backspace at the start of a line
 joins it to the one above. Home and End (or Ctrl-A and Ctrl-E) go to either
 end of a line, Tab completes the name being typed from everything the session
 has defined, and Ctrl-D in an empty one leaves. Ctrl-C at the prompt does
-nothing. A block pasted in is taken as it is, with its own indentation and any
+nothing; while a submission is running, Ctrl-C interrupts it and brings the
+prompt back with the session intact. .NET cannot stop a running thread from
+outside, so an interrupted submission is abandoned rather than ended: it
+keeps its definitions, and may go on running in the background, using a
+core or writing output, until it finishes or the session ends. A block pasted in is taken as it is, with its own indentation and any
 blank lines in it. A mistake inside an `if`, a loop or a definition is
 reported once the block is closed rather than as soon as it is typed, so the
 closing lines stay part of the same submission.
