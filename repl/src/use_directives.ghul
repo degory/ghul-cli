@@ -69,7 +69,9 @@ namespace Ghul.Repl is
 
             let dot = body.last_index_of('.')
 
-            return if dot >= 0 then body.substring(dot + 1) else body fi
+            let name = if dot >= 0 then body.substring(dot + 1) else body fi
+
+            return if name.starts_with("`") then name.substring(1) else name fi
         si
 
         _is_use(text: string) -> bool static =>

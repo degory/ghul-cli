@@ -46,7 +46,7 @@ namespace Ghul.Cli.Tests is
 
             _accept(session, "let x = 1\n", LIST[string](["x"]));
 
-            assert session.prelude() =~ "use default\nuse cell1.x\n";
+            assert session.prelude() =~ "use default\nuse cell1.`x\n";
         si
 
         // Written by the user, `use default` is theirs, so it is not
@@ -133,7 +133,7 @@ namespace Ghul.Cli.Tests is
             _accept(session, "use IO.Path.combine\n", _nothing());
             _accept(session, "combine(a: string, b: string) -> string => a\n", LIST[string](["combine"]));
 
-            assert session.prelude() =~ "use cell2.combine\n";
+            assert session.prelude() =~ "use cell2.`combine\n";
         si
 
         @Test()
@@ -176,6 +176,63 @@ namespace Ghul.Cli.Tests is
 
             assert outcome.diagnostics[0] =~ "cell-3: 1,12..1,13: error: symbol not found: y";
         si
+        // An operator or a name that is also a keyword is only a name
+        // once escaped, so every generated import is.
+        @Test()
+        prelude__escapes_an_operator_and_a_keyword() is
+            let session = SESSION(false)
+
+            _accept(session, "struct V(x: int)\n", LIST[string](["+", "if"]));
+
+            assert session.prelude() =~ "use cell1.`+\nuse cell1.`if\n";
+        si
+
+        // A generated import that fails to resolve is dropped, and costs
+        // the session that name rather than every later cell.
+        @Test()
+        drop_failed_imports__drops_an_import_the_compile_reports_an_error_in() is
+            let session = SESSION(false)
+
+            _accept(session, "let x = 1\n", LIST[string](["x", "y"]));
+
+            let request = session.prepare("x + 1\n")
+
+            let dropped = session.drop_failed_imports(
+                request,
+                LIST[Ghul.Repl.CELL_DIAGNOSTIC]([
+                    Ghul.Repl.CELL_DIAGNOSTIC.parse("cell2.ghul: 2,10..2,12: error: used identifier cell1.y is not defined")
+                ]))
+
+            assert dropped.count == 1;
+            assert dropped[0] =~ "use cell1.`y";
+            assert session.prelude() =~ "use cell1.`x\n";
+        si
+
+        @Test()
+        drop_failed_imports__leaves_imports_alone_for_an_error_in_the_cell() is
+            let session = SESSION(false)
+
+            _accept(session, "let x = 1\n", LIST[string](["x"]));
+
+            let request = session.prepare("x + \"s\"\n")
+
+            let dropped = session.drop_failed_imports(
+                request,
+                LIST[Ghul.Repl.CELL_DIAGNOSTIC]([
+                    Ghul.Repl.CELL_DIAGNOSTIC.parse("cell2.ghul: 2,1..2,8: error: no operator")
+                ]))
+
+            assert dropped.count == 0;
+            assert session.prelude() =~ "use cell1.`x\n";
+        si
+
+        @Test()
+        is_user_name__rejects_a_generated_name() is
+            assert !Ghul.Repl.CELL_EXPORTS.is_user_name("$anon_0$cache");
+            assert !Ghul.Repl.CELL_EXPORTS.is_user_name("$AsyncStateMachine_run_0");
+            assert Ghul.Repl.CELL_EXPORTS.is_user_name("count_async");
+        si
+
     si
 
     @TestClass()
@@ -224,6 +281,11 @@ namespace Ghul.Cli.Tests is
         bound_name__is_null_for_an_import_of_many_names() is
             assert !USE_DIRECTIVES.bound_name("use Collections.*")?;
             assert !USE_DIRECTIVES.bound_name("use default")?;
+        si
+
+        @Test()
+        bound_name__is_the_name_without_its_escape() is
+            assert USE_DIRECTIVES.bound_name("use cell2.`+") =~ "+";
         si
     si
 si

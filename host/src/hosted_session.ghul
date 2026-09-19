@@ -65,8 +65,22 @@ namespace Ghul.Repl.Host is
         si
 
         submit(source: string) -> SUBMIT_RESULT is
-            let request = _session.prepare(source)
-            let compiled = _backend.compile(request)
+            let request mut = _session.prepare(source)
+            let compiled mut = _backend.compile(request)
+
+            // An import generated for an earlier cell that does not
+            // resolve would fail every cell after it. It is dropped, and
+            // the cell compiled again without it.
+            let dropped: Collections.List[string] mut = Collections.LIST[string]()
+
+            if !compiled.assembly_path? then
+                dropped = _session.drop_failed_imports(request, compiled.diagnostics)
+
+                if dropped.count > 0 then
+                    request = _session.prepare(source)
+                    compiled = _backend.compile(request)
+                fi
+            fi
 
             let loaded: LOADED_CELL? mut = null
 
@@ -77,8 +91,14 @@ namespace Ghul.Repl.Host is
 
             let outcome = _session.accept(request, CELL_REPLY(compiled.diagnostics, loaded))
 
+            let diagnostics = Collections.LIST[string](outcome.diagnostics)
+
+            for directive in dropped do
+                diagnostics.add("ghul: dropped an import of an earlier cell that no longer resolves: {directive}")
+            od
+
             if !outcome.is_accepted \/ !loaded? then
-                return SUBMIT_RESULT(false, outcome.diagnostics, null, null)
+                return SUBMIT_RESULT(false, diagnostics, null, null)
             fi
 
             if let assembly_path = compiled.assembly_path then
@@ -87,7 +107,7 @@ namespace Ghul.Repl.Host is
 
             let run = CELL_ENTRY.run(loaded)
 
-            return SUBMIT_RESULT(true, outcome.diagnostics, run.value, run.error)
+            return SUBMIT_RESULT(true, diagnostics, run.value, run.error)
         si
 
         _analysis: ANALYSIS_SESSION?
