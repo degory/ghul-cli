@@ -3,6 +3,7 @@ namespace Ghul.Cli.Tests is
 
     use Ghul.Cli.Repl.CELL_INPUT
     use Ghul.Cli.Repl.CellStep
+    use Ghul.Cli.Repl.HELD_CONSTRUCT
     use Ghul.Repl.Host.Completeness
 
     use Ghul.Repl.CELL_REPLY
@@ -369,6 +370,46 @@ namespace Ghul.Cli.Tests is
             assert asked[1] =~ "let y = x +\n    1\n";
         si
 
+        // A statement over several lines that is not a block construct
+        // is submitted when it is finished, as a one-line one is.
+        @Test()
+        enter__submits_a_let_over_several_lines_when_finished() is
+            let cell = _at_terminal()
+
+            assert _enter(cell, ["let y = if x then", "    1", "fi"]) == CellStep.SUBMIT;
+        si
+
+        @Test()
+        enter__holds_a_definition_over_several_lines() is
+            let cell = _at_terminal()
+
+            assert _enter(cell, ["f(n: int) -> int is", "    if n > 0 then", "    fi"]) == CellStep.WAIT;
+        si
+
+        // Pasted lines neither submit nor hold; the line entered after the
+        // paste decides for the whole cell.
+        @Test()
+        append__takes_pasted_lines_without_submitting() is
+            let cell = _at_terminal()
+
+            cell.append("if x then")
+            cell.append("")
+            cell.append("fi")
+
+            assert cell.enter("") == CellStep.SUBMIT;
+            assert cell.source =~ "if x then\n\nfi\n";
+        si
+
+        @Test()
+        append__holds_when_the_line_after_a_pasted_construct_finishes_it() is
+            let cell = _at_terminal()
+
+            cell.append("for i in xs do")
+
+            assert cell.enter("od") == CellStep.WAIT;
+            assert cell.enter(".") == CellStep.SUBMIT;
+        si
+
         @Test()
         clear__empties_a_held_cell() is
             let cell = _at_terminal()
@@ -378,6 +419,39 @@ namespace Ghul.Cli.Tests is
 
             assert cell.is_empty;
             assert cell.enter("") == CellStep.NOTHING;
+        si
+    si
+
+    @TestClass()
+    class HELD_CONSTRUCT_TESTS is
+        init() is si
+
+        _starts(line: string) -> bool => HELD_CONSTRUCT.starts(LIST[string]([line]), 0)
+
+        @Test()
+        starts__for_block_constructs() is
+            for line in ["if x then", "case x", "for i in xs do", "while c do", "do", "try", "outer: for i in xs do"] do
+                assert _starts(line);
+            od
+        si
+
+        @Test()
+        starts__for_definitions() is
+            for line in ["class A is", "struct P(x: int) is", "trait T is", "union U is", "enum E is", "f(n: int) -> int is", "g[T](x: T) =>", "h() is"] do
+                assert _starts(line);
+            od
+        si
+
+        @Test()
+        starts__not_for_other_statements() is
+            for line in ["let y = if x then", "xs |> each(x =>", "f(1,", "total = total +", "write_line(\"is\")"] do
+                assert !_starts(line);
+            od
+        si
+
+        @Test()
+        starts__skips_pragmas_above_a_definition() is
+            assert HELD_CONSTRUCT.starts(LIST[string](["@equality()", "class A is"]), 0);
         si
     si
 si
