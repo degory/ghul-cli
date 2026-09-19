@@ -294,6 +294,61 @@ namespace Ghul.Cli.Tests is
             assert outcome.diagnostics[0] =~ "cell-2: 1,1..1,1: error: in the earlier definition of Q: _secret is not assignable to string";
         si
 
+        // An impl written again replaces the earlier one rather than adding
+        // its members a second time, as a redefinition would.
+        @Test()
+        prepare__does_not_carry_an_impl_the_cell_writes_again() is
+            let session = SESSION(false)
+
+            _accept(session, "union S is A; B; si\n", LIST[string](["S"]));
+            _accept(session, "impl N for S is\n    name() -> string => \"x\"\nsi\n", LIST[string](["S"]));
+
+            let request = session.prepare("impl N for S is\n    name() -> string => \"y\"\nsi\n")
+
+            assert request.carried_line_count == 1;
+            assert !request.source.contains("\"x\"");
+        si
+
+        @Test()
+        accept__keeps_one_impl_per_trait_after_it_is_written_again() is
+            let session = SESSION(false)
+
+            _accept(session, "union S is A; B; si\n", LIST[string](["S"]));
+            _accept(session, "impl N for S is\n    name() -> string => \"x\"\nsi\n", LIST[string](["S"]));
+            _accept(session, "impl N for S is\n    name() -> string => \"y\"\nsi\n", LIST[string](["S"]));
+
+            let request = session.prepare("impl M for S is\n    other() -> int => 1\nsi\n")
+
+            assert request.source.contains("\"y\"");
+            assert !request.source.contains("\"x\"");
+        si
+
+        // An impl of another trait is added alongside, not in place.
+        @Test()
+        prepare__carries_an_impl_of_another_trait() is
+            let session = SESSION(false)
+
+            _accept(session, "union S is A; B; si\n", LIST[string](["S"]));
+            _accept(session, "impl N for S is\n    name() -> string => \"x\"\nsi\n", LIST[string](["S"]));
+
+            let request = session.prepare("impl M for S is\n    other() -> int => 1\nsi\n")
+
+            assert request.source.contains("\"x\"");
+        si
+
+        // The same partial block submitted again is not carried twice.
+        @Test()
+        prepare__does_not_carry_a_partial_the_cell_writes_again() is
+            let session = SESSION(false)
+
+            _accept(session, "class P(x: int)\n", LIST[string](["P"]));
+            _accept(session, "partial P is\n    f() -> int => x\nsi\n", LIST[string](["P"]));
+
+            let request = session.prepare("partial P is\n    f() -> int => x\nsi\n")
+
+            assert request.carried_line_count == 1;
+        si
+
         // Declaring the type again starts its text over.
         @Test()
         prepare__forgets_blocks_added_before_a_type_is_declared_again() is
