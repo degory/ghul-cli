@@ -2,7 +2,8 @@
 # End-to-end test of the Jupyter kernel: builds it, gives it a connection
 # file with ports nothing else holds, and drives it over ZeroMQ the way a
 # notebook does - kernel_info, cells that chain, a cell that does not
-# compile, one that throws, one that writes, is_complete, and shutdown.
+# compile, one that throws, one that writes, is_complete, and shutdown - and
+# reports how long the kernel takes to start and to run its first cell.
 #
 # The kernel needs a ghul.compiler to build cells with, so this installs
 # one under a scratch HOME first, through the CLI that owns that, and the
