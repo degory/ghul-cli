@@ -5,6 +5,7 @@ namespace Ghul.Repl.Host is
     use Ghul.Repl.LOADED_CELL
     use Ghul.Repl.RUN_RESULT
     use Ghul.Repl.SESSION
+    use Ghul.Repl.STRAGGLERS
     use System.Reflection.Assembly
 
     // What a submission did, for a front end to report.
