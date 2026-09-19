@@ -33,6 +33,18 @@ namespace Ghul.Jupyter is
             od
         si
 
+        // The line forms are overridden as well as the two above: the
+        // base class ends a line through overloads a subclass cannot
+        // override, so the line ending would otherwise never arrive.
+        write_line() is
+            write('\n')
+        si
+
+        write_line(value: string?) is
+            write(value)
+            write('\n')
+        si
+
         flush() is
             if _pending.length == 0 then
                 return
