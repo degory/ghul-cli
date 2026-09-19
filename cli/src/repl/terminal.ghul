@@ -326,7 +326,7 @@ namespace Ghul.Cli.Repl is
 
                 let number = session.next_cell_number
 
-                _report(session.submit(read.source), read.step == CellStep.SUBMIT, number, read.source)
+                _report(session, session.submit(read.source), read.step == CellStep.SUBMIT, number, read.source)
             od
 
             session.close()
@@ -400,7 +400,7 @@ namespace Ghul.Cli.Repl is
                     return
                 fi
 
-                _report(result, true, new_number, cell.source)
+                _report(session, result, true, new_number, cell.source)
 
                 if is_from /\ (!result.is_accepted \/ result.was_interrupted \/ result.run_error?) then
                     Std.write_line("ghul: stopped at cell {new_number}, the rerun of cell {cell.number}; later cells were not rerun")
@@ -484,7 +484,7 @@ namespace Ghul.Cli.Repl is
             _current?.close()
         si
 
-        _report(result: SUBMIT_RESULT, want_value: bool, number: int, source: string) is
+        _report(session: HOSTED_SESSION, result: SUBMIT_RESULT, want_value: bool, number: int, source: string) is
             for line in Ghul.Repl.DIAGNOSTIC_VIEW.lines(result.diagnostics, "cell-{number}", source, _diagnostic_colours()) do
                 Std.error.write_line(line)
             od
@@ -492,6 +492,8 @@ namespace Ghul.Cli.Repl is
             // After whatever the cell itself wrote, so a cell that
             // prints and then ends on a value reads in the order it ran.
             if want_value then
+                _display.use_runtime(session.runtime)
+
                 if let shown = _display.format(result.value) then
                     Std.write_line(shown)
                 fi
@@ -655,7 +657,7 @@ namespace Ghul.Cli.Repl is
 
                 let result = session.submit("{cell}\n")
 
-                _report(result, true, number, cell)
+                _report(session, result, true, number, cell)
 
                 if !result.is_accepted \/ result.was_interrupted \/ result.run_error? then
                     Std.write_line("ghul: stopped at cell {number}; the rest of {path} was not loaded")

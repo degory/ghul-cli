@@ -67,10 +67,15 @@ location in a cell, including a related location, names the cell by its label
 
 ## values
 
-`CELL_DISPLAY.format` renders the value that a cell ended on. It renders a
-collection one level deep, up to a limit on the number of elements, and it
-returns nothing for a cell that ended on a statement. It prints nothing
-itself, so every host shows the same value in the same way.
+`CELL_DISPLAY.format` renders the value that a cell ended on, and returns
+nothing for a cell that ended on a statement. It prints nothing itself, so
+every host shows the same value in the same way.
+
+Give it the runtime the cells run against with `use_runtime`. From
+`ghul.runtime` 21.8.1 on, it renders the value with that runtime's `inspect`,
+the same text a program gets from calling `inspect` itself. With an older
+runtime, or none, it renders a collection one level deep, up to a limit on
+the number of elements.
 
 ## requirements
 

@@ -223,6 +223,17 @@ namespace Ghul.Repl.Host is
         // Each accepted cell's assembly, by cell name.
         _assemblies: Collections.MAP[string, Assembly]
 
+        // The runtime the cells run against: the one the session's load
+        // context resolves, whether from beside the cells or, failing that,
+        // the tool's own.
+        runtime: Assembly? is
+            try
+                return _context.load_from_assembly_name(System.Reflection.AssemblyName(Ghul.Repl.GHUL_RUNTIME_ASSEMBLY))
+            catch e: IO.FileNotFoundException
+                return null
+            yrt
+        si
+
         // Every submission so far, oldest first, whether or not it
         // compiled.
         submissions: Collections.List[CELL_RECORD] => _submissions
