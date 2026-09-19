@@ -1,16 +1,15 @@
 namespace Ghul.Cli.Tests is
+    use Ghul.Repl.Host.GHUL_LEXER
+    use Ghul.Repl.Host.INDENTATION
+    use Ghul.Repl.Host.LINE_SPANS
+    use Ghul.Repl.Host.TokenKind
     use Collections.LIST
 
     use Ghul.Cli.Repl.COLOUR_CHOICE
     use Ghul.Cli.Repl.COLOUR_CODES
     use Ghul.Cli.Repl.ColourDepth
-    use Ghul.Cli.Repl.GHUL_LEXER
-    use Ghul.Cli.Repl.INDENTATION
-    use Ghul.Cli.Repl.LINE_SPANS
     use Ghul.Cli.Repl.PALETTE
     use Ghul.Cli.Repl.ThemeChoice
-    use Ghul.Cli.Repl.TOKEN_SPAN
-    use Ghul.Cli.Repl.TokenKind
 
     use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
     use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;

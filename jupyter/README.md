@@ -88,7 +88,10 @@ messages with the key in the connection file. It answers these requests:
 - `kernel_info_request`
 - `execute_request`. It publishes `stream`, `execute_result` and `error`
   messages as the cell runs.
-- `is_complete_request`. The compiler gives the answer.
+- `is_complete_request`. The kernel answers the way the terminal decides what
+  Enter does: a value is complete, a `let` or a definition holds the cell
+  open for more, unfinished text is incomplete, and a blank line at the end
+  completes whatever is above it.
 - `complete_request` and `inspect_request`. The session's analyser gives the
   answers, so a name that an earlier cell declared completes in a later cell,
   and you can inspect it there. When no analyser is available, the kernel

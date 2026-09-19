@@ -1,4 +1,7 @@
 namespace Ghul.Cli.Repl is
+    use Ghul.Repl.Host.GHUL_LEXER
+    use Ghul.Repl.Host.TOKEN_SPAN
+    use Ghul.Repl.Host.TokenKind
     use Collections.LIST
     use IO.Std
 

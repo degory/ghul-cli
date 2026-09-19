@@ -1,4 +1,4 @@
-namespace Ghul.Cli.Repl is
+namespace Ghul.Repl.Host is
     use Collections.LIST
 
     // Where a line typed at the prompt starts, in steps of four spaces.
