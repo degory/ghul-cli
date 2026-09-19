@@ -49,7 +49,7 @@ namespace Ghul.Cli.Tests is
 
         @Test()
         format__of_a_list_of_strings__is_its_elements() is
-            assert _display().format(cast object(LIST[string](["a", "b"]))) =~ "[a, b]";
+            assert _display().format(cast object(LIST[string](["a", "b"]))) =~ "[\"a\", \"b\"]";
         si
 
         // A line is what there is room for, so a long collection says
@@ -68,8 +68,7 @@ namespace Ghul.Cli.Tests is
             assert formatted.ends_with(", 19, and 5 more]");
         si
 
-        // One level deep: a list of lists says what its elements are and
-        // no further.
+        // A list of lists shows the elements of each.
         @Test()
         format__of_a_list_of_lists__renders_each_element() is
             let lists = LIST[LIST[int]]()
@@ -77,7 +76,43 @@ namespace Ghul.Cli.Tests is
             lists.add(LIST[int]([1, 2]))
             lists.add(LIST[int]([3]))
 
-            assert _display().format(cast object(lists))?;
+            assert _display().format(cast object(lists)) =~ "[[1, 2], [3]]";
+        si
+
+        @Test()
+        format__of_a_bool__is_spelled_as_ghul_spells_it() is
+            assert _display().format(cast object(true)) =~ "true";
+        si
+
+        @Test()
+        format__of_a_tuple__quotes_its_strings_and_characters() is
+            assert _display().format(cast object((1, "one", 'c'))) =~ "(1, \"one\", 'c')";
+        si
+
+        // A map is its pairs.
+        @Test()
+        format__of_a_map__is_its_pairs() is
+            let map = Collections.MAP[string, int]()
+
+            map.add("a", 1)
+
+            assert _display().format(cast object(map)) =~ "[(\"a\", 1)]";
+        si
+
+        // An object with no text of its own shows its type and what a
+        // program could read of it.
+        @Test()
+        format__of_an_object_without_its_own_text__is_its_type_and_properties() is
+            assert _display().format(cast object(DISPLAYED(3, "x"))) =~ "DISPLAYED(count = 3, label = \"x\")";
+        si
+
+        @Test()
+        type_name__uses_ghul_names_for_type_arguments() is
+            assert CELL_DISPLAY.type_name(typeof(Collections.LIST[string])) =~ "List[string]";
+            assert CELL_DISPLAY.type_name(typeof(int[])) =~ "int[]";
+            assert CELL_DISPLAY.type_name(typeof(System.Nullable[int])) =~ "int?";
         si
     si
+
+    class DISPLAYED(count: int, label: string);
 si

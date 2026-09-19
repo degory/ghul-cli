@@ -78,6 +78,10 @@ namespace Ghul.Repl.Host is
 
             start_info.argument_list.add("--library")
 
+            for argument in REPL_COMPILER_ARGUMENTS.quieted do
+                start_info.argument_list.add(argument)
+            od
+
             // What the cell's namespace is called, which decides what
             // the generated imports of every later cell name. Without
             // it the compiler would derive one from the file's path.
