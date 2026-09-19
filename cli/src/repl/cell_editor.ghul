@@ -19,7 +19,7 @@ namespace Ghul.Cli.Repl is
     // deletes the word before the cursor, Ctrl-L clears the screen, Tab
     // completes, Shift-Tab shows what the name at the cursor is, a paste
     // is taken as it is, and Ctrl-D in an empty cell ends the input.
-    // Ctrl-C does nothing here.
+    // Ctrl-C abandons the cell to history and starts it again.
     class CELL_EDITOR(
         _complete: (string, int, int) -> Collections.List[string]?,
         _hover: (string, int, int) -> string?,
@@ -116,9 +116,9 @@ namespace Ghul.Cli.Repl is
                 let is_control = (modifiers & System.ConsoleModifiers.CONTROL) == System.ConsoleModifiers.CONTROL
                 let is_alt = (modifiers & System.ConsoleModifiers.ALT) == System.ConsoleModifiers.ALT
 
-                // Ctrl-C stops a running cell and nothing else: at the
-                // prompt it leaves the cell as it is.
                 if is_control /\ key.key == System.ConsoleKey.C then
+                    _abandon()
+
                     continue
                 fi
 
@@ -335,6 +335,63 @@ namespace Ghul.Cli.Repl is
             od
 
             _buffer.move_to(row, column)
+            _cursor_screen_row = 0
+        si
+
+        // Ctrl-C with something typed: the cell is left on the screen, all
+        // of it, marked ^C, and kept in history as its newest entry, and an
+        // empty cell under the same number takes its place. It was never
+        // submitted, so nothing else knows it existed. With nothing typed,
+        // Ctrl-C does nothing.
+        _abandon() is
+            let text = CELL_TEXT.without_terminator(_buffer.lines)
+
+            if text.trim().length == 0 then
+                return
+            fi
+
+            _write_whole("^C")
+
+            _history.add(text)
+
+            _buffer.clear()
+            _end.clear()
+            _draft = null
+            _top = 0
+
+            _draw()
+        si
+
+        // Every line of the cell written from its first row, whatever part
+        // of it was shown before, then `suffix` and a line break, so the
+        // cell stays on the screen as it was typed.
+        _write_whole(suffix: string) is
+            let lines = _buffer.lines
+            let output = System.Text.StringBuilder()
+
+            if _cursor_screen_row > 0 then
+                output.append("{_escape}[{_cursor_screen_row}A")
+            fi
+
+            output.append("\r{_escape}[J")
+
+            let context = LIST[string]()
+
+            for i in 0..lines.count do
+                if i > 0 then
+                    output.append("\r\n")
+                fi
+
+                output.append(if i == 0 then _prompt else _continuation fi)
+                output.append(_painted(lines[i], context))
+
+                context.add(lines[i])
+            od
+
+            output.append("{suffix}\r\n")
+
+            Std.write(output.to_string())
+
             _cursor_screen_row = 0
         si
 
