@@ -1,18 +1,18 @@
 namespace Ghul.Cli.Tests is
     use Collections.LIST
 
-    use Ghul.Cli.Repl.LINE_BUFFER
+    use Ghul.Cli.Repl.CELL_BUFFER
     use Ghul.Cli.Repl.LINE_HISTORY
 
     use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
     use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
 
     @TestClass()
-    class LINE_BUFFER_TESTS is
+    class CELL_BUFFER_LINE_EDITING_TESTS is
         init() is si
 
-        _typed(text: string) -> LINE_BUFFER is
-            let buffer = LINE_BUFFER()
+        _typed(text: string) -> CELL_BUFFER is
+            let buffer = CELL_BUFFER()
 
             buffer.insert(text)
 
@@ -28,7 +28,7 @@ namespace Ghul.Cli.Tests is
             buffer.insert("e")
 
             assert buffer.text =~ "let x";
-            assert buffer.cursor == 2;
+            assert buffer.column == 2;
         si
 
         @Test()
@@ -41,7 +41,7 @@ namespace Ghul.Cli.Tests is
             buffer.delete()
 
             assert buffer.text =~ "ad";
-            assert buffer.cursor == 1;
+            assert buffer.column == 1;
         si
 
         // In the spaces a line starts with, backspace goes back a whole
@@ -53,7 +53,7 @@ namespace Ghul.Cli.Tests is
             buffer.backspace()
 
             assert buffer.text =~ "    ";
-            assert buffer.cursor == 4;
+            assert buffer.column == 4;
 
             buffer.backspace()
 
@@ -70,13 +70,14 @@ namespace Ghul.Cli.Tests is
         si
 
         @Test()
-        reindent__outdents_a_closing_word_keeping_the_cursor_after_it() is
-            let buffer = _typed("        fi")
+        insert__outdents_a_closing_word_on_a_line_enter_indented() is
+            let buffer = _typed("if x then")
 
-            buffer.reindent(8)
+            buffer.new_line()
+            buffer.insert("fi")
 
-            assert buffer.text =~ "    fi";
-            assert buffer.cursor == 6;
+            assert buffer.line =~ "fi";
+            assert buffer.column == 2;
         si
 
         @Test()
@@ -84,12 +85,12 @@ namespace Ghul.Cli.Tests is
             let buffer = _typed("ab")
 
             buffer.right()
-            assert buffer.cursor == 2;
+            assert buffer.column == 2;
 
             buffer.home()
             buffer.left()
             buffer.backspace()
-            assert buffer.cursor == 0;
+            assert buffer.column == 0;
             assert buffer.text =~ "ab";
 
             buffer.end()
@@ -106,14 +107,14 @@ namespace Ghul.Cli.Tests is
 
         @Test()
         extension__is_the_rest_of_the_only_name() is
-            assert LINE_BUFFER.extension("ans", LIST[string](["answer"])) =~ "wer";
+            assert CELL_BUFFER.extension("ans", LIST[string](["answer"])) =~ "wer";
         si
 
         @Test()
         extension__is_as_far_as_the_names_agree() is
-            assert LINE_BUFFER.extension("va", LIST[string](["value1", "value2", "values"])) =~ "lue";
-            assert LINE_BUFFER.extension("x", LIST[string](["xa", "xb"])) =~ "";
-            assert LINE_BUFFER.extension("x", LIST[string]()) =~ "";
+            assert CELL_BUFFER.extension("va", LIST[string](["value1", "value2", "values"])) =~ "lue";
+            assert CELL_BUFFER.extension("x", LIST[string](["xa", "xb"])) =~ "";
+            assert CELL_BUFFER.extension("x", LIST[string]()) =~ "";
         si
     si
 

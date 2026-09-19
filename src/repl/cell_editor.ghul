@@ -1,0 +1,415 @@
+namespace Ghul.Cli.Repl is
+    use Collections.LIST
+    use IO.Std
+
+    // A cell read at the prompt: its source and what submitting it does. A
+    // command is a cell of one line starting with `:`, handed back as it
+    // was typed.
+    class CELL_READ(source: string, step: CellStep, is_command: bool);
+
+    // A cell edited in place at the terminal, all of it at once. Up and
+    // Down move between its lines, and past the first or last line recall
+    // earlier cells; Left and Right cross line ends; Enter inserts a line
+    // in the middle of the cell and on its last line does what CELL_END
+    // says; Alt-Enter always inserts a line. Backspace at the start of a
+    // line joins it to the one above, and Delete at the end of one joins
+    // the next. Home and End (or Ctrl-A and Ctrl-E) go to either end of a
+    // line, Tab completes, a paste is taken as it is, Ctrl-C abandons the
+    // cell, and Ctrl-D in an empty cell ends the input.
+    class CELL_EDITOR(
+        _complete: (string, int, int) -> Collections.List[string]?,
+        _palette: PALETTE?,
+        _end: CELL_END
+    ) is
+        _history: LINE_HISTORY
+        _buffer: CELL_BUFFER
+
+        // How many screen rows down from the first drawn row the cursor
+        // is, so the next redraw can go back up to the start.
+        _cursor_screen_row: int
+
+        // The first line drawn, when the cell is taller than the terminal.
+        _top: int
+
+        init(..) is
+            _history = LINE_HISTORY()
+            _buffer = CELL_BUFFER()
+
+            // Pasted text arrives between markers, so it can be told apart
+            // from typing.
+            Std.write("{_escape}[?2004h")
+        si
+
+        _escape: char static => cast char(27)
+
+        // Leaves the terminal as it was found.
+        close() is
+            Std.write("{_escape}[?2004l")
+        si
+
+        // The next cell, or null when the input has ended. An abandoned
+        // cell comes back as a step of NOTHING.
+        read_cell() -> CELL_READ? is
+            // Ctrl-C is read as a key while a cell is edited, rather than
+            // ending the process.
+            let was_control_c_input = Std.treat_control_c_as_input
+
+            Std.treat_control_c_as_input = true
+
+            try
+                return _read_cell()
+            finally
+                Std.treat_control_c_as_input = was_control_c_input
+            yrt
+        si
+
+        _read_cell() -> CELL_READ? is
+            _buffer.clear()
+            _end.clear()
+
+            _cursor_screen_row = 0
+            _top = 0
+
+            _draw()
+
+            do
+                let key = Std.read_key(true)
+                let modifiers = key.modifiers
+                let is_control = (modifiers & System.ConsoleModifiers.CONTROL) == System.ConsoleModifiers.CONTROL
+                let is_alt = (modifiers & System.ConsoleModifiers.ALT) == System.ConsoleModifiers.ALT
+
+                if is_control /\ key.key == System.ConsoleKey.C then
+                    _finish("^C")
+
+                    return CELL_READ("", CellStep.NOTHING, false)
+                fi
+
+                // A terminal sends Alt-Enter as Escape then Enter, and a
+                // paste between Escape-led markers.
+                if key.key == System.ConsoleKey.ESCAPE /\ _key_arrives_soon() then
+                    let next = Std.read_key(true)
+
+                    if next.key == System.ConsoleKey.ENTER then
+                        _buffer.new_line()
+                    elif next.key_char == '[' /\ _follows("200~") then
+                        _buffer.insert_verbatim(_read_paste())
+                    fi
+
+                    _draw()
+
+                    continue
+                fi
+
+                case key.key
+                when System.ConsoleKey.ENTER then
+                    if is_alt \/ !_buffer.is_on_last_line then
+                        _buffer.new_line()
+                    else
+                        let lines = _buffer.lines
+                        let step = _end.step_for(lines)
+
+                        if step == CellStep.WAIT then
+                            _buffer.add_line()
+                        else
+                            let is_command = lines.count == 1 /\ lines[0].trim().starts_with(":")
+                            let source = if is_command then lines[0] else _end.source_for(lines) fi
+
+                            _buffer.to_end()
+                            _finish("")
+
+                            if step != CellStep.NOTHING then
+                                _history.add(_buffer.text)
+                            fi
+
+                            return CELL_READ(source, step, is_command)
+                        fi
+                    fi
+                when System.ConsoleKey.BACKSPACE then
+                    _buffer.backspace()
+                when System.ConsoleKey.DELETE then
+                    _buffer.delete()
+                when System.ConsoleKey.LEFT_ARROW then
+                    _buffer.left()
+                when System.ConsoleKey.RIGHT_ARROW then
+                    _buffer.right()
+                when System.ConsoleKey.HOME then
+                    _buffer.home()
+                when System.ConsoleKey.END then
+                    _buffer.end()
+                when System.ConsoleKey.UP_ARROW then
+                    if !_buffer.up() then
+                        if let recalled = _history.previous() then
+                            _buffer.replace(recalled)
+                        fi
+                    fi
+                when System.ConsoleKey.DOWN_ARROW then
+                    if !_buffer.down() then
+                        if let recalled = _history.next() then
+                            _buffer.replace(recalled)
+                        fi
+                    fi
+                when System.ConsoleKey.TAB then
+                    _complete_at()
+                else
+                    if is_control /\ key.key == System.ConsoleKey.A then
+                        _buffer.home()
+                    elif is_control /\ key.key == System.ConsoleKey.E then
+                        _buffer.end()
+                    elif is_control /\ key.key == System.ConsoleKey.D then
+                        if _buffer.is_blank /\ _buffer.lines.count == 1 then
+                            _finish("")
+
+                            return null
+                        fi
+
+                        _buffer.delete()
+                    elif !is_control /\ key.key_char >= ' ' then
+                        _buffer.insert(key.key_char.to_string())
+                    fi
+                esac
+
+                _draw()
+            od
+        si
+
+        // One name on offer is written in; several are written in as far
+        // as they agree, and listed when they agree no further.
+        _complete_at() is
+            let offered = _complete(_buffer.text, _buffer.row + 1, _buffer.column + 1)
+
+            if !offered? \/ offered.count == 0 then
+                return
+            fi
+
+            let typed = _buffer.name_before_cursor
+            let extension = CELL_BUFFER.extension(typed, offered)
+
+            if extension.length > 0 then
+                _buffer.insert(extension)
+            elif offered.count > 1 then
+                let row = _buffer.row
+                let column = _buffer.column
+
+                _buffer.to_end()
+                _draw()
+                Std.write("\r\n")
+                Std.write_line(offered |> Ghul.Pipes.take(60) |> Ghul.Pipes.join("  "))
+
+                _buffer.move_to(row, column)
+                _cursor_screen_row = 0
+            fi
+        si
+
+        // The cell drawn with the cursor at its end, then a line break, so
+        // what follows is written below it.
+        _finish(suffix: string) is
+            _buffer.to_end()
+            _draw()
+
+            Std.write("{suffix}\r\n")
+
+            _cursor_screen_row = 0
+        si
+
+        _width: int is
+            try
+                let width = Std.window_width
+
+                return if width > 0 then width else 80 fi
+            catch e: System.Exception
+                return 80
+            yrt
+        si
+
+        _height: int is
+            try
+                let height = Std.window_height
+
+                return if height > 1 then height else 24 fi
+            catch e: System.Exception
+                return 24
+            yrt
+        si
+
+        // The whole cell written again from its first row, or as much of
+        // it around the cursor as fits the terminal, with the cursor put
+        // back where it is in the text.
+        _draw() is
+            let lines = _buffer.lines
+            let width = _width
+            let layout = CELL_LAYOUT(width, 2)
+
+            _top = layout.top(lines, _buffer.row, _top, _height - 1)
+
+            let bottom = layout.bottom(lines, _top, _height - 1)
+
+            let output = System.Text.StringBuilder()
+
+            if _cursor_screen_row > 0 then
+                output.append("{_escape}[{_cursor_screen_row}A")
+            fi
+
+            output.append("\r{_escape}[J")
+
+            let context = LIST[string]()
+
+            for i in 0.._top do
+                context.add(lines[i])
+            od
+
+            let rows mut = 0
+
+            for i in _top..bottom do
+                if i > _top then
+                    output.append("\r\n")
+                fi
+
+                output.append(if i == 0 then "> " else "| " fi)
+                output.append(_painted(lines[i], context))
+
+                context.add(lines[i])
+                rows = rows + layout.rows(lines[i])
+            od
+
+            // Where the cursor is left, counted in rows from the first drawn
+            // row, and where it has to go.
+            let end_row = rows - 1
+            let target = layout.cursor(lines, _top, _buffer.row, _buffer.column)
+
+            if end_row > target.row then
+                output.append("{_escape}[{end_row - target.row}A")
+            fi
+
+            output.append("\r")
+
+            if target.column > 0 then
+                output.append("{_escape}[{target.column}C")
+            fi
+
+            Std.write(output.to_string())
+
+            _cursor_screen_row = target.row
+        si
+
+        _painted(text: string, before: Collections.List[string]) -> string is
+            if let palette = _palette then
+                return palette.paint(text, LINE_SPANS.of_last_line(before, text))
+            fi
+
+            return text
+        si
+
+        // Whether the keys waiting to be read are `expected`, which they
+        // are only when a terminal sent them together; anything else
+        // waiting is consumed with them.
+        _follows(expected: string) -> bool is
+            for c in expected do
+                if !_key_arrives_soon() then
+                    return false
+                fi
+
+                if Std.read_key(true).key_char != c then
+                    return false
+                fi
+            od
+
+            return true
+        si
+
+        _key_arrives_soon() -> bool is
+            for i in 0..20 do
+                if Std.key_available then
+                    return true
+                fi
+
+                System.Threading.Thread.sleep(1)
+            od
+
+            return false
+        si
+
+        // The text of a paste, up to the marker that ends it, with every
+        // line break as a newline.
+        _read_paste() -> string is
+            let text = System.Text.StringBuilder()
+            let end_marker = "{_escape}[201~"
+
+            do
+                let key = Std.read_key(true)
+                let c = if key.key == System.ConsoleKey.ENTER then '\n' else key.key_char fi
+
+                text.append(c)
+
+                if text.length >= end_marker.length /\ text.to_string().ends_with(end_marker, System.StringComparison.ORDINAL) then
+                    return text.to_string(0, text.length - end_marker.length).replace("\r\n", "\n").replace('\r', '\n')
+                fi
+            od
+        si
+    si
+
+    // Where the lines of a cell fall on a terminal `width` columns wide,
+    // each after a prompt `prompt_width` columns wide: how many rows each
+    // takes, which lines fit, and where the cursor goes.
+    class CELL_LAYOUT(_width: int, _prompt_width: int) is
+        rows(line: string) -> int =>
+            System.Math.max(1, (_prompt_width + line.length + _width - 1) / _width)
+
+        // The first line to draw: the one before unless the cursor's line
+        // is above it, or would fall below what fits.
+        top(lines: Collections.List[string], cursor_row: int, previous_top: int, height: int) -> int is
+            let top mut = System.Math.min(previous_top, cursor_row)
+
+            while top < cursor_row /\ _rows_between(lines, top, cursor_row + 1) > height do
+                top = top + 1
+            od
+
+            return top
+        si
+
+        // One past the last line to draw from `top`, as many as fit.
+        bottom(lines: Collections.List[string], top: int, height: int) -> int is
+            let used mut = 0
+            let bottom mut = top
+
+            while bottom < lines.count /\ (bottom == top \/ used + rows(lines[bottom]) <= height) do
+                used = used + rows(lines[bottom])
+                bottom = bottom + 1
+            od
+
+            return bottom
+        si
+
+        // The row and column of the cursor, counted from the first line
+        // drawn.
+        cursor(lines: Collections.List[string], top: int, row: int, column: int) -> (row: int, column: int) is
+            let offset = _prompt_width + column
+            let within =
+                if offset > 0 /\ offset == _prompt_width + lines[row].length /\ offset % _width == 0 then
+                    // At the very end of a line that fills its last row the
+                    // terminal leaves the cursor on that row.
+                    offset / _width - 1
+                else
+                    offset / _width
+                fi
+
+            let column_on_row =
+                if offset > 0 /\ offset % _width == 0 /\ within < offset / _width then
+                    _width - 1
+                else
+                    offset % _width
+                fi
+
+            return (row = _rows_between(lines, top, row) + within, column = column_on_row)
+        si
+
+        _rows_between(lines: Collections.List[string], from: int, to: int) -> int is
+            let total mut = 0
+
+            for i in from..to do
+                total = total + rows(lines[i])
+            od
+
+            return total
+        si
+    si
+si

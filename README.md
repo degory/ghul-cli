@@ -155,12 +155,19 @@ so `let x = 41` followed later by `let x = "now a string"` is fine.
 A redefinition can read the value it replaces: after `let x = 10, y = 20`,
 `let x = x + y` makes `x` 30.
 
-At a terminal each line can be edited as it is typed: the arrow keys move
-along it and bring back earlier lines, Home and End (or Ctrl-A and Ctrl-E)
-go to either end, Tab completes the name being typed from everything the
-session has defined, Ctrl-C abandons what has been typed of a submission,
-and Ctrl-D on an empty line leaves. A block pasted in is taken as it is,
-with its own indentation and any blank lines in it, and Enter submits it.
+At a terminal the whole submission is edited in place, however many lines
+it has. Up and Down move between its lines, and past the first or last line
+bring back earlier submissions, each as a whole. Enter on the last line
+submits or waits for more as described above; Enter on an earlier line, or
+Alt-Enter anywhere, starts a new line there. Backspace at the start of a line
+joins it to the one above. Home and End (or Ctrl-A and Ctrl-E) go to either
+end of a line, Tab completes the name being typed from everything the session
+has defined, Ctrl-C abandons the submission, and Ctrl-D in an empty one
+leaves. A block pasted in is taken as it is, with its own indentation and any
+blank lines in it. A mistake inside an `if`, a loop or a definition is
+reported once the block is closed rather than as soon as it is typed, so the
+closing lines stay part of the same submission.
+
 Input that is not a terminal, such as a script piped in, is read a line at
 a time as before.
 

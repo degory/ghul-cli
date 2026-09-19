@@ -1,0 +1,309 @@
+namespace Ghul.Cli.Repl is
+    use Collections.LIST
+
+    // The cell being edited at the prompt: its lines, and the line and
+    // column the cursor is at. A line added by Enter starts indented as
+    // INDENTATION says and keeps following it - stepping out for a closing
+    // word as it is typed - until its indent is changed by hand. A line
+    // that came from anywhere else, pasted or recalled, keeps the indent it
+    // came with.
+    class CELL_BUFFER is
+        _lines: LIST[string]
+
+        // For each line, the indent INDENTATION gave it, or -1 once it is
+        // the user's to decide.
+        _expected: LIST[int]
+
+        row: int
+        column: int
+
+        lines: Collections.List[string] => _lines
+
+        line: string => _lines[row]
+
+        is_on_last_line: bool => row == _lines.count - 1
+
+        is_blank: bool => _lines |> Ghul.Pipes.all(l => l.trim().length == 0)
+
+        text: string => _lines |> Ghul.Pipes.join("\n")
+
+        init() is
+            _lines = LIST[string]()
+            _expected = LIST[int]()
+
+            _lines.add("")
+            _expected.add(0)
+        si
+
+        // Starts a fresh cell, its first line at the margin.
+        clear() is
+            _lines.clear()
+            _expected.clear()
+
+            _lines.add("")
+            _expected.add(0)
+
+            row = 0
+            column = 0
+        si
+
+        // The whole cell replaced, as a cell recalled from history is, with
+        // the cursor at the end of its last line.
+        replace(value: string) is
+            _lines.clear()
+            _expected.clear()
+
+            for part in value.split(['\n']) do
+                _lines.add(part)
+                _expected.add(-1)
+            od
+
+            row = _lines.count - 1
+            column = _lines[row].length
+        si
+
+        insert(value: string) is
+            _set_line(line.insert(column, value))
+            column = column + value.length
+
+            _reindent()
+        si
+
+        // Text that may hold line breaks, taken as it is: each break
+        // splits the line at the cursor, and nothing is re-indented.
+        insert_verbatim(value: string) is
+            let parts = value.split(['\n'])
+
+            if parts.count == 1 then
+                _set_line(line.insert(column, value))
+                column = column + value.length
+                _expected[row] = -1
+
+                return
+            fi
+
+            let before = line.substring(0, column)
+            let after = line.substring(column)
+
+            _lines[row] = "{before}{parts[0]}"
+            _expected[row] = -1
+
+            for i in 1..parts.count do
+                row = row + 1
+
+                _lines.insert(row, parts[i])
+                _expected.insert(row, -1)
+            od
+
+            column = _lines[row].length
+            _lines[row] = "{_lines[row]}{after}"
+        si
+
+        // Enter within the cell: the line is split at the cursor, and the
+        // new line starts where INDENTATION says, carrying what followed
+        // the cursor.
+        new_line() is
+            let after = line.substring(column).trim_start()
+
+            _set_line(line.substring(0, column))
+
+            let above = LIST[string]()
+
+            for i in 0..row + 1 do
+                above.add(_lines[i])
+            od
+
+            let indent = INDENTATION.for_next_line(above)
+
+            row = row + 1
+
+            _lines.insert(row, "{string(' ', indent)}{after}")
+            _expected.insert(row, indent)
+
+            column = indent
+        si
+
+        // Backspace in the spaces a line starts with goes back a whole
+        // indent step and leaves the line's indent to the user from then
+        // on; at the start of a line it joins the line to the one above;
+        // anywhere else it deletes one character.
+        backspace() is
+            if column == 0 then
+                if row == 0 then
+                    return
+                fi
+
+                let joined = _lines[row]
+
+                _lines.remove_at(row)
+                _expected.remove_at(row)
+
+                row = row - 1
+                column = _lines[row].length
+
+                _lines[row] = "{_lines[row]}{joined}"
+
+                return
+            fi
+
+            let target =
+                if is_in_indent then
+                    _expected[row] = -1
+
+                    INDENTATION.backspace_column(column)
+                else
+                    column - 1
+                fi
+
+            _set_line(line.remove(target, column - target))
+            column = target
+
+            _reindent()
+        si
+
+        // Delete at the end of a line joins the next line to it.
+        delete() is
+            if column < line.length then
+                if is_in_indent then
+                    _expected[row] = -1
+                fi
+
+                _set_line(line.remove(column, 1))
+                _reindent()
+            elif row < _lines.count - 1 then
+                _lines[row] = "{line}{_lines[row + 1]}"
+
+                _lines.remove_at(row + 1)
+                _expected.remove_at(row + 1)
+            fi
+        si
+
+        left() is
+            if column > 0 then
+                column = column - 1
+            elif row > 0 then
+                row = row - 1
+                column = line.length
+            fi
+        si
+
+        right() is
+            if column < line.length then
+                column = column + 1
+            elif row < _lines.count - 1 then
+                row = row + 1
+                column = 0
+            fi
+        si
+
+        // A line up, keeping the column where the line is long enough;
+        // false at the first line, where Up means history instead.
+        up() -> bool is
+            if row == 0 then
+                return false
+            fi
+
+            row = row - 1
+            column = System.Math.min(column, line.length)
+
+            return true
+        si
+
+        down() -> bool is
+            if row >= _lines.count - 1 then
+                return false
+            fi
+
+            row = row + 1
+            column = System.Math.min(column, line.length)
+
+            return true
+        si
+
+        home() is
+            column = 0
+        si
+
+        end() is
+            column = line.length
+        si
+
+        // Puts the cursor back where it was, within the cell as it is now.
+        move_to(to_row: int, to_column: int) is
+            row = System.Math.clamp(to_row, 0, _lines.count - 1)
+            column = System.Math.clamp(to_column, 0, line.length)
+        si
+
+        // Moves the cursor to the end of the last line, for submitting.
+        to_end() is
+            row = _lines.count - 1
+            column = line.length
+        si
+
+        // Adds a line after the last one, indented as INDENTATION says, and
+        // puts the cursor on it: Enter on a cell that is not finished.
+        add_line() is
+            to_end()
+            new_line()
+        si
+
+        is_in_indent: bool => INDENTATION.leading_spaces(line) >= column
+
+        // The part of a name the cursor follows, which completion extends.
+        name_before_cursor: string is
+            let start mut = column
+            let text = line
+
+            while start > 0 /\ (char.is_letter_or_digit(text[start - 1]) \/ text[start - 1] == '_') do
+                start = start - 1
+            od
+
+            return text.substring(start, column - start)
+        si
+
+        _set_line(value: string) is
+            _lines[row] = value
+        si
+
+        _reindent() is
+            let expected = _expected[row]
+
+            if expected < 0 then
+                return
+            fi
+
+            let text = line
+            let adjusted = INDENTATION.adjust(text, expected)
+
+            if adjusted =~ text then
+                return
+            fi
+
+            _set_line(adjusted)
+            column = System.Math.clamp(column + adjusted.length - text.length, 0, adjusted.length)
+        si
+
+        // What completing a name that starts `typed` adds, given the names
+        // on offer: as much as every one of them agrees on beyond what is
+        // typed, which is the whole of the rest when there is only one.
+        extension(typed: string, names: Collections.List[string]) -> string static is
+            if names.count == 0 then
+                return ""
+            fi
+
+            let common mut = names[0]
+
+            for name in names do
+                let length mut = 0
+
+                while length < common.length /\ length < name.length /\ common[length] == name[length] do
+                    length = length + 1
+                od
+
+                common = common.substring(0, length)
+            od
+
+            return if common.length > typed.length then common.substring(typed.length) else "" fi
+        si
+    si
+si

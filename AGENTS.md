@@ -85,8 +85,12 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
   question. `COMPLETENESS_CHECK` runs
   `ghul-compiler --check-complete` (a spawn per call, a few hundred
   milliseconds) and answers complete, incomplete or invalid.
-- `src/repl/` — the terminal front end. `CELL_INPUT` decides what each
-  line does to the cell being entered: finished text submits unless, at a
+- `src/repl/` — the terminal front end. At a terminal `CELL_EDITOR`
+  edits the whole cell in place (`CELL_BUFFER` its lines and cursor,
+  `CELL_LAYOUT` where they fall on the screen) and `CELL_END` decides what
+  Enter on its last line does, judged from the whole cell. For input that
+  is not a terminal `CELL_INPUT` decides what each line does to the cell
+  being entered: finished text submits unless, at a
   terminal, it ends on a statement written over several lines, which
   holds the cell open; a blank line submits (without showing the value
   after a held construct), and a line holding only `.` submits showing
