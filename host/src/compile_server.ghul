@@ -123,6 +123,10 @@ namespace Ghul.Repl.Host is
         // at a time, while a warm-up compile runs alongside the prompt.
         _exchange_lock: object
 
+        // Set once the session is ending, when a server that stops
+        // answering is the session's doing rather than a fault to report.
+        _is_closing: bool
+
         init(..) is
             _server = _connection
             _exchange_lock = object()
@@ -185,9 +189,20 @@ namespace Ghul.Repl.Host is
         // Not a name a cell takes, so its assembly is never mistaken for one's.
         WARM_UP_NAME: string static => "warm_up"
 
+        // Closing the connection first ends a warm-up exchange still under
+        // way, so taking the lock afterwards does not wait on a server
+        // that has stopped answering.
         close() is
+            _is_closing = true
             _server?.close()
-            _server = null
+
+            System.Threading.Monitor.enter(_exchange_lock)
+
+            try
+                _server = null
+            finally
+                System.Threading.Monitor.exit(_exchange_lock)
+            yrt
 
             _fallback.close()
         si
@@ -323,7 +338,9 @@ namespace Ghul.Repl.Host is
                 "[^\\s:]*cell([0-9]+)\\.(ghul|dll)\\b",
                 m => Ghul.Repl.cell_label_for(int.parse(m.groups[1].value)))
 
-            _say("ghul: {labelled}; starting the compiler for each cell instead")
+            if !_is_closing then
+                _say("ghul: {labelled}; starting the compiler for each cell instead")
+            fi
 
             server.close()
             _server = null

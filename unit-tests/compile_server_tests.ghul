@@ -52,6 +52,7 @@ namespace Ghul.Cli.Tests is
         began: System.Threading.ManualResetEventSlim
         release: System.Threading.ManualResetEventSlim
         sent: LIST[string]
+        is_closed: bool
 
         init() is
             began = System.Threading.ManualResetEventSlim(false)
@@ -66,10 +67,18 @@ namespace Ghul.Cli.Tests is
             began.set()
             release.wait()
 
+            if is_closed then
+                return null
+            fi
+
             return "{{\"status\":0,\"diagnostics\":[]}}"
         si
 
-        close() is si
+        // As a process ending does, closing ends an exchange under way.
+        close() is
+            is_closed = true
+            release.set()
+        si
     si
 
     class FAKE_BACKEND: CompileBackend is
@@ -147,6 +156,24 @@ namespace Ghul.Cli.Tests is
 
             assert warming.wait(10000);
             assert server.sent.count == 1;
+        si
+
+        @Test()
+        close__ends_a_warm_up_under_way_without_reporting_it() is
+            let server = BLOCKING_SERVER()
+            let said = LIST[string]()
+            let backend = _backend(server, FAKE_BACKEND(), said)
+
+            let warming = backend.warm_up()
+
+            assert server.began.wait(10000);
+
+            backend.close()
+
+            assert warming.wait(10000);
+            assert server.is_closed;
+            assert said.count == 0;
+            assert !backend.is_serving;
         si
 
         @Test()
