@@ -324,6 +324,21 @@ namespace Ghul.Cli.Repl is
             od
         si
 
+        // The column, from 1, of a character of the name at the cursor: the
+        // one just before it, or the one under it, or 0 where neither is part
+        // of a name.
+        hover_column: int is
+            let text = line
+
+            if column > 0 /\ _is_word(text[column - 1]) then
+                return column
+            elif column < text.length /\ _is_word(text[column]) then
+                return column + 1
+            fi
+
+            return 0
+        si
+
         _is_word(c: char) -> bool static => char.is_letter_or_digit(c) \/ c == '_'
 
         end() is

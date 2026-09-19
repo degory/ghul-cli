@@ -230,7 +230,11 @@ namespace Ghul.Cli.Repl is
                     fi
 
                 _colours = _palette()
-                _editor = CELL_EDITOR((text, line, column) => _names(text, line, column), _colours, CELL_END(check_ending))
+                _editor = CELL_EDITOR(
+                    (text, line, column) => _names(text, line, column),
+                    (text, line, column) => _current?.hover(text, line, column),
+                    _colours,
+                    CELL_END(check_ending))
             fi
         si
 
@@ -288,6 +292,12 @@ namespace Ghul.Cli.Repl is
                             _complete(session, command.substring(":complete ".length))
                         elif command.starts_with(":hover ") then
                             _hover(session, command.substring(":hover ".length))
+                        elif command.starts_with(":type ") then
+                            _type(session, command.substring(":type ".length))
+                        elif command.starts_with(":save ") then
+                            _save(session, command.substring(":save ".length).trim())
+                        elif command.starts_with(":load ") then
+                            _load(session, command.substring(":load ".length).trim())
                         else
                             Std.write_line("unknown command {command}; :help for the list")
                         fi
@@ -521,6 +531,86 @@ namespace Ghul.Cli.Repl is
             fi
         si
 
+        // The type of an expression, which is compiled but not run.
+        _type(session: HOSTED_SESSION, expression: string) is
+            if expression.trim().length == 0 then
+                Std.write_line("usage: :type EXPRESSION")
+
+                return
+            fi
+
+            if let shown = session.hover(TYPE_QUERY.probe(expression), 1, TYPE_QUERY.column) then
+                if let type = TYPE_QUERY.type_from_hover(shown) then
+                    Std.write_line(type)
+
+                    return
+                fi
+            fi
+
+            if session.is_analysis_available then
+                Std.write_line("no type for that")
+            else
+                Std.write_line("types are not available")
+            fi
+        si
+
+        // The cells that ran to the end, written to a file `:load` reads.
+        _save(session: HOSTED_SESSION, path: string) is
+            if path.length == 0 then
+                Std.write_line("usage: :save FILE")
+
+                return
+            fi
+
+            let text = SCRIPT_FILE.text(session.submissions)
+
+            try
+                IO.File.write_all_text(path, text)
+            catch e: System.Exception
+                Std.write_line("cannot write {path}: {e.message}")
+
+                return
+            yrt
+
+            Std.write_line("saved to {path}")
+        si
+
+        // A file's cells submitted in order, each shown as if typed,
+        // stopping at the first that does not run to the end.
+        _load(session: HOSTED_SESSION, path: string) is
+            if path.length == 0 then
+                Std.write_line("usage: :load FILE")
+
+                return
+            fi
+
+            let text mut = ""
+
+            try
+                text = IO.File.read_all_text(path)
+            catch e: System.Exception
+                Std.write_line("cannot read {path}: {e.message}")
+
+                return
+            yrt
+
+            for cell in SCRIPT_FILE.cells(text) do
+                let number = session.next_cell_number
+
+                _show_replayed(number, cell)
+
+                let result = session.submit("{cell}\n")
+
+                _report(result, true, number, cell)
+
+                if !result.is_accepted \/ result.was_interrupted \/ result.run_error? then
+                    Std.write_line("ghul: stopped at cell {number}; the rest of {path} was not loaded")
+
+                    return
+                fi
+            od
+        si
+
         // The declaration the last character of some text belongs to.
         _hover(session: HOSTED_SESSION, text: string) is
             if let shown = session.hover(text, 1, text.length) then
@@ -543,6 +633,9 @@ namespace Ghul.Cli.Repl is
             Std.write_line(":edit N          bring cell N back to edit as the next cell")
             Std.write_line(":complete TEXT   what could follow TEXT")
             Std.write_line(":hover TEXT      what the end of TEXT names")
+            Std.write_line(":type EXPR       the type of EXPR, without running it")
+            Std.write_line(":save FILE       write the cells that ran to the end to FILE")
+            Std.write_line(":load FILE       submit the cells in FILE, in order")
             Std.write_line(":quit            leave")
             Std.write_line("")
             Std.write_line("a line that finishes an expression or a call submits what you have typed;")
@@ -557,7 +650,8 @@ namespace Ghul.Cli.Repl is
             Std.write_line("empty submission leaves")
             Std.write_line("Ctrl-Left and Ctrl-Right (or Alt-B and Alt-F) move by a word; Ctrl-U and")
             Std.write_line("Ctrl-K delete to the start or end of the line, Ctrl-W the word before the")
-            Std.write_line("cursor; Ctrl-L clears the screen; Tab completes, listing the names on offer")
+            Std.write_line("cursor; Ctrl-L clears the screen; Tab completes, listing the names on offer;")
+            Std.write_line("Shift-Tab shows what the name at the cursor is")
             Std.write_line("Ctrl-C while a submission runs interrupts it; the session carries on")
             Std.write_line("what you end on is shown, unless you end on a statement or with a blank line")
             Std.write_line("messages call a cell cell-3; in code it is cell3, as in cell3.x")

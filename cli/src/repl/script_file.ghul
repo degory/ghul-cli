@@ -1,0 +1,64 @@
+namespace Ghul.Cli.Repl is
+    use Collections.LIST
+    use System.Text.RegularExpressions.Regex
+
+    use Ghul.Repl.Host.CELL_RECORD
+    use Ghul.Repl.Host.CellStatus
+
+    // What `:save` writes and `:load` reads: the cells that ran to the
+    // end, in order, each after a `// cell N` line. `:load` submits each
+    // marked part as a cell of its own, since a cell can redefine a name
+    // an earlier one declared and one file compiled whole cannot.
+    class SCRIPT_FILE is
+        init() is si
+
+        text(records: Collections.List[CELL_RECORD]) -> string static is
+            let result = System.Text.StringBuilder()
+
+            for record in records do
+                if record.status == CellStatus.OK then
+                    if result.length > 0 then
+                        result.append('\n')
+                    fi
+
+                    result.append("// cell {record.number}\n")
+                    result.append(record.source.trim_end())
+                    result.append('\n')
+                fi
+            od
+
+            return result.to_string()
+        si
+
+        // The cells in `text`: one for each `// cell N` line, or the whole
+        // of it where there are none. Cells with nothing in them are left
+        // out.
+        cells(text: string) -> LIST[string] static is
+            let result = LIST[string]()
+            let current = System.Text.StringBuilder()
+
+            for line in text.replace("\r\n", "\n").split(['\n']) do
+                if Regex.is_match(line, "^// cell [0-9]+\\s*$") then
+                    _add(current, result)
+                else
+                    current.append(line)
+                    current.append('\n')
+                fi
+            od
+
+            _add(current, result)
+
+            return result
+        si
+
+        _add(current: System.Text.StringBuilder, result: LIST[string]) static is
+            let cell = current.to_string().trim()
+
+            if cell.length > 0 then
+                result.add(cell)
+            fi
+
+            current.clear()
+        si
+    si
+si

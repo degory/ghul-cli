@@ -83,7 +83,7 @@ everything you type afterwards:
  |     names.add(name)
  | od
  | names
-[first, second, third]
+["first", "second", "third"]
 ```
 
 A line that finishes an expression or a call submits what you have typed
@@ -214,7 +214,8 @@ Ctrl-U and Ctrl-K delete to the start or end of the line, Ctrl-W deletes the
 word before the cursor, and Ctrl-L clears the screen. Tab completes the name
 being typed from everything the session has defined; where more than one name
 fits, it writes in as much as they share and lists them below the
-submission. Ctrl-D in an empty submission leaves. Ctrl-C at the prompt does
+submission. Shift-Tab shows what the name at the cursor is below the
+submission, as `:hover` does. Ctrl-D in an empty submission leaves. Ctrl-C at the prompt does
 nothing; while a submission is running, Ctrl-C interrupts it and brings the
 prompt back with the session intact. .NET cannot stop a running thread from
 outside, so an interrupted submission is abandoned rather than ended: it
@@ -241,10 +242,22 @@ answer
 answer: int
 ```
 
-They start a compiler in analysis mode the first time either is used, which
-takes a second or two; after that an answer takes tens of milliseconds, and
-a little longer straight after a submission, which the analyser has to take
-in first. They need `ghul.compiler` 59.9.0 or newer, and say they are not
+`:type EXPRESSION` shows the type of an expression without running it:
+
+```
+2> :type [answer, 1] |> map(n => "{n}")
+Pipe[string]
+```
+
+`:save FILE` writes the cells that ran to the end to FILE, each after a
+`// cell N` line, and `:load FILE` submits the cells in FILE in order, as a
+new cell each, stopping at the first that does not run to the end. A file
+with no `// cell N` lines is submitted as one cell.
+
+`:complete`, `:hover` and `:type` start a compiler in analysis mode the
+first time one is used, which takes a second or two; after that an answer
+takes tens of milliseconds, and a little longer straight after a
+submission, which the analyser has to take in first. They need `ghul.compiler` 59.9.0 or newer, and say they are not
 available with an older one.
 
 The session keeps one compiler running for its whole length, started

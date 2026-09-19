@@ -1,0 +1,23 @@
+namespace Ghul.Cli.Repl is
+    // `:type EXPRESSION` asks hover about a local variable initialized
+    // with the expression, so the expression is never run.
+    class TYPE_QUERY is
+        init() is si
+
+        probe(expression: string) -> string static => "let it = {expression.trim()}"
+
+        // Where the name is in the probe, from 1.
+        column: int static => 5
+
+        // The type, out of what hover says about the name.
+        type_from_hover(shown: string) -> string? static is
+            let marker = "it: "
+
+            if !shown.starts_with(marker, System.StringComparison.ORDINAL) then
+                return null
+            fi
+
+            return shown.substring(marker.length)
+        si
+    si
+si

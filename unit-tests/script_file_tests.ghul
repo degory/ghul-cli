@@ -1,0 +1,78 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+
+    use Ghul.Cli.Repl.SCRIPT_FILE
+    use Ghul.Cli.Repl.TYPE_QUERY
+    use Ghul.Repl.Host.CELL_RECORD
+    use Ghul.Repl.Host.CellStatus
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    @TestClass()
+    class SCRIPT_FILE_TESTS is
+        init() is si
+
+        @Test()
+        text__writes_the_cells_that_ran_to_the_end_each_after_a_marker() is
+            let records = LIST[CELL_RECORD]()
+
+            records.add(CELL_RECORD(1, "let x = 1\n", CellStatus.OK, null))
+            records.add(CELL_RECORD(2, "nope\n", CellStatus.FAILED, null))
+            records.add(CELL_RECORD(3, "throw System.Exception(\"x\")\n", CellStatus.THREW, null))
+            records.add(CELL_RECORD(4, "let x = x + 1\n", CellStatus.OK, null))
+
+            assert SCRIPT_FILE.text(records) =~ "// cell 1\nlet x = 1\n\n// cell 4\nlet x = x + 1\n";
+        si
+
+        @Test()
+        cells__splits_at_each_marker_and_leaves_out_empty_ones() is
+            let cells = SCRIPT_FILE.cells("// cell 1\nlet x = 1\n\n// cell 4\r\nif x > 0 then\n    x\nfi\n// cell 7\n\n")
+
+            assert cells.count == 2;
+            assert cells[0] =~ "let x = 1";
+            assert cells[1] =~ "if x > 0 then\n    x\nfi";
+        si
+
+        @Test()
+        cells__takes_a_file_with_no_markers_as_one_cell() is
+            let cells = SCRIPT_FILE.cells("let x = 1\nlet y = 2\n")
+
+            assert cells.count == 1;
+            assert cells[0] =~ "let x = 1\nlet y = 2";
+        si
+
+        @Test()
+        cells__reads_back_what_text_writes() is
+            let records = LIST[CELL_RECORD]()
+
+            records.add(CELL_RECORD(2, "let a = 1\n", CellStatus.OK, null))
+            records.add(CELL_RECORD(5, "a\n", CellStatus.OK, 2))
+
+            let cells = SCRIPT_FILE.cells(SCRIPT_FILE.text(records))
+
+            assert cells.count == 2;
+            assert cells[0] =~ "let a = 1";
+            assert cells[1] =~ "a";
+        si
+    si
+
+    @TestClass()
+    class TYPE_QUERY_TESTS is
+        init() is si
+
+        @Test()
+        probe__names_the_expression_at_the_column_given() is
+            let probe = TYPE_QUERY.probe("  xs.count ")
+
+            assert probe =~ "let it = xs.count";
+            assert probe.substring(TYPE_QUERY.column - 1, 2) =~ "it";
+        si
+
+        @Test()
+        type_from_hover__takes_the_type_after_the_name() is
+            assert TYPE_QUERY.type_from_hover("it: (total: int, string)") =~ "(total: int, string)";
+            assert !TYPE_QUERY.type_from_hover("xs: int[]")?;
+        si
+    si
+si
