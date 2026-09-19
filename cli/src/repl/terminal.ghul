@@ -243,6 +243,11 @@ namespace Ghul.Cli.Repl is
             fi
         si
 
+        // How diagnostics are coloured, if at all: not when they are
+        // written somewhere other than the terminal.
+        _diagnostic_colours() -> Ghul.Repl.DiagnosticColours? =>
+            if let palette = _colours /\ !Std.is_error_redirected then PALETTE_DIAGNOSTIC_COLOURS(palette) else null fi
+
         // What the input is coloured with at a terminal, if anything.
         _palette() -> PALETTE? is
             let environment = (name: string) -> string? => System.Environment.get_environment_variable(name)
@@ -480,7 +485,7 @@ namespace Ghul.Cli.Repl is
         si
 
         _report(result: SUBMIT_RESULT, want_value: bool, number: int, source: string) is
-            for line in DIAGNOSTIC_VIEW.lines(result.diagnostics, "cell-{number}", source, if Std.is_error_redirected then null else _colours fi) do
+            for line in Ghul.Repl.DIAGNOSTIC_VIEW.lines(result.diagnostics, "cell-{number}", source, _diagnostic_colours()) do
                 Std.error.write_line(line)
             od
 

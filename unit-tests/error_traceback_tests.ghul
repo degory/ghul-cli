@@ -1,0 +1,46 @@
+namespace Ghul.Cli.Tests is
+    use Ghul.Jupyter.ERROR_TRACEBACK
+    use Ghul.Jupyter.ANSI_DIAGNOSTIC_COLOURS
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    @TestClass()
+    class ERROR_TRACEBACK_TESTS is
+        init() is si
+
+        @Test()
+        name_and_message__takes_the_type_name_and_its_message_from_the_first_line() is
+            let thrown = ERROR_TRACEBACK.name_and_message("System.ArgumentOutOfRangeException: out of range\n   at cell-2")
+
+            assert thrown.name =~ "ArgumentOutOfRangeException";
+            assert thrown.message =~ "out of range";
+        si
+
+        @Test()
+        name_and_message__treats_a_line_in_another_shape_as_all_message() is
+            let thrown = ERROR_TRACEBACK.name_and_message("something went wrong: badly")
+
+            assert thrown.name =~ "Exception";
+            assert thrown.message =~ "something went wrong: badly";
+        si
+
+        @Test()
+        of_exception__colours_the_first_line_and_keeps_the_frames() is
+            let lines = ERROR_TRACEBACK.of_exception("System.Exception: boom\n   at cell-3")
+
+            assert lines.count == 2;
+            assert lines[0] =~ "\u001B[31mSystem.Exception: boom\u001B[39m";
+            assert lines[1] =~ "   at cell-3";
+        si
+
+        @Test()
+        colours__are_red_for_an_error_and_yellow_for_a_warning() is
+            let colours = ANSI_DIAGNOSTIC_COLOURS()
+
+            assert colours.severity("error", "x") =~ "\u001B[31mx\u001B[39m";
+            assert colours.severity("warn", "x") =~ "\u001B[33mx\u001B[39m";
+            assert colours.code("let x = 1") =~ "let x = 1";
+        si
+    si
+si
