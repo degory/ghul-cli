@@ -157,7 +157,7 @@ namespace Ghul.Cli.Repl is
                             _finish("")
 
                             if step != CellStep.NOTHING then
-                                _history.add(_buffer.text)
+                                _history.add(CELL_TEXT.without_terminator(_buffer.lines))
                             fi
 
                             return CELL_READ(source, step, is_command)

@@ -344,4 +344,21 @@ namespace Ghul.Cli.Repl is
             return if common.length > typed.length then common.substring(typed.length) else "" fi
         si
     si
+
+    class CELL_TEXT is
+        init() is si
+
+        // A cell's lines without what ended it: a line holding only `.`,
+        // and any blank lines. Recalled from history, the cell then ends on
+        // its last line of code, where Enter submits it.
+        without_terminator(lines: Collections.List[string]) -> string static is
+            let end mut = lines.count
+
+            while end > 0 /\ (lines[end - 1].trim().length == 0 \/ lines[end - 1].trim() =~ ".") do
+                end = end - 1
+            od
+
+            return lines |> Ghul.Pipes.take(end) |> Ghul.Pipes.join("\n")
+        si
+    si
 si

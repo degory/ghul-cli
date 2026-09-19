@@ -117,8 +117,10 @@ third.
 
 `:rerun 3` submits the third cell's text again, as a new cell with a number
 of its own; `:cells` lists it as a rerun of 3. `:rerun 3..` submits the
-third cell and then every later one that ran to the end, in order, stopping
-at the first that does not: after redefining something an earlier cell
+third cell again and then, in order, every later cell that ran to the end
+the first time, leaving out any that failed, threw or were interrupted; it
+stops at the first of those resubmitted cells that does not run to the end
+this time: after redefining something an earlier cell
 used, that brings everything built on it up to date. `:edit 3` brings the
 third cell's text back as the cell at the next prompt, to change and submit
 as a new cell.
