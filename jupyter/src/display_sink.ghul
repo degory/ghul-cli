@@ -1,6 +1,6 @@
 namespace Ghul.Jupyter is
     use Ghul.Repl.CELL_BUNDLE
-    use Ghul.Repl.Display.DisplaySink
+    use Ghul.DisplaySink
 
     // What display shows from a running cell, published as display_data
     // with the same bundle a cell's value is shown with, and redrawn with
