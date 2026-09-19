@@ -1,0 +1,105 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+
+    use Ghul.Repl.Host.CompileBackend
+    use Ghul.Repl.Host.COMPILE_RESULT
+    use Ghul.Repl.Host.HOSTED_SESSION
+    use Ghul.Repl.Host.PACKAGE_RESTORE
+    use Ghul.Repl.CELL_REQUEST
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    // Records the references each request names, and compiles nothing.
+    class REFERENCE_RECORDING_BACKEND: CompileBackend is
+        references: LIST[Collections.List[string]]
+
+        init() is
+            references = LIST[Collections.List[string]]()
+        si
+
+        compile(request: CELL_REQUEST) -> COMPILE_RESULT is
+            references.add(request.references)
+
+            return COMPILE_RESULT(null, LIST[Ghul.Repl.CELL_DIAGNOSTIC]())
+        si
+
+        close() is si
+    si
+
+    @TestClass()
+    class SESSION_REFERENCES_TESTS is
+        init() is si
+
+        _directory() -> string =>
+            IO.Path.join([IO.Path.get_temp_path(), "ghul-cli-tests-{System.Guid.new_guid().to_string("N")}"])
+
+        // An assembly this test can count on existing.
+        _an_assembly: string => (typeof PACKAGE_RESTORE).assembly.location
+
+        @Test()
+        add_reference__copies_the_assembly_beside_the_cells_under_its_name() is
+            let directory = _directory()
+            let session = HOSTED_SESSION(REFERENCE_RECORDING_BACKEND(), directory, false)
+
+            let added = session.add_reference(_an_assembly)
+
+            assert !added.problem?;
+            assert added.names.count == 1;
+            assert added.names[0] =~ "ghul.repl.host";
+            assert IO.File.exists(IO.Path.join([directory, "ghul.repl.host.dll"]));
+        si
+
+        @Test()
+        add_reference__is_referenced_by_every_later_cell() is
+            let backend = REFERENCE_RECORDING_BACKEND()
+            let session = HOSTED_SESSION(backend, _directory(), false)
+
+            session.add_reference(_an_assembly);
+            session.submit("1\n");
+
+            assert backend.references.count >= 1;
+            assert backend.references[0] |> Ghul.Pipes.any(r => r =~ "ghul.repl.host");
+        si
+
+        @Test()
+        add_reference__adds_an_assembly_once() is
+            let session = HOSTED_SESSION(REFERENCE_RECORDING_BACKEND(), _directory(), false)
+
+            session.add_reference(_an_assembly);
+
+            let again = session.add_reference(_an_assembly)
+
+            assert again.names.count == 0;
+            assert session.references.count == 1;
+        si
+
+        @Test()
+        add_reference__says_why_a_file_cannot_be_referenced() is
+            let directory = _directory()
+            let session = HOSTED_SESSION(REFERENCE_RECORDING_BACKEND(), directory, false)
+
+            assert session.add_reference(IO.Path.join([directory, "missing.dll"])).problem!.starts_with("no such file");
+
+            let text = IO.Path.get_temp_file_name()
+
+            IO.File.write_all_text(text, "not an assembly")
+
+            assert session.add_reference(text).problem!.starts_with("not a .NET assembly");
+        si
+
+        @Test()
+        project__references_the_package_at_the_version_or_the_latest() is
+            assert PACKAGE_RESTORE.project("Humanizer.Core", "2.14.1").contains("<PackageReference Include=\"Humanizer.Core\" Version=\"2.14.1\" />");
+            assert PACKAGE_RESTORE.project("A&B", null).contains("Include=\"A&amp;B\" Version=\"*\"");
+        si
+
+        @Test()
+        first_error__is_the_message_without_the_project() is
+            let output = "  Determining projects to restore...\n/tmp/x/p.csproj : error NU1101: Unable to find package Zz. [/tmp/x/p.csproj]\n"
+
+            assert PACKAGE_RESTORE.first_error(output) =~ "error NU1101: Unable to find package Zz.";
+            assert !PACKAGE_RESTORE.first_error("all good")?;
+        si
+    si
+si

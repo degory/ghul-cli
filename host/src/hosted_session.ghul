@@ -95,6 +95,129 @@ namespace Ghul.Repl.Host is
             _session = SESSION(_want_default_use)
             _context = SESSION_LOAD_CONTEXT(_probe_directory)
             _assemblies = Collections.MAP[string, Assembly]()
+            _references = Collections.LIST[string]()
+        si
+
+        // Assemblies added with add_reference or add_package, by name:
+        // each is kept in the session's directory beside the cells, where
+        // a cell's compile finds it as a reference and the session's load
+        // context finds it when the cell runs.
+        _references: Collections.LIST[string]
+
+        references: Collections.List[string] => _references
+
+        // An assembly file, referenced by every later cell.
+        add_reference(path: string) -> ADDED_REFERENCES is
+            let names = Collections.LIST[string]()
+
+            if !IO.File.exists(path) then
+                return ADDED_REFERENCES(names, "no such file: {path}")
+            fi
+
+            if let problem = _add_assembly(IO.Path.get_full_path(path), names) then
+                return ADDED_REFERENCES(names, problem)
+            fi
+
+            return ADDED_REFERENCES(names, null)
+        si
+
+        // A NuGet package and what it depends on, referenced by every later
+        // cell. With no version the latest stable release is taken.
+        add_package(package: string, version: string?) -> ADDED_REFERENCES is
+            let names = Collections.LIST[string]()
+            let directory = _probe_directory
+
+            if !directory? then
+                return ADDED_REFERENCES(names, "this session keeps no directory to add a package to")
+            fi
+
+            let restore_directory = IO.Path.join([directory, "packages", System.Guid.new_guid().to_string("N")])
+
+            // The restore's project and its build output go once what it
+            // produced is copied beside the cells.
+            try
+                let restored = PACKAGE_RESTORE.assemblies(package, version, restore_directory)
+
+                if let problem = restored.problem then
+                    return ADDED_REFERENCES(names, problem)
+                fi
+
+                for path in restored.paths do
+                    if let problem = _add_assembly(path, names) then
+                        return ADDED_REFERENCES(names, problem)
+                    fi
+                od
+
+                return ADDED_REFERENCES(names, null)
+            finally
+                _delete_quietly(restore_directory)
+            yrt
+        si
+
+        _delete_quietly(directory: string) static is
+            try
+                if IO.Directory.exists(directory) then
+                    IO.Directory.delete(directory, true)
+                fi
+            catch e: System.Exception
+            yrt
+        si
+
+        // Copied into the session's directory under its assembly name, which
+        // is the name both the compile and the load context look for. One
+        // that is there already, such as the session's own copy of the ghūl
+        // runtime, is left as it is.
+        _add_assembly(path: string, names: Collections.LIST[string]) -> string? is
+            let directory = _probe_directory ?? ""
+
+            if directory.length == 0 then
+                return "this session keeps no directory to add a reference to"
+            fi
+
+            let name: string mut
+
+            try
+                name = System.Reflection.AssemblyName.get_assembly_name(path).name ?? IO.Path.get_file_name_without_extension(path)!
+            catch e: System.BadImageFormatException
+                return "not a .NET assembly: {path}"
+            yrt
+
+            IO.Directory.create_directory(directory)
+
+            let destination = IO.Path.join([directory, "{name}.dll"])
+
+            if IO.File.exists(destination) then
+                return null
+            fi
+
+            IO.File.copy(path, destination)
+
+            _references.add(name)
+            names.add(name)
+
+            _analysis?.add(destination)
+
+            return null
+        si
+
+        // The request with the added assemblies referenced as well.
+        _with_references(request: Ghul.Repl.CELL_REQUEST) -> Ghul.Repl.CELL_REQUEST is
+            if _references.count == 0 then
+                return request
+            fi
+
+            let references = Collections.LIST[string](request.references)
+
+            references.add_range(_references)
+
+            return Ghul.Repl.CELL_REQUEST(
+                request.index,
+                request.name,
+                request.source,
+                request.prelude_line_count,
+                references,
+                request.carried_line_count,
+                request.carried_names)
         si
 
         // Each accepted cell's assembly, by cell name.
@@ -124,7 +247,7 @@ namespace Ghul.Repl.Host is
         si
 
         _submit_recorded(source: string, rerun_of: int?) -> SUBMIT_RESULT is
-            let request = _session.prepare(source)
+            let request = _with_references(_session.prepare(source))
             let result = _submit(source, request)
 
             let status =
@@ -156,7 +279,7 @@ namespace Ghul.Repl.Host is
                 dropped = _session.drop_failed_imports(request, compiled.diagnostics)
 
                 if dropped.count > 0 then
-                    request = _session.prepare(source)
+                    request = _with_references(_session.prepare(source))
                     compiled = _backend.compile(request)
                 fi
             fi
