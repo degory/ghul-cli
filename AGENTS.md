@@ -10,7 +10,16 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
 
 ## Layout
 
-- `src/main.ghul` — the whole tool. Strips a leading `--no-cache`, then
+Each package is a folder of its own - `cli/`, `repl/`, `host/`,
+`jupyter/` - beside `unit-tests/` and `tests/`, with what they share
+(README, LICENSE, VERSION, `Directory.*.props`, the tool manifest) at the
+root. `ghul-cli.slnx` lists every project, so `dotnet build` at the root
+builds them all, and `ghul-cli.code-workspace` opens each folder in VS Code.
+Every package is packed into the root `nupkg/`, where the release job
+looks for them.
+
+- `cli/src/main.ghul` — the whole tool, packed as `ghul.cli` by
+  `cli/ghul-cli.ghulproj`. Strips a leading `--no-cache`, then
   dispatches on the next argument: `--` skips straight to the default
   (unforced) run so a file literally named `run`/`compile`/`cache`/
   `install-compiler`/`version` can still be reached; otherwise a verb
@@ -89,7 +98,7 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
   question. `COMPLETENESS_CHECK` runs
   `ghul-compiler --check-complete` (a spawn per call, a few hundred
   milliseconds) and answers complete, incomplete or invalid.
-- `src/repl/` — the terminal front end. At a terminal `CELL_EDITOR`
+- `cli/src/repl/` — the terminal front end. At a terminal `CELL_EDITOR`
   edits the whole cell in place (`CELL_BUFFER` its lines and cursor,
   `CELL_LAYOUT` where they fall on the screen) and `CELL_END` decides what
   Enter on its last line does, judged from the whole cell. For input that

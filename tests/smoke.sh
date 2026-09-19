@@ -9,7 +9,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 
-dotnet build -nologo -c Debug "$repo_root/ghul-cli.ghulproj" -o "$scratch/build" >&2
+dotnet build -nologo -c Debug "$repo_root/cli/ghul-cli.ghulproj" -o "$scratch/build" >&2
 cli="$scratch/build/ghul-cli.dll"
 
 export HOME="$scratch/home"

@@ -83,7 +83,7 @@ jobs:
     # from one repository, and the tool bundles the library it references.
     - name: Create packages
       run: |
-        dotnet pack -nologo ghul-cli.ghulproj -p:Version=${{ needs.version.outputs.package }}
+        dotnet pack -nologo cli/ghul-cli.ghulproj -p:Version=${{ needs.version.outputs.package }}
         dotnet pack -nologo repl/repl.ghulproj -p:Version=${{ needs.version.outputs.package }}
         dotnet pack -nologo host/host.ghulproj -p:Version=${{ needs.version.outputs.package }}
         dotnet pack -nologo jupyter/jupyter.ghulproj -p:Version=${{ needs.version.outputs.package }}

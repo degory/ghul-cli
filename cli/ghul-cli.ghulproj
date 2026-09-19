@@ -17,7 +17,7 @@
     <Description>Run ghūl scripts directly, including via a #!/usr/bin/env ghul shebang line on Linux: resolves and installs the ghul.compiler tool on first use, compiles, caches the result by script content, and runs it.</Description>
     <PackageDescription>Run ghūl scripts directly, including via a #!/usr/bin/env ghul shebang line on Linux: resolves and installs the ghul.compiler tool on first use, compiles, caches the result by script content, and runs it.</PackageDescription>
     <PackageTags>ghul;ghūl;cli;script;shebang</PackageTags>
-    <PackageOutputPath>./nupkg</PackageOutputPath>
+    <PackageOutputPath>../nupkg</PackageOutputPath>
     <PackageProjectUrl>https://ghul.dev</PackageProjectUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -28,10 +28,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="README.md" Pack="true" PackagePath="\" />
-    <None Include="LICENSE*" Pack="true" PackagePath="\" />
+    <None Include="../README.md" Pack="true" PackagePath="\" />
+    <None Include="../LICENSE*" Pack="true" PackagePath="\" />
 
-    <ProjectReference Include="host/host.ghulproj" />
+    <ProjectReference Include="../host/host.ghulproj" />
 
     <GhulSources Include="src/**/*.ghul" />
   </ItemGroup>

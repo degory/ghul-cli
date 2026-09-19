@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="cli/ghul-cli.ghulproj" Type="9a19103f-16f7-4668-be54-9a1e7a4f7556" />
+  <Project Path="repl/repl.ghulproj" Type="9a19103f-16f7-4668-be54-9a1e7a4f7556" />
+  <Project Path="host/host.ghulproj" Type="9a19103f-16f7-4668-be54-9a1e7a4f7556" />
+  <Project Path="jupyter/jupyter.ghulproj" Type="9a19103f-16f7-4668-be54-9a1e7a4f7556" />
+  <Project Path="unit-tests/unit-tests.ghulproj" Type="9a19103f-16f7-4668-be54-9a1e7a4f7556" />
+  <Project Path="tests/jupyter-client/jupyter-client.ghulproj" Type="9a19103f-16f7-4668-be54-9a1e7a4f7556" />
+</Solution>

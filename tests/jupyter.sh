@@ -34,7 +34,7 @@ trap cleanup EXIT INT TERM
 
 # Built before the scratch HOME is set, since building needs the real one's
 # package cache and local tool manifest.
-dotnet build -nologo -c Debug "$repo_root/ghul-cli.ghulproj" -o "$scratch/cli" >&2
+dotnet build -nologo -c Debug "$repo_root/cli/ghul-cli.ghulproj" -o "$scratch/cli" >&2
 dotnet build -nologo -c Debug "$repo_root/jupyter/jupyter.ghulproj" -o "$scratch/kernel" >&2
 dotnet build -nologo -c Debug "$repo_root/tests/jupyter-client/jupyter-client.ghulproj" -o "$scratch/client" >&2
 

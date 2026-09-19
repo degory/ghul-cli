@@ -1,0 +1,17 @@
+{
+    "folders": [
+        { "name": "ghul-cli", "path": "." },
+        { "name": "cli", "path": "cli" },
+        { "name": "repl", "path": "repl" },
+        { "name": "host", "path": "host" },
+        { "name": "jupyter", "path": "jupyter" },
+        { "name": "unit-tests", "path": "unit-tests" },
+        { "name": "tests", "path": "tests" }
+    ],
+    "settings": {},
+    "extensions": {
+        "recommendations": [
+            "degory.ghul"
+        ]
+    }
+}

@@ -10,7 +10,7 @@
     <PackageReference Include="MSTest.TestAdapter" />
     <PackageReference Include="MSTest.TestFramework" />
 
-    <ProjectReference Include="../ghul-cli.ghulproj" />
+    <ProjectReference Include="../cli/ghul-cli.ghulproj" />
     <ProjectReference Include="../jupyter/jupyter.ghulproj" />
 
     <GhulSources Include="**/*.ghul" />
