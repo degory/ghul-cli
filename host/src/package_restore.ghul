@@ -46,10 +46,16 @@ namespace Ghul.Repl.Host is
                 return (paths = paths, problem = "could not start dotnet to restore {package}")
             fi
 
-            let said = process.standard_output.read_to_end()
-            let _ = process.standard_error.read_to_end()
+            // Both streams read at once: read one after the other, a child
+            // that fills the pipe of the one not yet read would wait for it
+            // forever.
+            let output_read = process.standard_output.read_to_end_async()
+            let error_read = process.standard_error.read_to_end_async()
 
             process.wait_for_exit()
+
+            let said = output_read.result
+            let _ = error_read.result
 
             if process.exit_code != 0 then
                 return (paths = paths, problem = "could not restore {package}: {first_error(said) ?? "dotnet publish failed"}")
