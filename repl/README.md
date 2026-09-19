@@ -1,34 +1,44 @@
 # ghul.repl
 
-The session behind a ghūl read-eval-print loop.
+[![CI](https://img.shields.io/github/actions/workflow/status/degory/ghul-cli/ci.yml?branch=main)](https://github.com/degory/ghul-cli/actions/workflows/ci.yml?query=branch%3Amain)
+[![NuGet version (ghul.repl)](https://img.shields.io/nuget/v/ghul.repl.svg)](https://www.nuget.org/packages/ghul.repl/)
+[![License](https://img.shields.io/github/license/degory/ghul-cli)](https://github.com/degory/ghul-cli/blob/main/LICENSE)
+[![ghūl](https://img.shields.io/badge/gh%C5%ABl-100%25!-information)](https://ghul.dev)
 
-A session is a list of accepted cells. Each submission is compiled as its
-own library assembly in its own namespace, referencing the earlier cells'
-assemblies, and the session generates the `use` prelude that makes the
-earlier cells' names visible - one per visible name, naming the cell that
-last defined it, so a redefinition takes effect going forward and nothing
-about name lookup changes. The `use` directives a cell opens with are
-carried into every later cell's prelude too, and every prelude begins with
-`use default` unless the session is made with `SESSION(false)`. Each
-prelude leaves out the imports its own cell writes, so its length varies
-from cell to cell; `request.prelude_line_count` is the one to use.
+The session behind a [ghūl](https://ghul.dev) read-eval-print loop. It keeps
+track of the cells a user has submitted and works out what each new cell needs
+in order to see them. It compiles nothing, loads nothing, runs nothing and
+names no file: a host does those, so the same session works in a terminal, a
+browser page and a notebook kernel.
 
-A host hands back the compiler's diagnostics in `CELL_REPLY`, either as
-`CELL_DIAGNOSTIC`s or as the compiler's own lines, which it takes apart.
-`accept` returns them as the user should see them: every location in a
-cell, related ones included, names the cell by its label (`cell-3`) and
-counts lines from the first the user wrote. `CELL_ERROR.describe` does the
-same for an exception a cell threw.
+## how a session works
 
-This package compiles nothing, loads nothing, runs nothing and names no
-file. A host drives it in three steps:
+A session is a list of accepted cells. A host compiles each cell as its own
+library assembly, in its own namespace, with references to the assemblies of
+the earlier cells.
+
+The session writes a prelude of `use` lines in front of each new cell, so that
+the cell can see the names the earlier cells defined. The prelude has one
+`use` for each visible name, and that `use` names the cell that defined the
+name most recently. A new definition of a name therefore replaces the old one
+for later cells, and name lookup in the compiler works as it always does.
+
+The prelude also repeats the `use` lines that earlier cells started with. It
+starts with `use default`, unless the host creates the session with
+`SESSION(false)`. It leaves out any import that the new cell writes itself, so
+its length changes from cell to cell. Read the length from
+`request.prelude_line_count`.
+
+## using it
+
+A host drives the session in three steps:
 
 ```ghul
 let request = session.prepare(source)
 
 // compile request.source, with request.references naming the earlier
-// cells whose assemblies it needs; where the result touches disk it is
-// named `<request.name>.dll`
+// cells whose assemblies it needs. if the result is written to disk,
+// name it `<request.name>.dll`
 
 let loaded = Ghul.Repl.CELL_EXPORTS.read(assembly)
 let outcome = session.accept(request, Ghul.Repl.CELL_REPLY(diagnostics, loaded))
@@ -38,15 +48,31 @@ if outcome.is_accepted then
 fi
 ```
 
-`CELL_EXPORTS.read` takes an assembly the host has already loaded, so a
-host that holds its cells as bytes in one load context never has to write
-them out. A cell that compiled is accepted whatever its own code then
-does, so it is run after it has joined the session.
+`CELL_EXPORTS.read` takes an assembly that the host has already loaded. A host
+that holds its cells as bytes in one load context never writes them to disk.
 
-`CELL_DISPLAY.format` renders the value a cell ended on - a collection to
-a limit of its elements, one level deep, and nothing where the cell ended
-on a statement - and prints nothing, so every host shows the same value
-the same way.
+The session accepts every cell that compiles, whatever the cell does when it
+runs. So run a cell after the session accepts it.
 
-The compiler needs to be recent enough for `--submission`, `--reference`
-and `use default`.
+## diagnostics
+
+The host gives the compiler's diagnostics to the session in a `CELL_REPLY`. It
+can give them as `CELL_DIAGNOSTIC` values, or as the lines the compiler wrote,
+which the session parses.
+
+`accept` returns the diagnostics in the form the user should see. Every
+location in a cell, including a related location, names the cell by its label
+(`cell-3`) and counts lines from the first line the user wrote.
+`CELL_ERROR.describe` does the same for an exception that a cell threw.
+
+## values
+
+`CELL_DISPLAY.format` renders the value that a cell ended on. It renders a
+collection one level deep, up to a limit on the number of elements, and it
+returns nothing for a cell that ended on a statement. It prints nothing
+itself, so every host shows the same value in the same way.
+
+## requirements
+
+The compiler needs to support `--submission`, `--reference` and `use default`:
+`ghul.compiler` 59.8.0 or newer.
