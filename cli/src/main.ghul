@@ -255,6 +255,10 @@ namespace Ghul.Cli is
         start_info.argument_list.add("-o")
         start_info.argument_list.add(output)
 
+        if wants_implicit_default_use(compiler_version) then
+            start_info.argument_list.add("--implicit-default-use")
+        fi
+
         if let process: System.Diagnostics.Process = System.Diagnostics.Process.start(start_info) then
             process.wait_for_exit()
 
@@ -617,21 +621,32 @@ namespace Ghul.Cli is
     MINIMUM_REPL_COMPILER: string => "59.8.0"
 
     // Whether what is installed is old enough to be missing something
-    // the session needs. A version that does not parse is left alone:
-    // it is a build of the compiler rather than a release, and whoever
-    // installed it knows what it is.
-    is_too_old_for_repl(version: string) -> bool is
+    // the session needs.
+    is_too_old_for_repl(version: string) -> bool => is_older_than(version, MINIMUM_REPL_COMPILER)
+
+    // The oldest compiler that takes `--implicit-default-use`, which gives
+    // a script with no namespace of its own the default imports, as the
+    // REPL has them. An older one compiles scripts as it always did.
+    MINIMUM_IMPLICIT_DEFAULT_USE_COMPILER: string => "60.2.0"
+
+    wants_implicit_default_use(version: string) -> bool =>
+        !is_older_than(version, MINIMUM_IMPLICIT_DEFAULT_USE_COMPILER)
+
+    // Whether `version` is a release older than `minimum`. A version that
+    // does not parse is a build of the compiler rather than a release, and
+    // is taken to be current.
+    is_older_than(version: string, minimum: string) -> bool is
         let installed: System.Version? mut
-        let minimum: System.Version? mut
+        let wanted: System.Version? mut
 
         if
             !System.Version.try_parse(version, installed ref) \/ !installed? \/
-            !System.Version.try_parse(MINIMUM_REPL_COMPILER, minimum ref) \/ !minimum?
+            !System.Version.try_parse(minimum, wanted ref) \/ !wanted?
         then
             return false
         fi
 
-        return installed < minimum
+        return installed < wanted
     si
 
     // What `ghul repl` was asked for.
