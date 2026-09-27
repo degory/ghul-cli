@@ -115,7 +115,7 @@ namespace Ghul.Cli.Tests is
 
         @Test()
         table__says_how_many_more_rows_there_are() is
-            let html = _table(cast object(Ghul.Pipes.from(0) |> Ghul.Pipes.take(25) |> Ghul.Pipes.collect_list()))
+            let html = _table(cast object(Ghul.Pipes.from(0) |> Ghul.Pipes.take(25) |> Ghul.Pipes.collect_mutable()))
 
             assert html.contains("and 5 more");
         si
