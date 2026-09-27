@@ -342,7 +342,7 @@ fi
 echo "smoke: 'ghul repl' keeps going after cells whose compiled form holds generated names..." >&2
 repl_generated_in="$scratch/repl-generated-in.txt"
 cat > "$repl_generated_in" <<'REPL'
-let up = ["ann"] |> map(n => n.to_upper()) |> collect_list()
+let up = ["ann"] |> map(n => n.to_upper()) |> collect_mutable()
 
 count_async() -> Tasks.TASK[int] is
     await Tasks.TASK.delay(1)
