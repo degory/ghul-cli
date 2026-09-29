@@ -1,0 +1,66 @@
+namespace Ghul.Cli.Tests is
+    use IO.Directory
+    use IO.File
+    use IO.Path
+
+    use Ghul.Jupyter.COMPILER_LOCATION
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    // Which runtime the kernel pairs with the compiler ghul.cli installed,
+    // in a tools directory whose store holds more than one version.
+    @TestClass()
+    class COMPILER_LOCATION_TESTS is
+        init() is si
+
+        // A tools directory whose store holds a runtime under each of
+        // `versions`, laid out as a .NET tool installs one.
+        _tools(versions: string[]) -> string is
+            let tools = Path.join([Path.get_temp_path(), "ghul-location-{System.Guid.new_guid()}"])
+
+            for v in versions do
+                let directory = Path.join([tools, ".store", "ghul.compiler", v, "ghul.compiler", v, "tools", "net10.0", "any"])
+
+                Directory.create_directory(directory)
+                File.write_all_text(Path.join([directory, "ghul-runtime.dll"]), v)
+            od
+
+            return tools
+        si
+
+        @Test()
+        runtime_under__takes_the_runtime_of_the_version_the_shim_runs() is
+            let tools = _tools(["1.0.0", "2.0.0"])
+
+            try
+                let found = COMPILER_LOCATION.runtime_under(tools, "2.0.0")!
+
+                assert File.read_all_text(found) =~ "2.0.0";
+
+                let other = COMPILER_LOCATION.runtime_under(tools, "1.0.0")!
+
+                assert File.read_all_text(other) =~ "1.0.0";
+            finally
+                Directory.delete(tools, true)
+            yrt
+        si
+
+        @Test()
+        runtime_under__falls_back_to_any_runtime_where_the_version_has_none() is
+            let tools = _tools(["1.0.0"])
+
+            try
+                assert COMPILER_LOCATION.runtime_under(tools, "9.9.9")?;
+                assert COMPILER_LOCATION.runtime_under(tools, null)?;
+            finally
+                Directory.delete(tools, true)
+            yrt
+        si
+
+        @Test()
+        runtime_under__of_a_tools_directory_with_no_store__is_nothing() is
+            assert !COMPILER_LOCATION.runtime_under(Path.join([Path.get_temp_path(), "ghul-no-such-{System.Guid.new_guid()}"]), "1.0.0")?;
+        si
+    si
+si

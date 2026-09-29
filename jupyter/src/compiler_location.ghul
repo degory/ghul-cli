@@ -4,8 +4,9 @@ namespace Ghul.Jupyter is
     use IO.Path
 
     // Where the compiler is, and the runtime beside it that a cell's
-    // assembly needs to load.
-    class COMPILER_LOCATION(shim: string, runtime_assembly: string?) is
+    // assembly needs to load. `_known_version` is the compiler's version
+    // where finding the runtime already asked for it.
+    class COMPILER_LOCATION(shim: string, runtime_assembly: string?, _known_version: string?) is
         // `GHUL_COMPILER` first, for a machine that keeps its compiler
         // somewhere of its own; then the private copy `ghul.cli`
         // installs, which is the usual answer on a machine with the tool;
@@ -14,29 +15,33 @@ namespace Ghul.Jupyter is
             if let named = System.Environment.get_environment_variable("GHUL_COMPILER") /\
                 named.trim().length > 0
             then
-                return COMPILER_LOCATION(named, _runtime_beside(named))
+                return COMPILER_LOCATION(named, _runtime_beside(named), null)
             fi
 
             let tools = Path.join([_home(), ".local", "share", "ghul-cli", "tools"])
             let shim = Path.join([tools, "ghul-compiler"])
 
             if File.exists(shim) then
-                return COMPILER_LOCATION(shim, _runtime_under(tools))
+                let version = version_of(shim)
+
+                return COMPILER_LOCATION(shim, runtime_under(tools, version), version)
             fi
 
             if let on_path = _on_path("ghul-compiler") then
-                return COMPILER_LOCATION(on_path, _runtime_beside(on_path))
+                return COMPILER_LOCATION(on_path, _runtime_beside(on_path), null)
             fi
 
             return null
         si
 
-        // What the compiler answers when asked for its version, which
+        version() -> string? => _known_version ?? version_of(shim)
+
+        // What a compiler answers when asked for its version, which
         // is the first line it prints when given no arguments at all.
         // Null where it cannot be run or says nothing recognisable: an
         // answer that is not a version is not one to refuse to start
         // over.
-        version() -> string? is
+        version_of(shim: string) -> string? static is
             try
                 let start_info = System.Diagnostics.ProcessStartInfo()
 
@@ -86,13 +91,24 @@ namespace Ghul.Jupyter is
         si
 
         // A .NET tool installs under `.store/<id>/<version>/...`, so the
-        // runtime the compiler was packed with is somewhere below the
-        // tools directory rather than beside the shim.
-        _runtime_under(tools: string) -> string? static is
+        // runtime the compiler was packed with is below the tools
+        // directory rather than beside the shim. The store can hold more
+        // than one version, so it is the runtime of the version the shim
+        // runs; where that is not known, or not there, the first runtime
+        // found anywhere in the store.
+        runtime_under(tools: string, version: string?) -> string? static is
             let store = Path.join([tools, ".store"])
 
             if !Directory.exists(store) then
                 return null
+            fi
+
+            if let v = version then
+                let packed = Path.join([store, "ghul.compiler", v, "ghul.compiler", v, "tools", "net10.0", "any", "ghul-runtime.dll"])
+
+                if File.exists(packed) then
+                    return packed
+                fi
             fi
 
             try
