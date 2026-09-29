@@ -258,7 +258,16 @@ namespace Ghul.Cli.Repl is
 
                 let number = session.next_cell_number
 
-                _report(session, session.submit(read.source), read.step == CellStep.SUBMIT, number, read.source)
+                let want_value = read.step == CellStep.SUBMIT
+
+                let result =
+                    if want_value then
+                        session.submit(read.source, _presenter(session))
+                    else
+                        session.submit(read.source)
+                    fi
+
+                _report(session, result, want_value, number, read.source)
             od
 
             session.close()
@@ -326,7 +335,7 @@ namespace Ghul.Cli.Repl is
 
                 _show_replayed(new_number, cell.source)
 
-                let result = session.rerun(cell.number)
+                let result = session.rerun(cell.number, _presenter(session))
 
                 if !result? then
                     return
@@ -416,6 +425,12 @@ namespace Ghul.Cli.Repl is
             _current?.close()
         si
 
+        // How a cell's value is shown, run on the cell's own thread after the
+        // cell, so Ctrl-C stops a value that never finishes showing itself
+        // as it stops the cell.
+        _presenter(session: HOSTED_SESSION) -> (object?) -> object? =>
+            value => (_display.use_runtime(session.runtime); _display.format(value))
+
         _report(session: HOSTED_SESSION, result: SUBMIT_RESULT, want_value: bool, number: int, source: string) is
             for line in Ghul.Repl.DIAGNOSTIC_VIEW.lines(result.diagnostics, "cell-{number}", source, _diagnostic_colours()) do
                 Std.error.write_line(line)
@@ -424,9 +439,7 @@ namespace Ghul.Cli.Repl is
             // After whatever the cell itself wrote, so a cell that
             // prints and then ends on a value reads in the order it ran.
             if want_value then
-                _display.use_runtime(session.runtime)
-
-                if let shown = _display.format(result.value) then
+                if let shown = cast string?(result.value) then
                     Std.write_line(_with_type(session, source, shown))
                 fi
             fi
@@ -623,7 +636,7 @@ namespace Ghul.Cli.Repl is
 
                 _show_replayed(number, cell)
 
-                let result = session.submit("{cell}\n")
+                let result = session.submit("{cell}\n", _presenter(session))
 
                 _report(session, result, true, number, cell)
 

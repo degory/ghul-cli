@@ -339,6 +339,35 @@ namespace Ghul.Jupyter.Tests is
 
         _interrupt_case(client)
 
+        Std.write_line("one interrupt_request stops a running cell:")
+
+        _single_interrupt_case(client, "a silent loop", "while true do\nod\n", null)
+
+        _single_interrupt_case(
+            client,
+            "a loop writing a line each time round",
+            "let i mut = 0\nwhile true do\n    IO.Std.write_line(\"line {{i}}\")\n    i = i + 1\n    System.Threading.Thread.sleep(20)\nod\n",
+            m => m.msg_type =~ "stream")
+
+        _single_interrupt_case(
+            client,
+            "a loop updating a display",
+            "display(0, \"counter\")\nlet i mut = 0\nwhile true do\n    update_display(i, \"counter\")\n    i = i + 1\n    System.Threading.Thread.sleep(20)\nod\n",
+            m => m.msg_type =~ "display_data")
+
+        _single_interrupt_case(
+            client,
+            "a loop after a top-level let",
+            "let limit = 10\nwhile limit > 0 do\nod\n",
+            null)
+
+        // The cell itself finishes at once; showing its value never does.
+        _single_interrupt_case(
+            client,
+            "a value that never finishes showing itself",
+            "class ENDLESS is\n    init() is si\n\n    to_string() -> string is\n        while true do\n        od\n\n        return \"\"\n    si\nsi\n\nENDLESS()\n",
+            null)
+
         Std.write_line("the session survives being interrupted:")
 
         _execute(client, "add(x)\n", "42")
@@ -355,11 +384,29 @@ namespace Ghul.Jupyter.Tests is
 
         Std.write_line("shutdown:")
 
-        let sent_shutdown = client.send("shutdown_request", "{{\"restart\": false}}")
+        // What a front end's restart sends: shutdown on control, here
+        // while the kernel is stuck showing a cell's value, which is when
+        // a restart is wanted. The kernel has to answer, and then go.
+        let running = client.send(
+            "execute_request",
+            JSON.object(
+                LIST[(name: string, value: string)]([
+                    (name = "code", value = JSON.quote("IO.Std.write_line(\"showing it\")\nENDLESS()\n")),
+                    (name = "silent", value = "false"),
+                    (name = "store_history", value = "true"),
+                    (name = "allow_stdin", value = "false"),
+                    (name = "stop_on_error", value = "false")
+                ])))
 
-        let shutdown = client.reply()
+        client.check(
+            client.published_within(running, System.TimeSpan.from_seconds(60.0), m => m.msg_type =~ "stream"),
+            "a cell is showing its value when shutdown arrives")
 
-        client.check(shutdown? /\ shutdown.msg_type =~ "shutdown_reply", "the kernel answers shutdown_request")
+        let _ = client.send_control("shutdown_request", "{{\"restart\": true}}")
+
+        let shutdown = client.control_reply_within(System.TimeSpan.from_seconds(10.0))
+
+        client.check(shutdown? /\ shutdown.msg_type =~ "shutdown_reply", "the kernel answers shutdown_request on control")
 
         if client.failures.count > 0 then
             Std.error.write_line("{client.failures.count} checks failed")
@@ -447,6 +494,72 @@ namespace Ghul.Jupyter.Tests is
             JSON.string_member(reply.content, "status") =~ "error" /\
                 JSON.string_member(reply.content, "ename") =~ "KeyboardInterrupt",
             "and its execute_reply says KeyboardInterrupt")
+    si
+
+    // A running cell stopped by exactly one interrupt_request, which is
+    // what a front end's stop button sends. The request goes once the
+    // cell is known to be running: once it has published something
+    // `running` accepts, or, for a cell that publishes nothing, once
+    // enough time has passed for it to have compiled.
+    //
+    // An interrupted cell is abandoned rather than ended and runs on in
+    // the background, so the cells that write pace themselves: one
+    // flooding iopub for the rest of the run would bury what later
+    // requests publish.
+    _single_interrupt_case(client: CLIENT, label: string, code: string, running: ((MESSAGE) -> bool)?) is
+        let content = JSON.object(
+            LIST[(name: string, value: string)]([
+                (name = "code", value = JSON.quote(code)),
+                (name = "silent", value = "false"),
+                (name = "store_history", value = "true"),
+                (name = "allow_stdin", value = "false"),
+                (name = "stop_on_error", value = "false")
+            ]))
+
+        let sent = client.send("execute_request", content)
+
+        if let wanted = running then
+            client.check(
+                client.published_within(sent, System.TimeSpan.from_seconds(60.0), wanted),
+                "{label}: the cell runs")
+        else
+            System.Threading.Thread.sleep(10_000)
+        fi
+
+        let _ = client.send_control("interrupt_request", JSON.EMPTY_OBJECT)
+
+        let control = client.control_reply_within(System.TimeSpan.from_seconds(10.0))
+
+        client.check(
+            control? /\ control.msg_type =~ "interrupt_reply",
+            "{label}: the kernel answers the one interrupt_request")
+
+        let reply = client.reply_within(System.TimeSpan.from_seconds(5.0))
+
+        if !reply? then
+            client.check(false, "{label}: one interrupt_request stops the cell within 5 seconds")
+
+            return
+        fi
+
+        client.check(
+            JSON.string_member(reply.content, "status") =~ "error" /\
+                JSON.string_member(reply.content, "ename") =~ "KeyboardInterrupt",
+            "{label}: its execute_reply says KeyboardInterrupt")
+
+        let published = client.published_until_idle(sent)
+
+        client.check(_has(published, "error"), "{label}: an error is published for it")
+
+        let went_idle mut = false
+
+        for message in published do
+            if message.msg_type =~ "status" /\ JSON.string_member(message.content, "execution_state") =~ "idle" then
+                went_idle = true
+            fi
+        od
+
+        client.check(went_idle, "{label}: and the kernel goes idle")
     si
 
     _is_complete(client: CLIENT, code: string, want: string) is

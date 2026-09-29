@@ -62,6 +62,51 @@ namespace Ghul.Cli.Tests is
             assert !CELL_RUNNER().interrupt();
         si
 
+        // An interrupt that arrives while the cell is still being
+        // compiled is kept, and the cell is reported interrupted without
+        // being started.
+        @Test()
+        interrupt__before_the_run_stops_the_cell_before_it_starts() is
+            let runner = CELL_RUNNER()
+            let started mut = false
+
+            runner.begin_cell()
+
+            assert runner.interrupt();
+
+            let run = runner.run(() -> RUN_RESULT is
+                started = true
+
+                return RUN_RESULT(1, null)
+            si)
+
+            runner.end_cell()
+
+            assert run.was_interrupted;
+            assert !started;
+            assert !runner.is_running;
+        si
+
+        // An interrupt belongs to the cell it arrived for: once that cell
+        // ends, the next one runs.
+        @Test()
+        interrupt__does_not_outlive_its_cell() is
+            let runner = CELL_RUNNER()
+
+            runner.begin_cell()
+            let _ = runner.interrupt()
+            runner.end_cell()
+
+            assert !runner.interrupt();
+
+            runner.begin_cell()
+            let run = runner.run(() => RUN_RESULT(7, null))
+            runner.end_cell()
+
+            assert !run.was_interrupted;
+            assert cast int(run.value!) == 7;
+        si
+
         // Deep recursion needs more than a default thread stack.
         @Test()
         run__gives_the_cell_a_deep_stack() is

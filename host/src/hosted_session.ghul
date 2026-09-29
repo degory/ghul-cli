@@ -305,23 +305,36 @@ namespace Ghul.Repl.Host is
 
         _submissions: Collections.LIST[CELL_RECORD]
 
-        submit(source: string) -> SUBMIT_RESULT => _submit_recorded(source, null)
+        submit(source: string) -> SUBMIT_RESULT => _submit_recorded(source, null, null)
+
+        // A cell submitted with a way to present the value it ends on.
+        // `present` runs on the cell's own thread straight after the
+        // cell, so an interrupt stops a presentation that never finishes
+        // - a to_string or a sequence with no end - exactly as it stops
+        // the cell. The result carries what `present` returned in place
+        // of the value, and whatever it throws as the cell's run error.
+        submit(source: string, present: (object?) -> object?) -> SUBMIT_RESULT =>
+            _submit_recorded(source, null, present)
 
         // The text of an earlier cell submitted again, as a cell of its
         // own with a number of its own.
-        rerun(number: int) -> SUBMIT_RESULT? is
+        rerun(number: int) -> SUBMIT_RESULT? => rerun(number, null)
+
+        // The same, with the value presented as submit presents it.
+        rerun(number: int, present: ((object?) -> object?)?) -> SUBMIT_RESULT? is
             for record in _submissions do
                 if record.number == number then
-                    return _submit_recorded(record.source, number)
+                    return _submit_recorded(record.source, number, present)
                 fi
             od
 
             return null
         si
 
-        _submit_recorded(source: string, rerun_of: int?) -> SUBMIT_RESULT is
+        _submit_recorded(source: string, rerun_of: int?, present: ((object?) -> object?)?) -> SUBMIT_RESULT is
             let request = _with_references(_session.prepare(source))
-            let result = _submit(source, request)
+
+            let result = _submit_in_cell(source, request, present)
 
             let status =
                 if !result.is_accepted then
@@ -339,7 +352,19 @@ namespace Ghul.Repl.Host is
             return result
         si
 
-        _submit(source: string, first: Ghul.Repl.CELL_REQUEST) -> SUBMIT_RESULT is
+        // The whole of a cell, compile and run, as the one span an interrupt
+        // applies to.
+        _submit_in_cell(source: string, request: Ghul.Repl.CELL_REQUEST, present: ((object?) -> object?)?) -> SUBMIT_RESULT is
+            _runner.begin_cell()
+
+            try
+                return _submit(source, request, present)
+            finally
+                _runner.end_cell()
+            yrt
+        si
+
+        _submit(source: string, first: Ghul.Repl.CELL_REQUEST, present: ((object?) -> object?)?) -> SUBMIT_RESULT is
             let request mut = first
             let compiled mut = _backend.compile(request)
 
@@ -394,20 +419,28 @@ namespace Ghul.Repl.Host is
                 _analysis?.add(IO.Path.get_full_path(assembly_path))
             fi
 
-            let run = _runner.run(() => CELL_ENTRY.run(loaded))
+            let run = _runner.run(() => _presented(CELL_ENTRY.run(loaded), present))
 
             return SUBMIT_RESULT(true, diagnostics, run.value, run.error, run.was_interrupted)
         si
 
+        _presented(result: Ghul.Repl.RUN_RESULT, present: ((object?) -> object?)?) -> Ghul.Repl.RUN_RESULT static =>
+            if let presenting = present /\ !result.error? then
+                Ghul.Repl.RUN_RESULT(presenting(result.value), null)
+            else
+                result
+            fi
+
         _runner: CELL_RUNNER
 
-        // Stops waiting for the cell running now, so its submit returns
-        // at once as interrupted; false when no cell is running. The cell
-        // itself is abandoned rather than ended. Safe to call from any
-        // thread.
+        // Stops the cell in progress, so its submit returns as
+        // interrupted: at once if it is running, and without running it
+        // if it is still being compiled. False when no cell is in
+        // progress. A running cell is abandoned rather than ended. Safe to
+        // call from any thread.
         interrupt() -> bool => _runner.interrupt()
 
-        // Whether a cell is running now.
+        // Whether a cell is in progress now, being compiled or running.
         is_running: bool => _runner.is_running
 
         _analysis: ANALYSIS_SESSION?
