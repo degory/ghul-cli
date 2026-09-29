@@ -14,6 +14,33 @@ namespace Ghul.Cli.Tests is
 
         _display() -> CELL_DISPLAY => CELL_DISPLAY()
 
+        // A sequence with no end answers with its first elements, and says
+        // there are more, rather than reading on to count them.
+        @Test()
+        elements__of_a_sequence_with_no_end__stops_after_the_limit() is
+            let found = CELL_DISPLAY.elements(cast object(Ghul.Pipes.from(0)), 3)!
+
+            assert found.items.count == 3;
+            assert cast int(found.items[2]!) == 2;
+            assert found.has_more;
+        si
+
+        @Test()
+        elements__of_a_short_sequence__has_no_more() is
+            let found = CELL_DISPLAY.elements(cast object(LIST[int]([1, 2])), 3)!
+
+            assert found.items.count == 2;
+            assert !found.has_more;
+        si
+
+        @Test()
+        elements__of_a_sequence_exactly_the_limit_long__has_no_more() is
+            let found = CELL_DISPLAY.elements(cast object(LIST[int]([1, 2, 3])), 3)!
+
+            assert found.items.count == 3;
+            assert !found.has_more;
+        si
+
         @Test()
         format__of_nothing__is_nothing() is
             assert !_display().format(null)?;
@@ -65,7 +92,7 @@ namespace Ghul.Cli.Tests is
             let formatted = _display().format(cast object(numbers))!
 
             assert formatted.starts_with("[0, 1, 2,");
-            assert formatted.ends_with(", 19, and 5 more]");
+            assert formatted.ends_with(", 19, ...]");
         si
 
         // A list of lists shows the elements of each.

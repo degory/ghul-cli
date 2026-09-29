@@ -245,6 +245,22 @@ namespace Ghul.Jupyter.Tests is
             _result_html(table.published).contains("<th>`0</th><th>`1</th>"),
             "and a table beside it as text/html")
 
+        Std.write_line("a cell ending on a sequence of scalars, and on one with no end:")
+
+        let scalars = _execute_raw(client, "[1, 2, 3]\n")
+
+        client.check(
+            _result_text(scalars.published) =~ "[1, 2, 3]" /\ _result_html(scalars.published) =~ "",
+            "a list of scalars is its text alone, with no table")
+
+        let endless_timer = System.Diagnostics.Stopwatch.start_new()
+        let endless = _execute_raw(client, "from(0)\n")
+        let endless_ms = endless_timer.elapsed_milliseconds
+
+        client.check(
+            endless_ms < 5000L /\ _result_text(endless.published).ends_with(", ...]"),
+            "a sequence with no end answers, within 5000 ms, with its first elements ({endless_ms} ms)")
+
         Std.write_line("a cell that calls display:")
 
         let shown = _execute_raw(client, "display(41)\ndisplay(\"first\", \"progress\")\nupdate_display(\"second\", \"progress\")\n")

@@ -305,12 +305,14 @@ namespace Ghul.Repl is
                 cast int(System.Reflection.BindingFlags.INSTANCE))
 
         // Whatever the value holds, where it holds a sequence of things:
-        // the first `limit` of them, and how many more there are. Asked of
+        // the first `limit` of them, and whether there are more. At most
+        // one element past `limit` is read, so a sequence with no end
+        // still answers, and a generator runs no further than that. Asked of
         // the value rather than of a type it might implement: the
         // non-generic enumerable interface has no name in ghūl, and the
         // generic one cannot be named without knowing the element type,
         // which is the thing being discovered.
-        elements(value: object, limit: int) -> (items: LIST[object?], extra: int)? static is
+        elements(value: object, limit: int) -> (items: LIST[object?], has_more: bool)? static is
             let flags = _instance_flags()
 
             let get_enumerator = value.get_type().get_method("GetEnumerator", flags)
@@ -334,17 +336,24 @@ namespace Ghul.Repl is
             fi
 
             let items = LIST[object?]()
-            let extra mut = 0
+            let has_more mut = false
 
-            while cast bool(move_next.invoke(enumerator, System.Array.empty[object]())!) do
-                if items.count < limit then
+            try
+                while cast bool(move_next.invoke(enumerator, System.Array.empty[object]())!) do
+                    if items.count == limit then
+                        has_more = true
+                        break
+                    fi
+
                     items.add(current.get_value(enumerator))
-                else
-                    extra = extra + 1
+                od
+            finally
+                if let disposable = cast Ghul.Disposable?(enumerator) then
+                    disposable.dispose()
                 fi
-            od
+            yrt
 
-            return (items = items, extra = extra)
+            return (items = items, has_more = has_more)
         si
 
         _try_elements(value: object, depth: int) -> string? is
@@ -360,12 +369,10 @@ namespace Ghul.Repl is
                 rendered.add(_render(item, depth + 1))
             od
 
-            let extra = found.extra
-
             let body = rendered |> Ghul.Pipes.join(", ")
 
-            if extra > 0 then
-                return "[{body}, and {extra} more]"
+            if found.has_more then
+                return "[{body}, ...]"
             fi
 
             return "[{body}]"

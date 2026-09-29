@@ -16,8 +16,7 @@ namespace Ghul.Repl is
             _display = CELL_DISPLAY()
         si
 
-        // How many rows a table is worth before it says how many more
-        // there are.
+        // How many rows a table is worth before it says there are more.
         _ROWS: int static => 20
 
         // Write the text/plain part with the `inspect` of the runtime the
@@ -91,10 +90,11 @@ namespace Ghul.Repl is
 
         // A table, where the value is a sequence of things that share a
         // shape: a row each, and a column for each name that shape gives
-        // its parts. A sequence of scalars has one unnamed column, which
-        // is still worth a table - it is what makes a long list readable.
-        // A string is text rather than a sequence of characters, and gets
-        // no table.
+        // its parts. A sequence whose elements have no parts to line up,
+        // scalars or unlike things, gets no table: its text/plain is what
+        // a front end should show, and one that prefers HTML would show
+        // such a table one element to a line. A string is text rather than
+        // a sequence of characters, and gets no table.
         table(value: object?) -> string? is
             if !value? \/ isa string(value) then
                 return null
@@ -112,41 +112,38 @@ namespace Ghul.Repl is
                 rows.add(_row(item))
             od
 
-            let columns = _columns(rows)
+            let names = _columns(rows)
+
+            if !names? then
+                return null
+            fi
+
             let html = System.Text.StringBuilder()
 
             html.append("<table>")
 
-            if let names = columns then
-                html.append("<thead><tr>")
+            html.append("<thead><tr>")
 
-                for name in names do
-                    html.append("<th>{_escape(name)}</th>")
-                od
+            for name in names do
+                html.append("<th>{_escape(name)}</th>")
+            od
 
-                html.append("</tr></thead>")
-            fi
+            html.append("</tr></thead>")
 
             html.append("<tbody>")
 
             for row in rows do
                 html.append("<tr>")
 
-                if columns? then
-                    for cell in row.cells do
-                        html.append("<td>{_escape(cell)}</td>")
-                    od
-                else
-                    html.append("<td>{_escape(row.text)}</td>")
-                fi
+                for cell in row.cells do
+                    html.append("<td>{_escape(cell)}</td>")
+                od
 
                 html.append("</tr>")
             od
 
-            if found.extra > 0 then
-                let span = if let names = columns then names.count else 1 fi
-
-                html.append("<tr><td colspan=\"{span}\">and {found.extra} more</td></tr>")
+            if found.has_more then
+                html.append("<tr><td colspan=\"{names.count}\">...</td></tr>")
             fi
 
             html.append("</tbody></table>")
@@ -157,7 +154,7 @@ namespace Ghul.Repl is
         // The column names, where every row has the same names in the
         // same order. A row whose names differ is part of a sequence of
         // unlike things, and a table of it would line up parts that are
-        // not the same part, so each row is then shown whole instead.
+        // not the same part, so there is then no table.
         _columns(rows: Collections.List[CELL_BUNDLE_ROW]) -> Collections.List[string]? is
             let first = rows[0].names
 
@@ -183,13 +180,11 @@ namespace Ghul.Repl is
         si
 
         // One element, as the parts of a row: a tuple's elements, a map
-        // entry's key and value, an object's readable members; or the
-        // element whole where it has no parts to spread out.
+        // entry's key and value, an object's readable members; or no parts
+        // where it has none to spread out.
         _row(element: object?) -> CELL_BUNDLE_ROW is
-            let text = _display.cell_text(element)
-
             if !element? then
-                return CELL_BUNDLE_ROW(null, LIST[string](), text)
+                return CELL_BUNDLE_ROW(null, LIST[string]())
             fi
 
             let type = element.get_type()
@@ -200,7 +195,7 @@ namespace Ghul.Repl is
                 cells.add(_display.cell_text(type.get_property("Key")?.get_value(element)))
                 cells.add(_display.cell_text(type.get_property("Value")?.get_value(element)))
 
-                return CELL_BUNDLE_ROW(LIST[string](["key", "value"]), cells, text)
+                return CELL_BUNDLE_ROW(LIST[string](["key", "value"]), cells)
             fi
 
             if let tuple = cast System.Runtime.CompilerServices.ITuple?(element) then
@@ -215,7 +210,7 @@ namespace Ghul.Repl is
                     cells.add(_display.cell_text(tuple[i]))
                 od
 
-                return CELL_BUNDLE_ROW(names, cells, text)
+                return CELL_BUNDLE_ROW(names, cells)
             fi
 
             if let found = CELL_DISPLAY.parts(element) /\ found.names.count > 0 then
@@ -225,10 +220,10 @@ namespace Ghul.Repl is
                     cells.add(_display.cell_text(part))
                 od
 
-                return CELL_BUNDLE_ROW(found.names, cells, text)
+                return CELL_BUNDLE_ROW(found.names, cells)
             fi
 
-            return CELL_BUNDLE_ROW(null, LIST[string](), text)
+            return CELL_BUNDLE_ROW(null, LIST[string]())
         si
 
         _escape(text: string) -> string static =>
@@ -239,6 +234,6 @@ namespace Ghul.Repl is
     si
 
     // One element of a sequence in a table: its parts by name where it
-    // has them, and the element's own text for when it is shown whole.
-    class CELL_BUNDLE_ROW(names: Collections.List[string]?, cells: Collections.List[string], text: string);
+    // has them.
+    class CELL_BUNDLE_ROW(names: Collections.List[string]?, cells: Collections.List[string]);
 si
