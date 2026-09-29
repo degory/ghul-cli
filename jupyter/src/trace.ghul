@@ -12,12 +12,26 @@ namespace Ghul.Jupyter is
         // publication of its own trace line and never stop. This is the
         // real stderr, taken once and kept - and synchronized, because
         // shell and control both trace and a writer holds one buffer.
+        //
+        // It is a file stream on descriptor 2 rather than the console's
+        // standard error stream: on Unix a write to a console stream
+        // takes a lock on Console.Out, which a cell writing a line holds
+        // while that line is published and traced, so a trace line from
+        // the control thread in the meantime waits for the cell and the
+        // cell waits for it.
         _stderr: IO.TextWriter static
 
         init() static is
             _is_enabled = System.Environment.get_environment_variable("GHUL_JUPYTER_TRACE")?
 
-            let writer = IO.StreamWriter(IO.Std.open_standard_error())
+            let stream: IO.Stream =
+                if System.OperatingSystem.is_windows() then
+                    IO.Std.open_standard_error()
+                else
+                    IO.FileStream(Microsoft.Win32.SafeHandles.SafeFileHandle(2w, false), IO.FileAccess.WRITE, 1)
+                fi
+
+            let writer = IO.StreamWriter(stream)
 
             writer.auto_flush = true
 

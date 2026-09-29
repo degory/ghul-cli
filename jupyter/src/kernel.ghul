@@ -106,6 +106,10 @@ namespace Ghul.Jupyter is
             // cell they are about to stop. Reading it on the same thread
             // would leave an interrupt in the socket until the cell it
             // meant to interrupt had finished.
+            // Set once the shell loop has returned, for the control thread
+            // to wait on after a shutdown.
+            let shell_stopped = System.Threading.ManualResetEventSlim(false)
+
             let control_thread =
                 System.Threading.Thread(
                     System.Threading.ThreadStart(
@@ -113,6 +117,15 @@ namespace Ghul.Jupyter is
                             while _is_running do
                                 _handle(_control, wait)
                             od
+
+                            // Shut down from control. The shell thread
+                            // notices at its next request, but one stuck
+                            // in a cell that an interrupt cannot reach
+                            // would keep the kernel alive after it has
+                            // told the front end it is going.
+                            if !shell_stopped.wait(SHUTDOWN_GRACE) then
+                                System.Environment.exit(0)
+                            fi
                         si))
 
             control_thread.is_background = true
@@ -122,6 +135,8 @@ namespace Ghul.Jupyter is
             while _is_running do
                 _handle(_shell, wait)
             od
+
+            shell_stopped.set()
 
             control_thread.join()
 
@@ -190,6 +205,11 @@ namespace Ghul.Jupyter is
                 channel.send(_messages.reply(request, "shutdown_reply", CONTENT.shutdown(restart)))
 
                 _is_running = false
+
+                // A shutdown can arrive on control while the shell thread
+                // is inside a cell, and that thread only sees the kernel
+                // stopping once the cell returns.
+                let _ = _session.interrupt()
             when "interrupt_request" then
                 // False means no cell was running, which is what the
                 // stop button on an idle kernel asks. Either way the
@@ -259,7 +279,7 @@ namespace Ghul.Jupyter is
                 IO.Std.set_out(out)
                 IO.Std.set_error(err)
 
-                result = _session.submit(code)
+                result = _session.submit(code, value => (_bundle.use_runtime(_session.runtime); _bundle.of(value)))
             finally
                 out.flush()
                 err.flush()
@@ -326,9 +346,9 @@ namespace Ghul.Jupyter is
                 return
             fi
 
-            _bundle.use_runtime(_session.runtime)
-
-            if let bundle = _bundle.of(result.value) /\ !silent then
+            // The value was presented on the cell's own thread, where an
+            // interrupt reaches a presentation that never finishes.
+            if let bundle = cast LIST[(mime: string, payload: string)]?(result.value) /\ !silent then
                 _publish(request, "execute_result", CONTENT.execute_result(bundle, _execution_count))
             fi
 
@@ -447,6 +467,10 @@ namespace Ghul.Jupyter is
         // What an interrupted cell is told. The cell was accepted and
         // started, so its definitions are in the session; .NET cannot
         // stop a thread, so the run itself may carry on unseen.
+        // How long a shutdown waits for the shell thread before ending the
+        // process without it.
+        SHUTDOWN_GRACE: System.TimeSpan static => System.TimeSpan.from_seconds(3.0)
+
         INTERRUPTED_NOTE: string static =>
             "interrupted; the cell kept its definitions, and may still be running in the background until the session ends"
 

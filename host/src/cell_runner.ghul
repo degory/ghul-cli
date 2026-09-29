@@ -15,8 +15,14 @@ namespace Ghul.Repl.Host is
     // runs on in the background until it finishes or the process does,
     // and whatever it produces then is thrown away. Its thread is a
     // background one, so it never keeps the process alive.
+    //
+    // A cell is compiled before it runs, and an interrupt can arrive
+    // while it compiles. `begin_cell` opens the window an interrupt is
+    // kept for, so one arriving before `run` stops the cell before it
+    // starts, and `end_cell` closes it.
     class CELL_RUNNER is
-        // Set while a cell runs; interrupting sets it.
+        // Set from begin_cell, or from run for a cell run on its own,
+        // until the cell ends; interrupting sets it.
         _interrupt: ManualResetEventSlim?
 
         // Deeply recursive cells need more than a thread's default stack.
@@ -24,13 +30,30 @@ namespace Ghul.Repl.Host is
 
         init() is si
 
-        // Whether a cell is running now.
+        // Whether a cell is in progress now, being compiled or running.
         is_running: bool => _interrupt?
 
+        // A cell is in progress from here until end_cell: an interrupt in
+        // between is kept, and the cell's run reports it.
+        begin_cell() is
+            _interrupt = ManualResetEventSlim(false)
+        si
+
+        end_cell() is
+            _interrupt = null
+        si
+
         // Runs `body` to the end, or until `interrupt` is called from any
-        // thread.
+        // thread. Within begin_cell and end_cell, an interrupt that
+        // arrived before this call means `body` is not started at all.
         run(body: () -> RUN_RESULT) -> CELL_RUN is
-            let interrupt = ManualResetEventSlim(false)
+            let begun = _interrupt
+            let interrupt = begun ?? ManualResetEventSlim(false)
+
+            if interrupt.is_set then
+                return CELL_RUN(null, null, true)
+            fi
+
             let finished = ManualResetEventSlim(false)
 
             let outcome: RUN_RESULT? mut = null
@@ -57,7 +80,9 @@ namespace Ghul.Repl.Host is
 
                 WaitHandle.wait_any([finished.wait_handle, interrupt.wait_handle])
             finally
-                _interrupt = null
+                if !begun? then
+                    _interrupt = null
+                fi
             yrt
 
             if finished.is_set then
@@ -71,8 +96,10 @@ namespace Ghul.Repl.Host is
             return CELL_RUN(null, null, true)
         si
 
-        // Stops waiting for the cell running now; false when none is.
-        // Safe to call from any thread, a signal handler's included.
+        // Stops the cell in progress: at once if it is running, before it
+        // starts if it is still being compiled. False when no cell is in
+        // progress. Safe to call from any thread, a signal handler's
+        // included.
         interrupt() -> bool is
             if let current = _interrupt then
                 current.set()

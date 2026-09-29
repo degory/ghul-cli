@@ -153,6 +153,34 @@ namespace Ghul.Jupyter.Tests is
             return seen
         si
 
+        // Whether a request publishes a message `wanted` accepts within
+        // `budget`, reading nothing past it: what the kernel publishes
+        // while a cell is still running.
+        published_within(msg_id: string, budget: System.TimeSpan, wanted: (MESSAGE) -> bool) -> bool is
+            let deadline = System.DateTime.utc_now.add(budget)
+
+            while System.DateTime.utc_now < deadline do
+                let frames = Collections.LIST[ubyte[]]()
+
+                if !NetMQ.ReceivingSocketExtensions.try_receive_multipart_bytes(
+                    _iopub,
+                    System.TimeSpan.from_milliseconds(200L),
+                    frames ref,
+                    8)
+                then
+                    continue
+                fi
+
+                if let message = CHANNEL.decode(frames, _signer) then
+                    if JSON.string_member(message.parent_header, "msg_id") =~ msg_id /\ wanted(message) then
+                        return true
+                    fi
+                fi
+            od
+
+            return false
+        si
+
         // A PUB socket drops what it publishes to a subscriber that has
         // not finished connecting, so a client that starts asking before
         // its subscription is live silently loses the first results. A
