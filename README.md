@@ -320,9 +320,24 @@ answer: int
 Pipe[string]
 ```
 
+A submission that ends on a value shows the value after the type of the
+expression it ended on, as `:type` would show it:
+
+```plaintext
+3> let x = {i for i in 0..5}
+4> x
+Pipe[int]: [0, 1, 2, 3, 4]
+5> x |> count()
+int: 5
+```
+
+`:types off` shows values without their types, and `:types on` shows them
+again. Where the analyser cannot answer, the value is shown alone.
+
 `:complete`, `:hover` and `:type` need `ghul.compiler` 59.9.0 or newer. With
-an older compiler, each one says that it is not available. The first time you
-use one, the session starts a compiler in analysis mode, which takes a second
+an older compiler, each one says that it is not available, and values are shown
+without their types. The first time you use one, or a submission first ends on
+a value, the session starts a compiler in analysis mode, which takes a second
 or two. After that an answer takes tens of milliseconds, or a little longer
 straight after a cell, because the analyser reads the new cell first.
 

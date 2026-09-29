@@ -1,0 +1,138 @@
+namespace Ghul.Repl is
+    use Collections.LIST
+
+    // The text of the last top-level statement of a cell that compiled,
+    // which is the expression a cell ending on a value ends on. A front end
+    // asks the analyser for its type, to show beside the value.
+    //
+    // Compiled text is complete, so every block keyword and bracket has its
+    // closer, and a line break outside all of them ends a statement unless
+    // the lines are joined: the next line opens with `.`, `?`, `|>` or `ref`,
+    // or the line before ends with an operator or a `,`. This is not a
+    // parser, and says nothing useful about text that did not compile.
+    class CELL_TAIL is
+        _OPENERS: string[] static => ["is", "if", "do", "case", "try", "val", "(", "[", "{{"]
+        _CLOSERS: string[] static => ["si", "fi", "od", "esac", "yrt", "lav", ")", "]", "}}"]
+
+        of(source: string) -> string? static is
+            let tokens = SOURCE_TOKENS.of(source)
+            let open = LIST[string]()
+
+            let start mut = -1
+            let last mut = -1
+            let at_break mut = false
+            let at_semicolon mut = false
+
+            for i in 0..tokens.count do
+                let token = tokens[i]
+
+                if token.text =~ "\n" then
+                    if open.count == 0 then
+                        at_break = true
+                    fi
+
+                    continue
+                fi
+
+                if open.count == 0 /\ token.text =~ ";" /\ !token.is_escaped then
+                    at_semicolon = true
+
+                    continue
+                fi
+
+                if start < 0 \/ at_semicolon \/ (at_break /\ !_joins(tokens[last], token)) then
+                    start = i
+                fi
+
+                at_break = false
+                at_semicolon = false
+                last = i
+
+                if !token.is_escaped then
+                    _track(open, token.text)
+                fi
+            od
+
+            if start < 0 then
+                return null
+            fi
+
+            return source.substring(tokens[start].start, tokens[last].end - tokens[start].start)
+        si
+
+        // Whether a line starting with `next` carries on the statement that
+        // the line ending with `previous` began.
+        _joins(previous: SOURCE_TOKEN, next: SOURCE_TOKEN) -> bool static is
+            if next.text.starts_with(".") \/ next.text.starts_with("?") \/ next.text =~ "|>" then
+                return true
+            fi
+
+            if next.is_word /\ !next.is_escaped /\ next.text =~ "ref" then
+                return true
+            fi
+
+            if previous.text =~ "," then
+                return true
+            fi
+
+            // A line ending in `x!` or `x?` ends on a postfix operator,
+            // not one waiting for its right operand.
+            if _ends_an_operand(previous) then
+                return false
+            fi
+
+            return !(previous.text =~ "!") /\ !(previous.text =~ "?")
+        si
+
+        // A name, a number, a literal or a closing bracket, after which a
+        // line is complete.
+        _ends_an_operand(token: SOURCE_TOKEN) -> bool static is
+            let first = token.text[0]
+
+            return
+                char.is_letter_or_digit(first) \/ first == '_' \/ first == '"' \/ first == '\'' \/
+                token.text =~ ")" \/ token.text =~ "]" \/ token.text =~ "}}"
+        si
+
+        // Keeps `open` as the stack of constructs the scan is inside. A
+        // bracket's closer also discards whatever it holds unclosed, which
+        // is how a comprehension's `if` clause, which has no `fi`, ends.
+        _track(open: LIST[string], text: string) static is
+            if _index_of(_OPENERS, text) >= 0 then
+                open.add(text)
+
+                return
+            fi
+
+            let closer = _index_of(_CLOSERS, text)
+
+            if closer < 0 then
+                return
+            fi
+
+            let opener = _OPENERS[closer]
+
+            let j mut = open.count - 1
+
+            while j >= 0 do
+                if open[j] =~ opener then
+                    open.remove_range(j, open.count - j)
+
+                    return
+                fi
+
+                j = j - 1
+            od
+        si
+
+        _index_of(words: string[], word: string) -> int static is
+            for i in 0..words.count do
+                if words[i] =~ word then
+                    return i
+                fi
+            od
+
+            return -1
+        si
+    si
+si

@@ -317,6 +317,9 @@ let held = 7
 
 IO.Std.write_line("printed")
 
+:types off
+42
+
 :quit
 REPL
 repl_values_out="$(dotnet "$cli" repl < "$repl_values_in" 2>"$scratch/repl-values.err")" || {
@@ -335,6 +338,20 @@ for expected in "41" "now a string" "(3, 4)" "[1, 2, 3]" "printed"; do
 done
 if [[ "$repl_values_out" == *"held"* ]]; then
     echo "smoke: a submission ending on a let should show nothing, got:" >&2
+    echo "$repl_values_out" >&2
+    exit 1
+fi
+# Each value follows the type of the expression the submission ended on,
+# until `:types off`.
+for expected in "int: 41" "(left: int, right: int): (3, 4)" "LIST[int]: [1, 2, 3]" "42"; do
+    if [[ "$repl_values_out" != *"$expected"* ]]; then
+        echo "smoke: expected the repl to show '$expected', got:" >&2
+        echo "$repl_values_out" >&2
+        exit 1
+    fi
+done
+if [[ "$repl_values_out" == *"int: 42"* ]]; then
+    echo "smoke: after :types off a value should show without its type, got:" >&2
     echo "$repl_values_out" >&2
     exit 1
 fi
