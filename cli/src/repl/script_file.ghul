@@ -2,27 +2,28 @@ namespace Ghul.Cli.Repl is
     use Collections.LIST
     use System.Text.RegularExpressions.Regex
 
-    use Ghul.Repl.Host.CELL_RECORD
-    use Ghul.Repl.Host.CellStatus
+    use Ghul.Repl.CellStatus
+    use Ghul.Repl.NOTEBOOK
 
-    // What `:save` writes and `:load` reads: the cells that ran to the
-    // end, in order, each after a `// cell N` line. `:load` submits each
+    // What `:save` writes and `:load` reads: the notebook's cells whose
+    // latest run ran to the end, in order, each as it ran, after a
+    // `// cell N` line. `:load` submits each
     // marked part as a cell of its own, since a cell can redefine a name
     // an earlier one declared and one file compiled whole cannot.
     class SCRIPT_FILE is
         init() is si
 
-        text(records: Collections.List[CELL_RECORD]) -> string static is
+        text(notebook: NOTEBOOK) -> string static is
             let result = System.Text.StringBuilder()
 
-            for record in records do
-                if record.status == CellStatus.OK then
+            for cell in notebook.cells do
+                if let run = cell.last_run /\ run.status == CellStatus.OK then
                     if result.length > 0 then
                         result.append('\n')
                     fi
 
-                    result.append("// cell {record.number}\n")
-                    result.append(record.source.trim_end())
+                    result.append("// cell {run.number}\n")
+                    result.append(run.source.trim_end())
                     result.append('\n')
                 fi
             od

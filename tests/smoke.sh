@@ -302,6 +302,42 @@ for expected in "cell1: x is 41" "now a string 101 7 2"; do
     fi
 done
 
+echo "smoke: 'ghul repl' edits an earlier cell and runs it again in its place..." >&2
+repl_notebook_in="$scratch/repl-notebook-in.txt"
+cat > "$repl_notebook_in" <<'REPL'
+let a = 1
+let b = a + 1
+b * 10
+:edit 1
+let a = 5
+:rerun 2..
+:cells
+:rerun ..3
+:quit
+REPL
+repl_notebook_out="$(dotnet "$cli" repl < "$repl_notebook_in" 2>&1)" || {
+    echo "smoke: ghul repl exited non-zero:" >&2
+    echo "$repl_notebook_out" >&2
+    exit 1
+}
+# Cell 1 runs again as cell 4 where it was, cells 2 and 3 are then out of
+# date, and running them again sees the new a; a number a cell ran as
+# before still finds it.
+for expected in \
+    "int: 20" \
+    "ghul: cells 2 and 3, below this one, ran before it; :rerun 2.. runs them again" \
+    "int: 60" \
+    "4  ok          let a = 5  (was 1)" \
+    "6  ok          b * 10  (was 3)" \
+    "7> let a = 5" \
+    "8> let b = a + 1"; do
+    if [[ "$repl_notebook_out" != *"$expected"* ]]; then
+        echo "smoke: expected the repl to show '$expected', got:" >&2
+        echo "$repl_notebook_out" >&2
+        exit 1
+    fi
+done
+
 echo "smoke: 'ghul repl' shows the value a submission ends on..." >&2
 repl_values_in="$scratch/repl-values-in.txt"
 cat > "$repl_values_in" <<'REPL'

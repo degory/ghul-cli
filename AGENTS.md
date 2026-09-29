@@ -68,7 +68,15 @@ looks for them.
   however it likes, and calls `accept(request, reply)` with what came
   back. `CELL_EXPORTS.read` takes an assembly the host has already
   loaded, so a host holding its cells as bytes never writes them out, and
-  `CELL_ENTRY.run` invokes one. `CELL_DISPLAY` renders the value a cell
+  `CELL_ENTRY.run` invokes one. `NOTEBOOK` is the cells as a notebook
+  front end holds them - in the order the user reads them, each with its
+  latest text - so editing an earlier cell and running it again, and "run
+  all above" / "run this and below", mean the same in the terminal and the
+  playground: running a cell submits its text as a new submission (a new
+  number, as a notebook's execution count), `ran` records it against the
+  cell's place, and later definitions winning in `SESSION` is what makes
+  the cells after it see the change. `CellStatus` lives here for it.
+  `CELL_DISPLAY` renders the value a cell
   ended on and prints nothing, so a terminal and a page show the same
   value the same way; a notebook wanting a MIME bundle replaces it.
   Where a host does write a cell out it
@@ -107,7 +115,11 @@ looks for them.
   terminal, it ends on a statement written over several lines, which
   holds the cell open; a blank line submits (without showing the value
   after a held construct), and a line holding only `.` submits showing
-  it. `INDENTATION` is where a new line starts and when a closing word
+  it. `TERMINAL` keeps the session's cells in a `NOTEBOOK`: Up past a
+  cell's first line steps through them (`CELL_RECALL`), each edited in
+  place under its own number, then on into history as copies; submitting
+  one runs it again where it is, and `:edit N` / `:rerun N`, `N..`, `..N`
+  work on the same notebook. `INDENTATION` is where a new line starts and when a closing word
   steps it back out, `GHUL_LEXER` splits typed text into coloured runs
   with the playground editor grammar's word lists and never fails on
   half-typed input, and `PALETTE` / `COLOUR_CHOICE` / `BACKGROUND_QUERY`

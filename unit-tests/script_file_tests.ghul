@@ -3,8 +3,8 @@ namespace Ghul.Cli.Tests is
 
     use Ghul.Cli.Repl.SCRIPT_FILE
     use Ghul.Cli.Repl.TYPE_QUERY
-    use Ghul.Repl.Host.CELL_RECORD
-    use Ghul.Repl.Host.CellStatus
+    use Ghul.Repl.CellStatus
+    use Ghul.Repl.NOTEBOOK
 
     use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
     use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
@@ -13,16 +13,37 @@ namespace Ghul.Cli.Tests is
     class SCRIPT_FILE_TESTS is
         init() is si
 
+        _ran(notebook: NOTEBOOK, number: int, source: string, status: CellStatus) static is
+            notebook.ran(notebook.add(source), number, source, status)
+        si
+
         @Test()
         text__writes_the_cells_that_ran_to_the_end_each_after_a_marker() is
-            let records = LIST[CELL_RECORD]()
+            let notebook = NOTEBOOK()
 
-            records.add(CELL_RECORD(1, "let x = 1\n", CellStatus.OK, null))
-            records.add(CELL_RECORD(2, "nope\n", CellStatus.FAILED, null))
-            records.add(CELL_RECORD(3, "throw System.Exception(\"x\")\n", CellStatus.THREW, null))
-            records.add(CELL_RECORD(4, "let x = x + 1\n", CellStatus.OK, null))
+            _ran(notebook, 1, "let x = 1\n", CellStatus.OK)
+            _ran(notebook, 2, "nope\n", CellStatus.FAILED)
+            _ran(notebook, 3, "throw System.Exception(\"x\")\n", CellStatus.THREW)
+            _ran(notebook, 4, "let x = x + 1\n", CellStatus.OK)
 
-            assert SCRIPT_FILE.text(records) =~ "// cell 1\nlet x = 1\n\n// cell 4\nlet x = x + 1\n";
+            assert SCRIPT_FILE.text(notebook) =~ "// cell 1\nlet x = 1\n\n// cell 4\nlet x = x + 1\n";
+        si
+
+        // A cell run again is written where it is, as it last ran, under
+        // its latest number; an edit not run yet is not written.
+        @Test()
+        text__writes_a_cell_run_again_in_its_place_as_it_last_ran() is
+            let notebook = NOTEBOOK()
+
+            _ran(notebook, 1, "let x = 1\n", CellStatus.OK)
+            _ran(notebook, 2, "x + 1\n", CellStatus.OK)
+
+            let first = notebook.cells[0]
+
+            notebook.ran(first, 3, "let x = 10\n", CellStatus.OK)
+            first.edit("let x = 100\n")
+
+            assert SCRIPT_FILE.text(notebook) =~ "// cell 3\nlet x = 10\n\n// cell 2\nx + 1\n";
         si
 
         @Test()
@@ -44,12 +65,12 @@ namespace Ghul.Cli.Tests is
 
         @Test()
         cells__reads_back_what_text_writes() is
-            let records = LIST[CELL_RECORD]()
+            let notebook = NOTEBOOK()
 
-            records.add(CELL_RECORD(2, "let a = 1\n", CellStatus.OK, null))
-            records.add(CELL_RECORD(5, "a\n", CellStatus.OK, 2))
+            _ran(notebook, 2, "let a = 1\n", CellStatus.OK)
+            _ran(notebook, 5, "a\n", CellStatus.OK)
 
-            let cells = SCRIPT_FILE.cells(SCRIPT_FILE.text(records))
+            let cells = SCRIPT_FILE.cells(SCRIPT_FILE.text(notebook))
 
             assert cells.count == 2;
             assert cells[0] =~ "let a = 1";

@@ -2,6 +2,7 @@ namespace Ghul.Repl.Host is
     use Ghul.Repl.CELL_EXPORTS
     use Ghul.Repl.CELL_REPLY
     use Ghul.Repl.CELL_ENTRY
+    use Ghul.Repl.CellStatus
     use Ghul.Repl.LOADED_CELL
     use Ghul.Repl.RUN_RESULT
     use Ghul.Repl.SESSION
@@ -23,27 +24,23 @@ namespace Ghul.Repl.Host is
         // the terminal and a notebook say the same thing.
         INTERRUPTED_NOTE: string static =>
             "interrupted; the cell kept its definitions, and may still be running in the background until the session ends"
+
+        // How the submission ended, as a notebook records it.
+        status: CellStatus =>
+            if !is_accepted then
+                CellStatus.FAILED
+            elif was_interrupted then
+                CellStatus.INTERRUPTED
+            elif run_error? then
+                CellStatus.THREW
+            else
+                CellStatus.OK
+            fi
     si
 
-    // How a submission ended.
-    enum CellStatus is
-        // It compiled and ran to the end.
-        OK,
-
-        // It did not compile, so it never ran and declares nothing.
-        FAILED,
-
-        // It compiled and threw while it ran.
-        THREW,
-
-        // It compiled and was interrupted while it ran.
-        INTERRUPTED
-    si
-
-    // One submission, as `:cells` lists it: the number it was given, its
-    // text, and how it ended.
-    // A rerun names the cell whose text it submitted again.
-    class CELL_RECORD(number: int, source: string, status: CellStatus, rerun_of: int?);
+    // One submission: the number it was given, its text, and how it
+    // ended.
+    class CELL_RECORD(number: int, source: string, status: CellStatus);
 
     // The cells' own load context. The tool is itself a ghūl program, so
     // its process already holds a ghūl runtime - the one it was built
@@ -305,7 +302,7 @@ namespace Ghul.Repl.Host is
 
         _submissions: Collections.LIST[CELL_RECORD]
 
-        submit(source: string) -> SUBMIT_RESULT => _submit_recorded(source, null, null)
+        submit(source: string) -> SUBMIT_RESULT => _submit_recorded(source, null)
 
         // A cell submitted with a way to present the value it ends on.
         // `present` runs on the cell's own thread straight after the
@@ -314,40 +311,14 @@ namespace Ghul.Repl.Host is
         // the cell. The result carries what `present` returned in place
         // of the value, and whatever it throws as the cell's run error.
         submit(source: string, present: (object?) -> object?) -> SUBMIT_RESULT =>
-            _submit_recorded(source, null, present)
+            _submit_recorded(source, present)
 
-        // The text of an earlier cell submitted again, as a cell of its
-        // own with a number of its own.
-        rerun(number: int) -> SUBMIT_RESULT? => rerun(number, null)
-
-        // The same, with the value presented as submit presents it.
-        rerun(number: int, present: ((object?) -> object?)?) -> SUBMIT_RESULT? is
-            for record in _submissions do
-                if record.number == number then
-                    return _submit_recorded(record.source, number, present)
-                fi
-            od
-
-            return null
-        si
-
-        _submit_recorded(source: string, rerun_of: int?, present: ((object?) -> object?)?) -> SUBMIT_RESULT is
+        _submit_recorded(source: string, present: ((object?) -> object?)?) -> SUBMIT_RESULT is
             let request = _with_references(_session.prepare(source))
 
             let result = _submit_in_cell(source, request, present)
 
-            let status =
-                if !result.is_accepted then
-                    CellStatus.FAILED
-                elif result.was_interrupted then
-                    CellStatus.INTERRUPTED
-                elif result.run_error? then
-                    CellStatus.THREW
-                else
-                    CellStatus.OK
-                fi
-
-            _submissions.add(CELL_RECORD(request.index, source, status, rerun_of))
+            _submissions.add(CELL_RECORD(request.index, source, result.status))
 
             return result
         si

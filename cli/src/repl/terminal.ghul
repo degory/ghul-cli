@@ -3,6 +3,8 @@ namespace Ghul.Cli.Repl is
     use Collections.LIST
     use Ghul.Repl.CELL_DISPLAY
     use Ghul.Repl.CELL_TAIL
+    use Ghul.Repl.NOTEBOOK
+    use Ghul.Repl.NOTEBOOK_CELL
     use Ghul.Repl.Host.GHUL_LEXER
     use IO.Std
     use Ghul.Repl.Host.Completeness
@@ -117,7 +119,9 @@ namespace Ghul.Cli.Repl is
     // The terminal front end: read a submission, hand it to the session,
     // report what happened. Everything it knows about a cell it learns
     // from SESSION, so a notebook or the playground can take its place
-    // without any of this.
+    // without any of this. What was submitted is kept as a NOTEBOOK, so
+    // an earlier cell can be edited and run again where it is, and the
+    // cells above or below it run again after it, as in a notebook.
     class TERMINAL(
         _make_session: () -> HOSTED_SESSION,
         _want_default_use: bool,
@@ -125,6 +129,10 @@ namespace Ghul.Cli.Repl is
         _completes_at_cursor: bool
     ) is
         _display: CELL_DISPLAY
+
+        // The session's cells, in the order they were entered, each
+        // holding its latest text.
+        _notebook: NOTEBOOK
 
         // Whether a value is shown with its type, as `:types` sets it.
         _show_types: bool
@@ -141,6 +149,7 @@ namespace Ghul.Cli.Repl is
 
         init(..) is
             _display = CELL_DISPLAY()
+            _notebook = NOTEBOOK()
             _show_types = true
 
             let is_interactive = !Std.is_input_redirected /\ !Std.is_output_redirected
@@ -215,6 +224,8 @@ namespace Ghul.Cli.Repl is
                         session = _make_session()
                         session.set_display_sink(TERMINAL_DISPLAY_SINK(() => session.runtime))
                         _current = session
+                        _notebook = NOTEBOOK()
+                        _pending_edit = null
 
                         Std.write_line("session reset")
                     when ":help" then
@@ -225,9 +236,9 @@ namespace Ghul.Cli.Repl is
                         elif command.starts_with(":edit ") then
                             _edit(session, command.substring(":edit ".length).trim())
                         elif command =~ ":cells" then
-                            _write_lines(CELL_LISTING.summary(session.submissions, 20))
+                            _write_lines(CELL_LISTING.summary(_notebook, 20))
                         elif command.starts_with(":cells ") then
-                            _write_lines(CELL_LISTING.cell(session.submissions, command.substring(":cells ".length).trim()))
+                            _write_lines(CELL_LISTING.cell(_notebook, command.substring(":cells ".length).trim()))
                         elif command.starts_with(":complete ") then
                             _complete(session, command.substring(":complete ".length))
                         elif command.starts_with(":hover ") then
@@ -256,18 +267,11 @@ namespace Ghul.Cli.Repl is
                     continue
                 fi
 
-                let number = session.next_cell_number
+                let result = _run(session, read.cell, read.source, read.step == CellStep.SUBMIT)
 
-                let want_value = read.step == CellStep.SUBMIT
-
-                let result =
-                    if want_value then
-                        session.submit(read.source, _presenter(session))
-                    else
-                        session.submit(read.source)
-                    fi
-
-                _report(session, result, want_value, number, read.source)
+                if let cell = read.cell then
+                    _note_out_of_date(cell, result)
+                fi
             od
 
             session.close()
@@ -276,8 +280,59 @@ namespace Ghul.Cli.Repl is
             return 0
         si
 
-        // An earlier cell's text, to be the cell edited at the next prompt.
-        _pending_edit: string?
+        // Submits `source` as the notebook cell `cell`, or as a new cell at
+        // the end when there is none, and reports it.
+        _run(session: HOSTED_SESSION, cell: NOTEBOOK_CELL?, source: string, want_value: bool) -> SUBMIT_RESULT is
+            let number = session.next_cell_number
+
+            let result =
+                if want_value then
+                    session.submit(source, _presenter(session))
+                else
+                    session.submit(source)
+                fi
+
+            _notebook.ran(cell ?? _notebook.add(source), number, source, result.status)
+
+            _report(session, result, want_value, number, source)
+
+            return result
+        si
+
+        // After an earlier cell has run again: which cells below it ran
+        // before it, so may be using what it defined before.
+        _note_out_of_date(cell: NOTEBOOK_CELL, result: SUBMIT_RESULT) is
+            if !result.is_accepted then
+                return
+            fi
+
+            let below = _notebook.out_of_date_below(cell)
+
+            if below.count == 0 then
+                return
+            fi
+
+            let numbers = LIST[string]()
+
+            for c in below do
+                numbers.add("{c.number ?? 0}")
+            od
+
+            let first = numbers[0]
+
+            if numbers.count == 1 then
+                Std.error.write_line("ghul: cell {first}, below this one, ran before it; :rerun {first}.. runs it again")
+            else
+                let listed = "{numbers |> Ghul.Pipes.take(numbers.count - 1) |> Ghul.Pipes.join(", ")} and {numbers[numbers.count - 1]}"
+
+                Std.error.write_line("ghul: cells {listed}, below this one, ran before it; :rerun {first}.. runs them again")
+            fi
+        si
+
+        // The notebook cell to be edited next: at a terminal it is brought
+        // up at the next prompt, and otherwise the next cell entered
+        // replaces it.
+        _pending_edit: NOTEBOOK_CELL?
 
         _edit(session: HOSTED_SESSION, argument: string) is
             let number mut = 0
@@ -288,65 +343,88 @@ namespace Ghul.Cli.Repl is
                 return
             fi
 
-            for cell in session.submissions do
-                if cell.number == number then
-                    if _editor? then
-                        _pending_edit = cell.source
-                    else
-                        Std.write_line(":edit needs a terminal")
-                    fi
+            if let cell = _notebook.with_number(number) then
+                _pending_edit = cell
 
-                    return
+                if !_editor? then
+                    Std.write_line("the next cell entered replaces cell {cell.number ?? number}")
                 fi
-            od
+
+                return
+            fi
 
             Std.write_line("no cell {number}")
         si
 
-        // `:rerun N` submits cell N again; `:rerun N..` submits N and every
-        // later cell that ran to the end, in order, stopping at the first
-        // that does not.
+        // `:rerun N` runs cell N again where it is; `:rerun N..` runs N and
+        // every cell after it, and `:rerun ..N` every cell before N, in
+        // order, stopping at the first that does not run to the end. A
+        // cell whose last run did not compile, and which has not been
+        // edited since, is passed over by either.
         _rerun(session: HOSTED_SESSION, argument: string) is
             let is_from = argument.ends_with("..")
-            let digits = if is_from then argument.substring(0, argument.length - 2).trim() else argument fi
+            let is_above = !is_from /\ argument.starts_with("..")
+            let digits =
+                if is_from then
+                    argument.substring(0, argument.length - 2).trim()
+                elif is_above then
+                    argument.substring(2).trim()
+                else
+                    argument
+                fi
+
             let number mut = 0
 
             if !int.try_parse(digits, number ref) then
-                Std.write_line("usage: :rerun N, or :rerun N.. for N and every later cell")
+                Std.write_line("usage: :rerun N, :rerun N.. for N and every cell after it, or :rerun ..N for every cell before N")
+
+                return
+            fi
+
+            let found = _notebook.with_number(number)
+
+            if !found? then
+                Std.write_line("no cell {number}")
 
                 return
             fi
 
             let cells =
                 if is_from then
-                    REPLAY.from(session.submissions, number)
+                    _notebook.from(found)
+                elif is_above then
+                    _notebook.above(found)
                 else
-                    session.submissions |> Ghul.Pipes.filter(c => c.number == number) |> Ghul.Pipes.collect_mutable()
+                    LIST[NOTEBOOK_CELL]([found])
                 fi
 
             if cells.count == 0 then
-                Std.write_line("no cell {number}")
+                Std.write_line("nothing above cell {number} to run")
 
                 return
             fi
 
+            let is_range = is_from \/ is_above
+
             for cell in cells do
+                let old_number = cell.number
                 let new_number = session.next_cell_number
+                let source = cell.source
 
-                _show_replayed(new_number, cell.source)
+                _show_replayed(new_number, source)
 
-                let result = session.rerun(cell.number, _presenter(session))
+                let result = _run(session, cell, source, true)
 
-                if !result? then
+                if is_range /\ (!result.is_accepted \/ result.was_interrupted \/ result.run_error?) then
+                    let was = if let n = old_number then ", which was cell {n}" else "" fi
+
+                    Std.write_line("ghul: stopped at cell {new_number}{was}; the cells after it were not run")
+
                     return
                 fi
 
-                _report(session, result, true, new_number, cell.source)
-
-                if is_from /\ (!result.is_accepted \/ result.was_interrupted \/ result.run_error?) then
-                    Std.write_line("ghul: stopped at cell {new_number}, the rerun of cell {cell.number}; later cells were not rerun")
-
-                    return
+                if !is_from /\ cell == cells[cells.count - 1] then
+                    _note_out_of_date(cell, result)
                 fi
             od
         si
@@ -371,11 +449,11 @@ namespace Ghul.Cli.Repl is
 
         // The next cell, or null when the input has ended.
         _read() -> CELL_READ? is
-            if let editor = _editor then
-                let text = _pending_edit
-                _pending_edit = null
+            let editing = _pending_edit
+            _pending_edit = null
 
-                return editor.read_cell(_current?.next_cell_number ?? 1, text)
+            if let editor = _editor then
+                return editor.read_cell(_current?.next_cell_number ?? 1, _notebook, editing)
             fi
 
             do
@@ -386,6 +464,8 @@ namespace Ghul.Cli.Repl is
                 fi
 
                 if _cell.is_empty /\ line.trim().starts_with(":") then
+                    _pending_edit = editing
+
                     return CELL_READ(line, CellStep.SUBMIT, true)
                 fi
 
@@ -396,7 +476,7 @@ namespace Ghul.Cli.Repl is
 
                     _cell.clear()
 
-                    return CELL_READ(source, step, false)
+                    return CELL_READ(source, step, false, editing)
                 fi
             od
         si
@@ -599,7 +679,7 @@ namespace Ghul.Cli.Repl is
                 return
             fi
 
-            let text = SCRIPT_FILE.text(session.submissions)
+            let text = SCRIPT_FILE.text(_notebook)
 
             try
                 IO.File.write_all_text(path, text)
@@ -636,9 +716,7 @@ namespace Ghul.Cli.Repl is
 
                 _show_replayed(number, cell)
 
-                let result = session.submit("{cell}\n", _presenter(session))
-
-                _report(session, result, true, number, cell)
+                let result = _run(session, null, "{cell}\n", true)
 
                 if !result.is_accepted \/ result.was_interrupted \/ result.run_error? then
                     Std.write_line("ghul: stopped at cell {number}; the rest of {path} was not loaded")
@@ -662,12 +740,14 @@ namespace Ghul.Cli.Repl is
         _write_help() is
             Std.write_line(":help            this list")
             Std.write_line(":reset           start a new session, forgetting every cell")
-            Std.write_line(":cells           the cells so far: number, how each ended, its first line")
+            Std.write_line(":cells           the cells so far, in order: number, how each last ran, its")
+            Std.write_line("                 first line, and whether it has been edited or is out of date")
             Std.write_line(":cells N         the whole of cell N")
-            Std.write_line(":rerun N         submit cell N again, as a new cell")
-            Std.write_line(":rerun N..       submit cell N and every later cell that ran to the end,")
-            Std.write_line("                 stopping if one of them does not this time")
-            Std.write_line(":edit N          bring cell N back to edit as the next cell")
+            Std.write_line(":edit N          edit cell N where it is; running it runs it again in its place")
+            Std.write_line(":rerun N         run cell N again, in its place")
+            Std.write_line(":rerun N..       run cell N and every cell after it, in order")
+            Std.write_line(":rerun ..N       run every cell before cell N, in order")
+            Std.write_line("                 either stops at the first cell that does not run to the end")
             Std.write_line(":complete TEXT   what could follow TEXT")
             Std.write_line(":hover TEXT      what the end of TEXT names")
             Std.write_line(":type EXPR       the type of EXPR, without running it")
@@ -686,15 +766,18 @@ namespace Ghul.Cli.Repl is
             Std.write_line("a submission is submitted from its last line; Enter on an earlier line adds")
             Std.write_line("a line, and Alt-Enter submits from any line, showing what it ended on")
             Std.write_line("a line ending in a lone \\ keeps the submission open; the \\ is dropped")
-            Std.write_line("Up and Down move between lines, then to earlier submissions; Ctrl-D in an")
-            Std.write_line("empty submission leaves")
+            Std.write_line("Up and Down move between lines, then between the cells so far, each edited")
+            Std.write_line("where it is under its own number, then back through history; running an")
+            Std.write_line("earlier cell runs it again in its place, as the next number, and later cells")
+            Std.write_line("then see what it defines; Ctrl-D in an empty submission leaves")
             Std.write_line("Ctrl-Left and Ctrl-Right (or Alt-B and Alt-F) move by a word; Ctrl-U and")
             Std.write_line("Ctrl-K delete to the start or end of the line, Ctrl-W the word before the")
             Std.write_line("cursor; Ctrl-L clears the screen; Tab completes, listing the names on offer,")
             Std.write_line("and Tab again chooses among them with Tab and the arrows, Enter or Escape;")
             Std.write_line("Shift-Tab shows what the name at the cursor is")
             Std.write_line("Ctrl-C while a submission runs interrupts it; the session carries on")
-            Std.write_line("Ctrl-C at the prompt sets what you have typed aside in history and starts again")
+            Std.write_line("Ctrl-C at the prompt sets what you have typed aside in history and starts again;")
+            Std.write_line("on an earlier cell it puts back what the cell last ran")
             Std.write_line("what you end on is shown, unless you end on a statement or with a blank line")
             Std.write_line("messages call a cell cell-3; in code it is cell3, as in cell3.x")
 

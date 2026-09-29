@@ -179,21 +179,56 @@ takes no number.
 Messages name a cell by its label, `cell-3` for the third cell. Code names
 the same cell `cell3`, so `cell3.x` is the third cell's `x`.
 
-`:cells` lists the cells so far. For each cell it shows the first line and
-how the cell ended: `ok`, `failed`, `threw` or `interrupted`. `:cells 3`
-shows the whole of the third cell.
+### editing and running earlier cells
 
-`:rerun 3` submits the text of the third cell again as a new cell with its
-own number. `:cells` lists the new cell as a rerun of 3.
+The session keeps its cells as a notebook does. You can go back to an earlier
+cell, change it, and run it again in its place. The cells after it then see
+what it now defines.
 
-`:rerun 3..` submits the third cell again, and then every later cell that ran
-to the end the first time, in order. It skips the cells that failed, threw or
-were interrupted, and it stops at the first cell that does not run to the end
-this time. Use it after you redefine something that later cells used: it
-brings those cells up to date.
+A cell that runs again takes the next number, as a notebook cell takes a new
+execution count. It keeps its place among the other cells. Code and messages
+use the new number. The old number still finds the cell in commands:
 
-`:edit 3` puts the text of the third cell at the next prompt, where you can
-change it and submit it as a new cell.
+```plaintext
+1> let a = 1
+2> let b = a + 1
+3> b * 10
+int: 20
+4> :edit 1
+4> let a = 5
+ghul: cells 2 and 3, below this one, ran before it; :rerun 2.. runs them again
+5> :rerun 2..
+5> let b = a + 1
+6> b * 10
+int: 60
+```
+
+`:edit 1` brings cell 1 back at the prompt as `1>`. When you submit it, the
+session writes it again as `4>`, the number it runs as, so that is what stays
+on the screen. Up
+from the first line of a new cell does the same for the cell above it. See
+[history](#history).
+
+`:cells` lists the cells in order. For each cell it shows its number, how it
+last ran (`ok`, `failed`, `threw` or `interrupted`) and its first line. It
+also says when a cell was edited and not run again, when it is out of date
+because a cell above it ran after it, and which numbers it ran as before.
+`:cells 3` shows the whole of the cell.
+
+| command | what it runs |
+| --- | --- |
+| `:rerun 3` | cell 3, in its place |
+| `:rerun 3..` | cell 3, then every cell after it, in order |
+| `:rerun ..3` | every cell before cell 3, in order, as a notebook's "run all above" does |
+
+`:rerun 3..` and `:rerun ..3` stop at the first cell that does not run to
+the end. They skip a cell that failed to compile if you have not edited it
+since, because it would only fail again. They run a cell that threw or was
+interrupted. `:rerun 1..` runs every cell.
+
+`:save` writes each cell whose last run ran to the end, in order, as it last
+ran. Without a terminal, `:edit 3` makes the next cell you enter replace
+cell 3.
 
 ### imports
 
@@ -238,7 +273,7 @@ At a terminal you edit the whole cell in place, however many lines it has.
 
 | key | what it does |
 | --- | --- |
-| Up, Down | move between the lines of the cell, and into history past its first or last line |
+| Up, Down | move between the lines of the cell, then to the cells above it, then into history |
 | Enter on the last line | submit the cell, or start a new line if the cell stays open |
 | Enter on an earlier line | start a new line there |
 | Alt-Enter | submit the cell from any line, and show the value it ends on |
@@ -266,8 +301,17 @@ blank lines.
 ### history
 
 Up from the first line of a cell, and Down from the last line, step through
-earlier cells. The session brings each one back whole. History includes the
-cells of earlier sessions. The session keeps the last thousand cells in
+the cells of this session, from the last back to the first. The session
+brings each cell back whole, at the prompt with its own number. You edit that
+cell where it is. If you move off the cell, it keeps your changes, and
+`:cells` says it was edited. If you submit it, it runs again in its place.
+Ctrl-C on the cell puts back the text it last ran.
+
+Past the first cell, Up goes on into history, with its newest entry first.
+History holds what is not one of the cells: commands, cells you set aside with
+Ctrl-C, what an edited cell held before, and the cells of earlier sessions.
+The prompt shows the next number there, because the session runs the text as
+a new cell. The session keeps the last thousand cells in
 `$XDG_STATE_HOME/ghul-cli/history`, or in `~/.local/state/ghul-cli/history`
 when `XDG_STATE_HOME` is not set.
 
@@ -287,8 +331,10 @@ restores what you typed. Any other key keeps the name and carries on typing.
 At the prompt, Ctrl-C sets aside the cell you are typing. The text stays on
 the screen marked `^C`, and a new prompt with the same number replaces it.
 The session did not submit the cell, so the cell takes no number and `:cells`
-does not list it. Up brings it back from history. With nothing typed, Ctrl-C
-does nothing.
+does not list it. Up brings it back from history, past the session's cells.
+With nothing typed, Ctrl-C does nothing. On an earlier cell brought back with
+Up or `:edit`, Ctrl-C drops your changes and puts back the text the cell last
+ran.
 
 While a cell is running, Ctrl-C interrupts it and brings the prompt back. The
 session keeps everything it has defined, including the definitions of the

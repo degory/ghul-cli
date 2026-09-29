@@ -1,0 +1,245 @@
+namespace Ghul.Repl is
+    use Collections.LIST
+
+    // How a run of a cell ended.
+    enum CellStatus is
+        // It compiled and ran to the end.
+        OK,
+
+        // It did not compile, so it never ran and declares nothing.
+        FAILED,
+
+        // It compiled and threw while it ran.
+        THREW,
+
+        // It compiled and was interrupted while it ran.
+        INTERRUPTED
+    si
+
+    // One run of a notebook cell: the number the submission took, the
+    // text that was submitted, and how it ended.
+    class CELL_RUN(number: int, source: string, status: CellStatus);
+
+    // A cell with a place in a notebook: text the user can come back to,
+    // edit and run again, as a notebook front end shows it. Running it
+    // submits its text as a new submission with a number of its own,
+    // which the session takes as it takes any other, so what it defines
+    // replaces what it defined before for every cell run after it. The
+    // cell keeps its place; only its number moves on, as a notebook's
+    // execution count does.
+    class NOTEBOOK_CELL is
+        // A handle that never changes and is never reused within its
+        // notebook, for a host to find the cell by whatever it runs as.
+        id: int
+
+        _source: string
+        _last_run: CELL_RUN?
+        _numbers: LIST[int]
+
+        init(id: int, source: string) is
+            self.id = id
+            _source = source
+            _numbers = LIST[int]()
+        si
+
+        // The text as it stands, which is what running the cell submits:
+        // what last ran, unless it has been edited since.
+        source: string => _source
+
+        // The latest run, or null for a cell not run yet.
+        last_run: CELL_RUN? => _last_run
+
+        // The number of the latest run: what the cell is called in code,
+        // as `cell3`, and in messages, as `cell-3`.
+        number: int? => _last_run?.number
+
+        // Every number the cell has run as, oldest first, so a number the
+        // user saw it take before still finds it.
+        numbers: Collections.List[int] => _numbers
+
+        // Whether the text differs from what last ran, so running it would
+        // change something. A cell not run yet counts as edited.
+        is_edited: bool =>
+            if let run = _last_run then _trimmed(run.source) !~ _trimmed(_source) else true fi
+
+        // Whether the latest run left anything in the session: one that
+        // did not compile left nothing.
+        is_in_effect: bool =>
+            if let run = _last_run then run.status != CellStatus.FAILED else false fi
+
+        edit(source: string) is
+            _source = source
+        si
+
+        // Puts back the text that last ran, dropping any edit since.
+        revert() is
+            if let run = _last_run then
+                _source = run.source
+            fi
+        si
+
+        ran(run: CELL_RUN) is
+            _last_run = run
+            _source = run.source
+            _numbers.add(run.number)
+        si
+
+        _trimmed(text: string) -> string static => text.trim_end()
+    si
+
+    // The cells of a notebook in the order the user reads them, which is
+    // not the order they ran in once one has been run again. It compiles
+    // nothing and runs nothing: a host runs a cell's text through its
+    // SESSION however it does, and tells the notebook with `ran`. A
+    // terminal, a browser page and a kernel front end can each keep one
+    // and agree on what editing an earlier cell, running it again and
+    // running the cells around it mean.
+    class NOTEBOOK is
+        _cells: LIST[NOTEBOOK_CELL]
+        _next_id: int
+
+        init() is
+            _cells = LIST[NOTEBOOK_CELL]()
+            _next_id = 1
+        si
+
+        cells: Collections.List[NOTEBOOK_CELL] => _cells
+
+        count: int => _cells.count
+
+        // A new cell at the end.
+        add(source: string) -> NOTEBOOK_CELL => insert(_cells.count, source)
+
+        // A new cell at `index`, before the cell there now.
+        insert(index: int, source: string) -> NOTEBOOK_CELL is
+            let cell = NOTEBOOK_CELL(_next_id, source)
+
+            _next_id = _next_id + 1
+
+            _cells.insert(System.Math.clamp(index, 0, _cells.count), cell)
+
+            return cell
+        si
+
+        // Takes a cell out of the notebook. What its runs defined stays in
+        // the session, as it does in a notebook when a cell is deleted.
+        remove(cell: NOTEBOOK_CELL) -> bool => _cells.remove(cell)
+
+        index_of(cell: NOTEBOOK_CELL) -> int => _cells.index_of(cell)
+
+        with_id(id: int) -> NOTEBOOK_CELL? is
+            for cell in _cells do
+                if cell.id == id then
+                    return cell
+                fi
+            od
+
+            return null
+        si
+
+        // The cell that ran as `number`, now or at any run before.
+        with_number(number: int) -> NOTEBOOK_CELL? is
+            for cell in _cells do
+                for n in cell.numbers do
+                    if n == number then
+                        return cell
+                    fi
+                od
+            od
+
+            return null
+        si
+
+        // Records that `cell` was just run, with `source`, as submission
+        // `number`.
+        ran(cell: NOTEBOOK_CELL, number: int, source: string, status: CellStatus) is
+            cell.ran(CELL_RUN(number, source, status))
+        si
+
+        // Whether something `cell` may have used has changed since it ran:
+        // a cell above it has run since, and left something in the
+        // session. A cell whose own run left nothing is not out of date,
+        // since there is nothing of its to be stale.
+        is_out_of_date(cell: NOTEBOOK_CELL) -> bool is
+            let run = cell.last_run
+
+            if !run? \/ run.status == CellStatus.FAILED then
+                return false
+            fi
+
+            for above in _cells do
+                if above == cell then
+                    return false
+                fi
+
+                if let other = above.last_run then
+                    if other.number > run.number /\ other.status != CellStatus.FAILED then
+                        return true
+                    fi
+                fi
+            od
+
+            return false
+        si
+
+        // The cells after `cell` that are out of date.
+        out_of_date_below(cell: NOTEBOOK_CELL) -> LIST[NOTEBOOK_CELL] is
+            let result = LIST[NOTEBOOK_CELL]()
+            let index = _cells.index_of(cell)
+
+            if index < 0 then
+                return result
+            fi
+
+            for i in index + 1.._cells.count do
+                if is_out_of_date(_cells[i]) then
+                    result.add(_cells[i])
+                fi
+            od
+
+            return result
+        si
+
+        // What "run all above" runs, top to bottom: the cells before
+        // `cell`, leaving out any whose last run did not compile and
+        // which has not been edited since, since running it again could
+        // only fail again and would stop the rest.
+        above(cell: NOTEBOOK_CELL) -> LIST[NOTEBOOK_CELL] is
+            let result = LIST[NOTEBOOK_CELL]()
+            let index = _cells.index_of(cell)
+
+            for i in 0..index do
+                if _is_worth_running(_cells[i]) then
+                    result.add(_cells[i])
+                fi
+            od
+
+            return result
+        si
+
+        // What "run this cell and all below" runs, top to bottom: `cell`
+        // itself, whatever became of it, then the cells after it that
+        // `above` would run.
+        from(cell: NOTEBOOK_CELL) -> LIST[NOTEBOOK_CELL] is
+            let result = LIST[NOTEBOOK_CELL]()
+            let index = _cells.index_of(cell)
+
+            if index < 0 then
+                return result
+            fi
+
+            result.add(cell)
+
+            for i in index + 1.._cells.count do
+                if _is_worth_running(_cells[i]) then
+                    result.add(_cells[i])
+                fi
+            od
+
+            return result
+        si
+
+        _is_worth_running(cell: NOTEBOOK_CELL) -> bool =>
+            cell.source.trim().length > 0 /\ (cell.is_in_effect \/ cell.is_edited)
+    si
+si

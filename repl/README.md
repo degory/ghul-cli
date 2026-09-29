@@ -54,6 +54,43 @@ that holds its cells as bytes in one load context never writes them to disk.
 The session accepts every cell that compiles, whatever the cell does when it
 runs. So run a cell after the session accepts it.
 
+## notebooks
+
+`NOTEBOOK` keeps the cells as a notebook shows them: in the order the user
+reads them, each with its latest text. That order is not the order the cells
+ran in once a cell runs again. Use it in a front end that lets the user edit
+an earlier cell and run it again. Like the session, it compiles and runs
+nothing.
+
+To run a cell, submit its `source` through the session as any other cell,
+then record the run:
+
+```ghul
+let cell = notebook.add(source)      // or an earlier cell the user edited
+
+// prepare, compile, accept and run cell.source as above, as number
+// request.index
+
+notebook.ran(cell, request.index, cell.source, status)
+```
+
+The run takes a new number, so the cell is `cell9` in code even if it was
+`cell3` before. The session lets a newer definition win, so the cells that
+run after it see what it defines now. `with_number` finds a cell by any
+number it has run as. `id` stays the same for the life of the cell.
+
+The notebook answers the questions a notebook front end asks:
+
+- `is_edited` is true when a cell's text differs from what last ran.
+- `is_out_of_date` is true when a cell above it ran after it did.
+  `out_of_date_below` lists every such cell below a given cell.
+- `above(cell)` lists the cells that "run all above" runs.
+  `from(cell)` lists the cells that "run this cell and below" runs.
+  Both skip a cell that failed to compile if nobody has edited it since.
+  Stop at the first cell that does not run to the end.
+- `insert` and `remove` add and delete cells anywhere in the notebook.
+  Removing a cell leaves its definitions in the session, as in Jupyter.
+
 ## diagnostics
 
 The host gives the compiler's diagnostics to the session in a `CELL_REPLY`. It

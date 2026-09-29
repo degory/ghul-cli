@@ -1,0 +1,73 @@
+namespace Ghul.Cli.Repl is
+    use Collections.LIST
+    use Ghul.Repl.NOTEBOOK
+    use Ghul.Repl.NOTEBOOK_CELL
+
+    // Somewhere Up can take the editor: a cell of this session's
+    // notebook, edited where it is, or text from history, which is a copy
+    // and becomes a new cell if it is run.
+    class RECALLED(cell: NOTEBOOK_CELL?, text: string?);
+
+    // What Up steps back through from a new cell, nearest first: the
+    // session's cells from the last up to the first, then history, newest
+    // first, for what is not already one of those cells - commands, cells
+    // set aside with Ctrl-C, what a cell held before it was edited, and
+    // cells from earlier sessions.
+    class CELL_RECALL is
+        init() is si
+
+        of(notebook: NOTEBOOK?, history: Collections.List[string]) -> LIST[RECALLED] static is
+            let result = LIST[RECALLED]()
+            let seen = Collections.SET[string]()
+
+            if let cells = notebook?.cells then
+                let i mut = cells.count - 1
+
+                while i >= 0 do
+                    let cell = cells[i]
+
+                    result.add(RECALLED(cell, null))
+
+                    seen.add(cell.source.trim_end())
+
+                    // What an earlier run of an edited cell submitted is
+                    // left in history, where the text before the edit can
+                    // still be had as a copy.
+                    if let run = cell.last_run then
+                        seen.add(run.source.trim_end())
+                    fi
+
+                    i = i - 1
+                od
+            fi
+
+            let previous mut = ""
+            let i mut = history.count - 1
+
+            while i >= 0 do
+                let text = history[i]
+                let key = text.trim_end()
+
+                if !seen.contains(key) /\ key !~ previous then
+                    result.add(RECALLED(null, text))
+                fi
+
+                previous = key
+                i = i - 1
+            od
+
+            return result
+        si
+
+        // Where `cell` is in what `of` returned, or -1.
+        position_of(recalled: Collections.List[RECALLED], cell: NOTEBOOK_CELL) -> int static is
+            for i in 0..recalled.count do
+                if recalled[i].cell == cell then
+                    return i
+                fi
+            od
+
+            return -1
+        si
+    si
+si

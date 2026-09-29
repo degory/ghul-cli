@@ -1,0 +1,158 @@
+namespace Ghul.Repl.Tests is
+    use Collections.LIST
+
+    use Ghul.Repl.CellStatus
+    use Ghul.Repl.NOTEBOOK
+    use Ghul.Repl.NOTEBOOK_CELL
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    @TestClass()
+    class NOTEBOOK_TESTS is
+        init() is si
+
+        // Four cells run in order as 1 to 4, the second of which did not
+        // compile.
+        _notebook() -> NOTEBOOK is
+            let notebook = NOTEBOOK()
+
+            _ran(notebook, 1, "let a = 1\n", CellStatus.OK)
+            _ran(notebook, 2, "let b = \n", CellStatus.FAILED)
+            _ran(notebook, 3, "let c = a + 1\n", CellStatus.OK)
+            _ran(notebook, 4, "c\n", CellStatus.THREW)
+
+            return notebook
+        si
+
+        _ran(notebook: NOTEBOOK, number: int, source: string, status: CellStatus) static is
+            notebook.ran(notebook.add(source), number, source, status)
+        si
+
+        _numbers(cells: Collections.List[NOTEBOOK_CELL]) -> string static is
+            let numbers = LIST[string]()
+
+            for cell in cells do
+                numbers.add("{cell.number ?? 0}")
+            od
+
+            return numbers |> Ghul.Pipes.join(",")
+        si
+
+        @Test()
+        ran__moves_the_number_on_and_keeps_the_place() is
+            let notebook = _notebook()
+            let first = notebook.cells[0]
+
+            notebook.ran(first, 5, "let a = 10\n", CellStatus.OK)
+
+            assert notebook.index_of(first) == 0;
+            assert first.number =~ 5;
+            assert first.source =~ "let a = 10\n";
+            assert _numbers(notebook.cells) =~ "5,2,3,4";
+            assert notebook.with_number(1) == first;
+            assert notebook.with_number(5) == first;
+            assert !notebook.with_number(9)?;
+        si
+
+        @Test()
+        edit__marks_the_cell_edited_until_it_runs_or_goes_back() is
+            let notebook = _notebook()
+            let first = notebook.cells[0]
+
+            assert !first.is_edited;
+
+            first.edit("let a = 2")
+
+            assert first.is_edited;
+
+            first.revert()
+
+            assert !first.is_edited;
+            assert first.source =~ "let a = 1\n";
+
+            first.edit("let a = 1")
+
+            assert !first.is_edited;
+        si
+
+        @Test()
+        a_cell_not_run_yet_counts_as_edited() is
+            let notebook = NOTEBOOK()
+            let cell = notebook.add("1")
+
+            assert cell.is_edited;
+            assert !cell.number?;
+            assert !notebook.is_out_of_date(cell);
+        si
+
+        // A cell is out of date once a cell above it has run since, unless
+        // that run did not compile, or its own run left nothing.
+        @Test()
+        is_out_of_date__after_a_cell_above_runs_again() is
+            let notebook = _notebook()
+
+            assert notebook.out_of_date_below(notebook.cells[0]).count == 0;
+
+            notebook.ran(notebook.cells[2], 5, "let c = a + 2\n", CellStatus.OK)
+
+            assert !notebook.is_out_of_date(notebook.cells[0]);
+            assert !notebook.is_out_of_date(notebook.cells[2]);
+            assert notebook.is_out_of_date(notebook.cells[3]);
+
+            notebook.ran(notebook.cells[0], 6, "let a = 5\n", CellStatus.FAILED)
+
+            assert !notebook.is_out_of_date(notebook.cells[2]);
+
+            notebook.ran(notebook.cells[0], 7, "let a = 5\n", CellStatus.OK)
+
+            assert notebook.is_out_of_date(notebook.cells[2]);
+            assert !notebook.is_out_of_date(notebook.cells[1]);
+            assert _numbers(notebook.out_of_date_below(notebook.cells[0])) =~ "5,4";
+        si
+
+        // Run all above: every cell before, passing over one that did not
+        // compile and has not been edited since.
+        @Test()
+        above__passes_over_cells_that_did_not_compile_unless_edited() is
+            let notebook = _notebook()
+            let last = notebook.cells[3]
+
+            assert _numbers(notebook.above(last)) =~ "1,3";
+
+            notebook.cells[1].edit("let b = 2\n")
+
+            assert _numbers(notebook.above(last)) =~ "1,2,3";
+            assert notebook.above(notebook.cells[0]).count == 0;
+        si
+
+        // Run this and below: the cell itself whatever became of it, then
+        // what above would run.
+        @Test()
+        from__takes_the_cell_itself_then_the_cells_after_it() is
+            let notebook = _notebook()
+
+            assert _numbers(notebook.from(notebook.cells[1])) =~ "2,3,4";
+            assert _numbers(notebook.from(notebook.cells[0])) =~ "1,3,4";
+        si
+
+        @Test()
+        insert_and_remove__place_cells_without_touching_the_others() is
+            let notebook = _notebook()
+            let inserted = notebook.insert(1, "let z = 0\n")
+
+            assert notebook.index_of(inserted) == 1;
+            assert notebook.count == 5;
+            assert inserted.id != notebook.cells[0].id;
+            assert notebook.with_id(inserted.id) == inserted;
+
+            assert notebook.remove(inserted);
+            assert notebook.count == 4;
+            assert _numbers(notebook.cells) =~ "1,2,3,4";
+
+            let again = notebook.add("x")
+
+            assert again.id != inserted.id;
+        si
+    si
+si

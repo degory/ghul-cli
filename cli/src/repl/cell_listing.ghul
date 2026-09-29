@@ -1,17 +1,20 @@
 namespace Ghul.Cli.Repl is
     use Collections.LIST
-    use Ghul.Repl.Host.CELL_RECORD
-    use Ghul.Repl.Host.CellStatus
+    use Ghul.Repl.CellStatus
+    use Ghul.Repl.NOTEBOOK
+    use Ghul.Repl.NOTEBOOK_CELL
 
-    // What `:cells` shows: the cells submitted so far, or one of them.
+    // What `:cells` shows: the notebook's cells in order, or one of them.
     class CELL_LISTING is
         init() is si
 
-        // The newest `limit` cells, oldest first: each one's number, how
-        // it ended, its first line, and how many lines it has when it has
-        // more than one.
-        summary(cells: Collections.List[CELL_RECORD], limit: int) -> LIST[string] static is
+        // The last `limit` cells, in order: each one's number, how its
+        // latest run ended, its first line, how many lines it has when it
+        // has more than one, and whether it has been edited or has fallen
+        // out of date since it ran.
+        summary(notebook: NOTEBOOK, limit: int) -> LIST[string] static is
             let lines = LIST[string]()
+            let cells = notebook.cells
 
             if cells.count == 0 then
                 lines.add("no cells yet")
@@ -25,23 +28,27 @@ namespace Ghul.Cli.Repl is
                 lines.add("{first} earlier cells not shown")
             fi
 
-            let width = "{cells[cells.count - 1].number}".length
+            let width mut = 1
+
+            for cell in cells do
+                width = System.Math.max(width, _number_of(cell).length)
+            od
 
             for i in first..cells.count do
                 let cell = cells[i]
                 let source_lines = _lines_of(cell.source)
                 let more = if source_lines.count > 1 then "  ({source_lines.count} lines)" else "" fi
-                let rerun = if let of = cell.rerun_of then "  (rerun of {of})" else "" fi
+                let notes = _notes(notebook, cell)
 
-                lines.add("{"{cell.number}".pad_left(width)}  {status_name(cell.status).pad_right(11)} {source_lines[0].trim_end()}{more}{rerun}")
+                lines.add("{_number_of(cell).pad_left(width)}  {_status_of(cell).pad_right(11)} {source_lines[0].trim_end()}{more}{notes}")
             od
 
             return lines
         si
 
-        // The whole of the cell numbered `number`, under a line saying how
-        // it ended.
-        cell(cells: Collections.List[CELL_RECORD], number: string) -> LIST[string] static is
+        // The whole of the cell that ran as `number`, now or before,
+        // under a line saying how its latest run ended.
+        cell(notebook: NOTEBOOK, number: string) -> LIST[string] static is
             let lines = LIST[string]()
             let wanted mut = 0
 
@@ -51,14 +58,12 @@ namespace Ghul.Cli.Repl is
                 return lines
             fi
 
-            for cell in cells do
-                if cell.number == wanted then
-                    lines.add("cell {cell.number}: {status_name(cell.status)}")
-                    lines.add_range(_lines_of(cell.source))
+            if let cell = notebook.with_number(wanted) then
+                lines.add("cell {_number_of(cell)}: {_status_of(cell)}{_notes(notebook, cell)}")
+                lines.add_range(_lines_of(cell.source))
 
-                    return lines
-                fi
-            od
+                return lines
+            fi
 
             lines.add("no cell {wanted}")
 
@@ -73,6 +78,30 @@ namespace Ghul.Cli.Repl is
             when CellStatus.INTERRUPTED then "interrupted"
             esac
 
+        _number_of(cell: NOTEBOOK_CELL) -> string static =>
+            if let number = cell.number then "{number}" else "-" fi
+
+        _status_of(cell: NOTEBOOK_CELL) -> string static =>
+            if let run = cell.last_run then status_name(run.status) else "not run" fi
+
+        _notes(notebook: NOTEBOOK, cell: NOTEBOOK_CELL) -> string static is
+            let notes = LIST[string]()
+
+            if cell.last_run? /\ cell.is_edited then
+                notes.add("edited")
+            fi
+
+            if notebook.is_out_of_date(cell) then
+                notes.add("out of date")
+            fi
+
+            if cell.numbers.count > 1 then
+                notes.add("was {cell.numbers |> Ghul.Pipes.take(cell.numbers.count - 1) |> Ghul.Pipes.join(", ")}")
+            fi
+
+            return if notes.count == 0 then "" else "  ({notes |> Ghul.Pipes.join("; ")})" fi
+        si
+
         _lines_of(source: string) -> LIST[string] static is
             let lines = LIST[string](source.trim_end(['\n']).split(['\n']))
 
@@ -81,32 +110,6 @@ namespace Ghul.Cli.Repl is
             fi
 
             return lines
-        si
-    si
-
-    // Which cells `:rerun N..` submits again, oldest first: cell N itself,
-    // however it ended, then every later cell that ran to the end. A cell
-    // that was itself a rerun is left out, since the cell it repeated is
-    // already in the list or before it.
-    class REPLAY is
-        init() is si
-
-        from(cells: Collections.List[CELL_RECORD], first: int) -> LIST[CELL_RECORD] static is
-            let result = LIST[CELL_RECORD]()
-
-            for cell in cells do
-                if cell.number == first then
-                    result.add(cell)
-                elif cell.number > first /\ cell.status == CellStatus.OK /\ !cell.rerun_of? then
-                    result.add(cell)
-                fi
-            od
-
-            if result.count > 0 /\ result[0].number != first then
-                result.clear()
-            fi
-
-            return result
         si
     si
 si

@@ -2,9 +2,9 @@ namespace Ghul.Cli.Tests is
     use Collections.LIST
 
     use Ghul.Cli.Repl.CELL_LISTING
-    use Ghul.Cli.Repl.REPLAY
-    use Ghul.Repl.Host.CELL_RECORD
-    use Ghul.Repl.Host.CellStatus
+    use Ghul.Cli.Repl.CELL_RECALL
+    use Ghul.Repl.CellStatus
+    use Ghul.Repl.NOTEBOOK
 
     use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
     use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
@@ -13,13 +13,20 @@ namespace Ghul.Cli.Tests is
     class CELL_LISTING_TESTS is
         init() is si
 
-        _cells() -> LIST[CELL_RECORD] =>
-            LIST[CELL_RECORD]([
-                CELL_RECORD(1, "let x = 1\n", CellStatus.OK, null),
-                CELL_RECORD(2, "let y = \n", CellStatus.FAILED, null),
-                CELL_RECORD(3, "for i in 0..3 do\n    write_line(i)\nod\n", CellStatus.OK, null),
-                CELL_RECORD(4, "while true do od\n", CellStatus.INTERRUPTED, null)
-            ])
+        _ran(notebook: NOTEBOOK, number: int, source: string, status: CellStatus) static is
+            notebook.ran(notebook.add(source), number, source, status)
+        si
+
+        _cells() -> NOTEBOOK is
+            let notebook = NOTEBOOK()
+
+            _ran(notebook, 1, "let x = 1\n", CellStatus.OK)
+            _ran(notebook, 2, "let y = \n", CellStatus.FAILED)
+            _ran(notebook, 3, "for i in 0..3 do\n    write_line(i)\nod\n", CellStatus.OK)
+            _ran(notebook, 4, "while true do od\n", CellStatus.INTERRUPTED)
+
+            return notebook
+        si
 
         @Test()
         summary__lists_each_cell_with_how_it_ended() is
@@ -43,7 +50,7 @@ namespace Ghul.Cli.Tests is
 
         @Test()
         summary__says_when_there_are_none() is
-            assert CELL_LISTING.summary(LIST[CELL_RECORD](), 20)[0] =~ "no cells yet";
+            assert CELL_LISTING.summary(NOTEBOOK(), 20)[0] =~ "no cells yet";
         si
 
         @Test()
@@ -61,33 +68,91 @@ namespace Ghul.Cli.Tests is
             assert CELL_LISTING.cell(_cells(), "x")[0] =~ "usage: :cells N";
         si
 
+        // A cell run again stays where it was, under its new number, and
+        // the cells below it that ran before it are marked.
         @Test()
-        summary__says_which_cell_a_rerun_repeated() is
-            let cells = _cells()
+        summary__shows_a_cell_run_again_in_its_place_and_what_is_now_out_of_date() is
+            let notebook = _cells()
 
-            cells.add(CELL_RECORD(5, "let x = 1\n", CellStatus.OK, 1))
+            notebook.ran(notebook.cells[0], 5, "let x = 2\n", CellStatus.OK)
 
-            assert CELL_LISTING.summary(cells, 20)[4] =~ "5  ok          let x = 1  (rerun of 1)";
-        si
+            let lines = CELL_LISTING.summary(notebook, 20)
 
-        // N itself however it ended, then the later cells that ran to the
-        // end, leaving out failures, interruptions and earlier reruns.
-        @Test()
-        replay__takes_the_cell_and_every_later_one_that_ran_to_the_end() is
-            let cells = _cells()
-
-            cells.add(CELL_RECORD(5, "let x = 1\n", CellStatus.OK, 1))
-            cells.add(CELL_RECORD(6, "x + 1\n", CellStatus.OK, null))
-
-            let numbers = REPLAY.from(cells, 2) |> Ghul.Pipes.map(c => c.number) |> Ghul.Pipes.collect_mutable()
-
-            assert numbers.count == 3;
-            assert numbers[0] == 2 /\ numbers[1] == 3 /\ numbers[2] == 6;
+            assert lines[0] =~ "5  ok          let x = 2  (was 1)";
+            assert lines[1] =~ "2  failed      let y =";
+            assert lines[2] =~ "3  ok          for i in 0..3 do  (3 lines)  (out of date)";
+            assert lines[3] =~ "4  interrupted while true do od  (out of date)";
         si
 
         @Test()
-        replay__is_empty_for_a_cell_that_does_not_exist() is
-            assert REPLAY.from(_cells(), 9).count == 0;
+        summary__says_which_cells_have_been_edited_since_they_ran() is
+            let notebook = _cells()
+
+            notebook.cells[0].edit("let x = 3\n")
+
+            assert CELL_LISTING.summary(notebook, 20)[0] =~ "1  ok          let x = 3  (edited)";
+        si
+
+        // A number a cell ran as before still finds it.
+        @Test()
+        cell__finds_a_cell_by_a_number_it_ran_as_before() is
+            let notebook = _cells()
+
+            notebook.ran(notebook.cells[0], 5, "let x = 2\n", CellStatus.OK)
+
+            assert CELL_LISTING.cell(notebook, "1")[0] =~ "cell 5: ok  (was 1)";
+        si
+    si
+
+    @TestClass()
+    class CELL_RECALL_TESTS is
+        init() is si
+
+        // The session's cells last to first, then history not already one
+        // of them, newest first, with repeats in a row taken once.
+        @Test()
+        of__steps_back_through_the_cells_then_the_rest_of_history() is
+            let notebook = NOTEBOOK()
+
+            notebook.ran(notebook.add("let a = 1\n"), 1, "let a = 1\n", CellStatus.OK)
+            notebook.ran(notebook.add("a + 1\n"), 2, "a + 1\n", CellStatus.OK)
+
+            let history = LIST[string](["old one", "old two", "old two", "let a = 1", ":cells", "a + 1"])
+
+            let recalled = CELL_RECALL.of(notebook, history)
+
+            assert recalled.count == 5;
+            assert recalled[0].cell == notebook.cells[1];
+            assert recalled[1].cell == notebook.cells[0];
+            assert recalled[2].text =~ ":cells";
+            assert recalled[3].text =~ "old two";
+            assert recalled[4].text =~ "old one";
+        si
+
+        // What an edited cell last ran, and what it held before, stay out
+        // of history's part only while they are the cell's.
+        @Test()
+        of__keeps_the_text_a_cell_had_before_it_was_run_again() is
+            let notebook = NOTEBOOK()
+            let cell = notebook.add("let a = 1\n")
+
+            notebook.ran(cell, 1, "let a = 1\n", CellStatus.OK)
+            notebook.ran(cell, 2, "let a = 2\n", CellStatus.OK)
+
+            let recalled = CELL_RECALL.of(notebook, LIST[string](["let a = 1", "let a = 2"]))
+
+            assert recalled.count == 2;
+            assert recalled[0].cell == cell;
+            assert recalled[1].text =~ "let a = 1";
+            assert CELL_RECALL.position_of(recalled, cell) == 0;
+        si
+
+        @Test()
+        of__is_history_alone_without_a_notebook() is
+            let recalled = CELL_RECALL.of(null, LIST[string](["x", "y"]))
+
+            assert recalled.count == 2;
+            assert recalled[0].text =~ "y";
         si
     si
 si

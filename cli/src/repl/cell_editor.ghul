@@ -3,16 +3,24 @@ namespace Ghul.Cli.Repl is
     use Ghul.Repl.Host.CellStep
     use Ghul.Repl.Host.LINE_SPANS
     use Collections.LIST
+    use Ghul.Repl.NOTEBOOK
+    use Ghul.Repl.NOTEBOOK_CELL
     use IO.Std
 
-    // A cell read at the prompt: its source and what submitting it does. A
-    // command is a cell of one line starting with `:`, handed back as it
-    // was typed.
-    class CELL_READ(source: string, step: CellStep, is_command: bool);
+    // A cell read at the prompt: its source, what submitting it does, and
+    // the notebook cell it is, or null for a new one. A command is a cell
+    // of one line starting with `:`, handed back as it was typed.
+    class CELL_READ(source: string, step: CellStep, is_command: bool, cell: NOTEBOOK_CELL?) is
+        init(source: string, step: CellStep, is_command: bool) is
+            self.init(source, step, is_command, null)
+        si
+    si
 
     // A cell edited in place at the terminal, all of it at once. Up and
-    // Down move between its lines, and past the first or last line recall
-    // earlier cells; Left and Right cross line ends; Enter inserts a line
+    // Down move between its lines, and past the first or last line move
+    // to the session's earlier cells, each edited where it is under its
+    // own number, and past the first of those to history; Left and Right
+    // cross line ends; Enter inserts a line
     // in the middle of the cell and on its last line does what CELL_END
     // says; Alt-Enter submits the cell from any line. Backspace at the
     // start of a line joins it to the one above, and Delete at the end of
@@ -23,7 +31,8 @@ namespace Ghul.Cli.Repl is
     // completes and then offers a menu, Shift-Tab shows what the name at
     // the cursor is, a paste is taken as it is, and Ctrl-D in an empty
     // cell ends the input.
-    // Ctrl-C abandons the cell to history and starts it again.
+    // Ctrl-C abandons the cell to history and starts it again, and on an
+    // earlier cell puts back the text it last ran.
     class CELL_EDITOR(
         _complete: (string, int, int) -> Collections.List[string]?,
         _hover: (string, int, int) -> string?,
@@ -33,9 +42,19 @@ namespace Ghul.Cli.Repl is
         _history: LINE_HISTORY
         _buffer: CELL_BUFFER
 
-        // The cell being typed when Up first went into history, put back
-        // when Down comes out past the newest entry.
+        // The cell being typed when Up first left it, put back when Down
+        // comes back to it.
         _draft: CELL_SNAPSHOT?
+
+        // Where Up and Down go, and which of them is shown: -1 for the new
+        // cell.
+        _recall: LIST[RECALLED]
+        _at: int
+
+        // The number a new cell, or an earlier one run again, takes.
+        _number: int
+
+        _notebook: NOTEBOOK?
 
         // How many screen rows down from the first drawn row the cursor
         // is, so the next redraw can go back up to the start.
@@ -52,6 +71,8 @@ namespace Ghul.Cli.Repl is
             _continuation = "| "
             _history = LINE_HISTORY(HISTORY_STORE(HISTORY_STORE.default_path(), 1000))
             _buffer = CELL_BUFFER()
+            _recall = LIST[RECALLED]()
+            _at = -1
 
             // Pasted text arrives between markers, so it can be told apart
             // from typing.
@@ -73,19 +94,73 @@ namespace Ghul.Cli.Repl is
 
         // The next cell, numbered `number` at its prompt, or null when the
         // input has ended.
-        read_cell(number: int) -> CELL_READ? => read_cell(number, null)
+        read_cell(number: int) -> CELL_READ? => read_cell(number, null, null)
 
-        // As read_cell(number), starting from `text` rather than an empty
-        // cell: an earlier cell brought back to edit.
-        read_cell(number: int, text: string?) -> CELL_READ? is
-            _prompt = "{number}> "
-            _continuation = "{string(' ', _prompt.length - 2)}| "
-            _initial = text
+        // As read_cell(number), with Up and Down reaching `notebook`'s
+        // cells, and starting on `start` if there is one: an earlier cell
+        // brought back to edit.
+        read_cell(number: int, notebook: NOTEBOOK?, start: NOTEBOOK_CELL?) -> CELL_READ? is
+            _number = number
+            _notebook = notebook
+            _recall = CELL_RECALL.of(notebook, _history.entries)
+            _at = if let cell = start then CELL_RECALL.position_of(_recall, cell) else -1 fi
 
             return read_cell()
         si
 
-        _initial: string?
+        _set_prompt(number: int) is
+            _prompt = "{number}> "
+            _continuation = "{string(' ', _prompt.length - 2)}| "
+        si
+
+        // The notebook cell shown, or null for a new one.
+        _cell: NOTEBOOK_CELL? => if _at >= 0 then _recall[_at].cell else null fi
+
+        // Whichever of the new cell or an earlier one `_at` says, in the
+        // buffer and at the prompt.
+        _show() is
+            if _at < 0 then
+                _set_prompt(_number)
+
+                if let draft = _draft then
+                    _buffer.restore(draft)
+                    _draft = null
+                else
+                    _buffer.clear()
+                fi
+
+                return
+            fi
+
+            let recalled = _recall[_at]
+
+            if let cell = recalled.cell then
+                _set_prompt(cell.number ?? _number)
+                _buffer.replace(cell.source.trim_end(['\n']))
+            else
+                _set_prompt(_number)
+                _buffer.replace(recalled.text ?? "")
+            fi
+        si
+
+        // Moving off a notebook cell keeps what was done to it, as a
+        // notebook keeps an edit to a cell not run again yet.
+        _leave() is
+            if let cell = _cell then
+                cell.edit(CELL_TEXT.without_terminator(_buffer.lines))
+            fi
+        si
+
+        _move_to(at: int) is
+            if _at < 0 then
+                _draft = _buffer.snapshot()
+            else
+                _leave()
+            fi
+
+            _at = at
+            _show()
+        si
 
         read_cell() -> CELL_READ? is
             // Ctrl-C is read as a key while a cell is edited, rather than
@@ -102,15 +177,11 @@ namespace Ghul.Cli.Repl is
         si
 
         _read_cell() -> CELL_READ? is
-            _buffer.clear()
+            _draft = null
 
-            if let text = _initial then
-                _buffer.replace(text.trim_end(['\n']))
-                _initial = null
-            fi
+            _show()
 
             _end.clear()
-            _draft = null
             _menu = null
 
             _cursor_screen_row = 0
@@ -187,6 +258,11 @@ namespace Ghul.Cli.Repl is
                             else
                                 let is_command = lines.count == 1 /\ lines[0].trim().starts_with(":")
                                 let source = if is_command then lines[0] else _end.source_for(lines) fi
+                                let cell = if is_command \/ step == CellStep.NOTHING then null else _cell fi
+
+                                if cell? then
+                                    _set_prompt(_number)
+                                fi
 
                                 _buffer.to_end()
                                 _finish("")
@@ -195,7 +271,7 @@ namespace Ghul.Cli.Repl is
                                     _history.add(CELL_TEXT.without_terminator(_buffer.lines))
                                 fi
 
-                                return CELL_READ(source, step, is_command)
+                                return CELL_READ(source, step, is_command, cell)
                             fi
                         fi
                     fi
@@ -212,27 +288,12 @@ namespace Ghul.Cli.Repl is
                 when System.ConsoleKey.END then
                     _buffer.end()
                 when System.ConsoleKey.UP_ARROW then
-                    if !_buffer.up() then
-                        let draft = if _history.is_at_newest then _buffer.snapshot() else null fi
-
-                        if let recalled = _history.previous() then
-                            if draft? then
-                                _draft = draft
-                            fi
-
-                            _buffer.replace(recalled)
-                        fi
+                    if !_buffer.up() /\ _at + 1 < _recall.count then
+                        _move_to(_at + 1)
                     fi
                 when System.ConsoleKey.DOWN_ARROW then
-                    if !_buffer.down() /\ !_history.is_at_newest then
-                        if let recalled = _history.next() then
-                            _buffer.replace(recalled)
-                        elif let draft = _draft then
-                            _buffer.restore(draft)
-                            _draft = null
-                        else
-                            _buffer.clear()
-                        fi
+                    if !_buffer.down() /\ _at >= 0 then
+                        _move_to(_at - 1)
                     fi
                 when System.ConsoleKey.TAB then
                     if (modifiers & System.ConsoleModifiers.SHIFT) == System.ConsoleModifiers.SHIFT then
@@ -290,14 +351,19 @@ namespace Ghul.Cli.Repl is
                 return null
             fi
 
+            let is_command = !text.contains('\n') /\ text.trim().starts_with(":")
+            let cell = if is_command then null else _cell fi
+
+            if cell? then
+                _set_prompt(_number)
+            fi
+
             _buffer.to_end()
             _finish("")
 
             _history.add(text)
 
-            let is_command = !text.contains('\n') /\ text.trim().starts_with(":")
-
-            return CELL_READ(if is_command then text else "{text}\n" fi, CellStep.SUBMIT, is_command)
+            return CELL_READ(if is_command then text else "{text}\n" fi, CellStep.SUBMIT, is_command, cell)
         si
 
         // One name on offer is written in. Several are written in as far
@@ -413,13 +479,15 @@ namespace Ghul.Cli.Repl is
 
         // Ctrl-C with something typed: the cell is left on the screen, all
         // of it, marked ^C, and kept in history as its newest entry, and an
-        // empty cell under the same number takes its place. It was never
-        // submitted, so nothing else knows it existed. With nothing typed,
-        // Ctrl-C does nothing.
+        // empty new cell takes its place. It was never submitted, so
+        // nothing else knows it existed. On an earlier cell it is the edit
+        // that is abandoned: the cell goes back to the text it last ran.
+        // With nothing typed, Ctrl-C does nothing.
         _abandon() is
             let text = CELL_TEXT.without_terminator(_buffer.lines)
+            let cell = _cell
 
-            if text.trim().length == 0 then
+            if text.trim().length == 0 /\ !cell? then
                 return
             fi
 
@@ -429,9 +497,14 @@ namespace Ghul.Cli.Repl is
 
             _history.add(text)
 
-            _buffer.clear()
-            _end.clear()
+            cell?.revert()
+
             _draft = null
+            _at = -1
+            _recall = CELL_RECALL.of(_notebook, _history.entries)
+            _show()
+
+            _end.clear()
             _top = 0
 
             _draw()
