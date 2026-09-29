@@ -2,6 +2,8 @@ namespace Ghul.Cli.Repl is
     use Ghul.Repl.Host.HELD_CONSTRUCT
     use Collections.LIST
     use Ghul.Repl.CELL_DISPLAY
+    use Ghul.Repl.CELL_TAIL
+    use Ghul.Repl.Host.GHUL_LEXER
     use IO.Std
     use Ghul.Repl.Host.Completeness
     use Ghul.Repl.Host.CELL_END
@@ -123,6 +125,9 @@ namespace Ghul.Cli.Repl is
         _completes_at_cursor: bool
     ) is
         _display: CELL_DISPLAY
+
+        // Whether a value is shown with its type, as `:types` sets it.
+        _show_types: bool
         _current: HOSTED_SESSION?
 
         // What code and diagnostics are coloured with at a terminal.
@@ -136,6 +141,7 @@ namespace Ghul.Cli.Repl is
 
         init(..) is
             _display = CELL_DISPLAY()
+            _show_types = true
 
             let is_interactive = !Std.is_input_redirected /\ !Std.is_output_redirected
 
@@ -230,6 +236,8 @@ namespace Ghul.Cli.Repl is
                             _reference(session, command.substring(":ref ".length).trim())
                         elif command.starts_with(":nuget ") then
                             _package(session, command.substring(":nuget ".length).trim())
+                        elif command =~ ":types" \/ command.starts_with(":types ") then
+                            _types(command.substring(":types".length).trim())
                         elif command.starts_with(":type ") then
                             _type(session, command.substring(":type ".length))
                         elif command.starts_with(":save ") then
@@ -419,7 +427,7 @@ namespace Ghul.Cli.Repl is
                 _display.use_runtime(session.runtime)
 
                 if let shown = _display.format(result.value) then
-                    Std.write_line(shown)
+                    Std.write_line(_with_type(session, source, shown))
                 fi
             fi
 
@@ -509,6 +517,42 @@ namespace Ghul.Cli.Repl is
             elif added.names.count == 0 then
                 Std.write_line("nothing new to reference")
             fi
+        si
+
+        // A value the cell ended on, after the type of the expression it
+        // ended on where the analyser can say what that is. The expression
+        // is asked about as `:type` asks, so it is not run again.
+        _with_type(session: HOSTED_SESSION, source: string, shown: string) -> string is
+            if !_show_types then
+                return shown
+            fi
+
+            if let tail = CELL_TAIL.of(source),
+                hovered = session.hover(TYPE_QUERY.probe(tail), 1, TYPE_QUERY.column),
+                type = TYPE_QUERY.type_from_hover(hovered) /\ !type.contains("!!!")
+            then
+                let painted = if let palette = _colours /\ !Std.is_output_redirected then palette.paint(type, GHUL_LEXER.spans(type)) else type fi
+
+                return "{painted}: {shown}"
+            fi
+
+            return shown
+        si
+
+        // `:types on` and `:types off`: whether values are shown with their
+        // types. `:types` alone says which.
+        _types(argument: string) is
+            if argument =~ "on" then
+                _show_types = true
+            elif argument =~ "off" then
+                _show_types = false
+            elif argument.length > 0 then
+                Std.write_line("usage: :types on, or :types off")
+
+                return
+            fi
+
+            Std.write_line(if _show_types then "values are shown with their types" else "values are shown without their types" fi)
         si
 
         // The type of an expression, which is compiled but not run.
@@ -614,6 +658,7 @@ namespace Ghul.Cli.Repl is
             Std.write_line(":complete TEXT   what could follow TEXT")
             Std.write_line(":hover TEXT      what the end of TEXT names")
             Std.write_line(":type EXPR       the type of EXPR, without running it")
+            Std.write_line(":types on|off    show each value with its type, or without (on)")
             Std.write_line(":ref FILE        reference an assembly in later cells")
             Std.write_line(":nuget PKG [V]   reference a NuGet package in later cells")
             Std.write_line(":save FILE       write the cells that ran to the end to FILE")

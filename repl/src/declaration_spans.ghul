@@ -118,9 +118,9 @@ namespace Ghul.Repl is
         si
     si
 
-    // A word, a bracket, `;`, `@` or a line break, with where it is.
-    // Everything else - comments, strings, characters, operators - is
-    // passed over.
+    // A word, a number, a string or character literal, a bracket or brace,
+    // `;`, `,`, `@`, a run of operator characters or a line break, with
+    // where it is. Comments are passed over.
     class SOURCE_TOKEN(text: string, start: int, end: int, is_word: bool, is_escaped: bool);
 
     class SOURCE_TOKENS is
@@ -143,9 +143,15 @@ namespace Ghul.Repl is
 
                     i = if close < 0 then source.length else close + 2 fi
                 elif c == '"' then
-                    i = _after_string(source, i)
+                    let end = _after_string(source, i)
+
+                    result.add(SOURCE_TOKEN(source.substring(i, end - i), i, end, false, false))
+                    i = end
                 elif c == '\'' then
-                    i = _after_char(source, i)
+                    let end = _after_char(source, i)
+
+                    result.add(SOURCE_TOKEN(source.substring(i, end - i), i, end, false, false))
+                    i = end
                 elif c == '`' /\ i + 1 < source.length /\ _is_word_char(source[i + 1]) then
                     let end = _word_end(source, i + 1)
 
@@ -156,9 +162,24 @@ namespace Ghul.Repl is
 
                     result.add(SOURCE_TOKEN(source.substring(i, end - i), i, end, !char.is_digit(c), false))
                     i = end
-                elif c == '(' \/ c == ')' \/ c == '[' \/ c == ']' \/ c == ';' \/ c == '@' then
+                elif c == '(' \/ c == ')' \/ c == '[' \/ c == ']' \/ c == ';' \/ c == '@' \/ c == ',' then
                     result.add(SOURCE_TOKEN("{c}", i, i + 1, false, false))
                     i = i + 1
+                elif c == '{' then
+                    result.add(SOURCE_TOKEN("{{", i, i + 1, false, false))
+                    i = i + 1
+                elif c == '}' then
+                    result.add(SOURCE_TOKEN("}}", i, i + 1, false, false))
+                    i = i + 1
+                elif _is_operator_char(c) then
+                    let end mut = i + 1
+
+                    while end < source.length /\ _is_operator_char(source[end]) do
+                        end = end + 1
+                    od
+
+                    result.add(SOURCE_TOKEN(source.substring(i, end - i), i, end, false, false))
+                    i = end
                 else
                     i = i + 1
                 fi
@@ -241,6 +262,9 @@ namespace Ghul.Repl is
         si
 
         _is_word_char(c: char) -> bool static => char.is_letter_or_digit(c) \/ c == '_'
+
+        _is_operator_char(c: char) -> bool static =>
+            "!$%^&*-+=|:~#\\<>.?/".index_of(c) >= 0 \/ (c > '\u007F' /\ char.is_symbol(c))
 
         _at(source: string, i: int, c: char) -> bool static => i < source.length /\ source[i] == c
     si

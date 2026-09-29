@@ -1,0 +1,94 @@
+namespace Ghul.Cli.Tests is
+    use Ghul.Repl.CELL_TAIL
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    // The last top-level statement of a cell that compiled, which a front
+    // end asks the type of to show beside the value the cell ends on.
+    @TestClass()
+    class CELL_TAIL_TESTS is
+        init() is si
+
+        _expect(expected: string, source: string) is
+            let found = CELL_TAIL.of(source)
+
+            assert found? /\ found =~ expected else "expected [{expected}], found [{found ?? "null"}]"
+        si
+
+        @Test()
+        of__a_cell_of_one_expression_is_its_tail() is
+            _expect("x", "x")
+        si
+
+        @Test()
+        of__takes_the_last_line_after_definitions() is
+            _expect("x + 1", "let x = 1\nx + 1\n")
+        si
+
+        @Test()
+        of__takes_what_follows_the_last_semicolon() is
+            _expect("a * 2", "let a = 1; a * 2")
+        si
+
+        @Test()
+        of__leaves_off_a_trailing_semicolon() is
+            _expect("x", "let x = 1\nx;\n")
+        si
+
+        @Test()
+        of__keeps_a_chain_whose_lines_open_with_a_pipe() is
+            _expect("xs\n    |> map(n => n * 2)\n    |> sum()", "let xs = [1, 2]\nxs\n    |> map(n => n * 2)\n    |> sum()\n")
+        si
+
+        @Test()
+        of__keeps_a_chain_whose_lines_open_with_a_dot() is
+            _expect("name\n    .to_upper()\n    .length", "name\n    .to_upper()\n    .length\n")
+        si
+
+        @Test()
+        of__keeps_a_line_that_ends_on_an_operator_with_the_next() is
+            _expect("total +\n    2", "let total = 1\ntotal +\n    2\n")
+        si
+
+        @Test()
+        of__keeps_a_block_expression_whole() is
+            _expect("if c then\n    1\nelse\n    2\nfi", "let c = true\nif c then\n    1\nelse\n    2\nfi\n")
+        si
+
+        @Test()
+        of__keeps_a_call_whose_arguments_span_lines() is
+            _expect("f(\n    1,\n    2)", "f(\n    1,\n    2)\n")
+        si
+
+        // A comprehension's `if` clause has no `fi`; the bracket closing
+        // the comprehension ends it, so the line after is a statement of
+        // its own.
+        @Test()
+        of__is_not_misled_by_a_comprehension_if_clause() is
+            _expect("xs.count", "let xs = [n for n in 0..5 if n > 1]\nxs.count\n")
+            _expect("s", "let s = {{i for i in 0..5 if i > 1}}\ns\n")
+        si
+
+        @Test()
+        of__ignores_braces_and_operators_in_strings_and_comments() is
+            _expect("x", "let x = \"a {{1 + 2}} (\"\n// x +\nx\n")
+        si
+
+        @Test()
+        of__does_not_join_a_line_ending_on_a_postfix_operator() is
+            _expect("next", "value!\nnext\n")
+        si
+
+        @Test()
+        of__takes_the_expression_after_a_class() is
+            _expect("POINT(1, 2).x", "class POINT(x: int public, y: int public) is\n    sum() -> int => x + y\nsi\nPOINT(1, 2).x\n")
+        si
+
+        @Test()
+        of__a_cell_of_comments_has_no_tail() is
+            assert !CELL_TAIL.of("// nothing\n")?
+            assert !CELL_TAIL.of("")?
+        si
+    si
+si
