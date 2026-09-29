@@ -44,8 +44,8 @@ if (-not (Test-Path $built)) {
 Write-Host 'smoke: a REPL session read from a pipe...'
 $session = ("let x = 20", "", "x * 2", ":quit") -join "`n"
 $out = ($session | dotnet $cli repl | Out-String)
-if ($out -notmatch '> 40') {
-    Write-Error "smoke: expected the REPL to answer 40, got: $out"
+if ($out -notmatch '> int: 40') {
+    Write-Error "smoke: expected the REPL to answer int: 40, got: $out"
     exit 1
 }
 
