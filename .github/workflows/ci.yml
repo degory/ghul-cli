@@ -87,6 +87,7 @@ jobs:
         dotnet pack -nologo repl/repl.ghulproj -p:Version=${{ needs.version.outputs.package }}
         dotnet pack -nologo host/host.ghulproj -p:Version=${{ needs.version.outputs.package }}
         dotnet pack -nologo jupyter/jupyter.ghulproj -p:Version=${{ needs.version.outputs.package }}
+        dotnet pack -nologo project/project.ghulproj -p:Version=${{ needs.version.outputs.package }}
 
     - uses: actions/upload-artifact@v7
       with:
@@ -196,6 +197,7 @@ jobs:
           ./nupkg/ghul.repl.${{ needs.version.outputs.package }}.nupkg \
           ./nupkg/ghul.repl.host.${{ needs.version.outputs.package }}.nupkg \
           ./nupkg/ghul.jupyter.${{ needs.version.outputs.package }}.nupkg \
+          ./nupkg/ghul.project.${{ needs.version.outputs.package }}.nupkg \
           --title "${{ needs.version.outputs.tag }}" \
           --notes-file changelog.txt
 
