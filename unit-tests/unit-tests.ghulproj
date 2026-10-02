@@ -12,6 +12,7 @@
 
     <ProjectReference Include="../cli/ghul-cli.ghulproj" />
     <ProjectReference Include="../jupyter/jupyter.ghulproj" />
+    <ProjectReference Include="../project/project.ghulproj" />
 
     <GhulSources Include="**/*.ghul" />
   </ItemGroup>

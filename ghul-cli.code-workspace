@@ -5,6 +5,7 @@
         { "name": "repl", "path": "repl" },
         { "name": "host", "path": "host" },
         { "name": "jupyter", "path": "jupyter" },
+        { "name": "project", "path": "project" },
         { "name": "unit-tests", "path": "unit-tests" },
         { "name": "tests", "path": "tests" }
     ],

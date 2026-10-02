@@ -1,0 +1,16 @@
+namespace Ghul.Project is
+    // One thing wrong with a manifest, and the key it is wrong at. A key
+    // the manifest never wrote is still named - an unknown key is a
+    // problem about itself.
+    //
+    // An empty key means the text is not a manifest at all, so there is
+    // no key to name and the path takes its place.
+    class MANIFEST_PROBLEM(key: string, message: string) is
+        describe() -> string =>
+            if self.key.length == 0 then
+                self.message
+            else
+                "{self.key}: {self.message}"
+            fi
+    si
+si

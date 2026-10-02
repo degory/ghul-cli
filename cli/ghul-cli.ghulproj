@@ -34,6 +34,7 @@
     <None Include="../images/ghul-logo-icon.png" Pack="true" PackagePath="" />
 
     <ProjectReference Include="../host/host.ghulproj" />
+    <ProjectReference Include="../project/project.ghulproj" />
 
     <GhulSources Include="src/**/*.ghul" />
   </ItemGroup>

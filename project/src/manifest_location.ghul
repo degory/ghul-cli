@@ -1,0 +1,21 @@
+namespace Ghul.Project is
+    use IO
+
+    // Where a project's manifest is: one file, named FILE_NAME, in the
+    // project's own directory. A parent directory is not searched - a
+    // project is what its own root says it is.
+    class MANIFEST_LOCATION is
+        FILE_NAME: string static => "ghul-project.json"
+
+        // The manifest in `directory`, or nothing when it holds none.
+        find_in(directory: string) -> string? static is
+            let path = IO.Path.combine(directory, FILE_NAME)
+
+            if IO.File.exists(path) then
+                return path
+            fi
+
+            return null
+        si
+    si
+si

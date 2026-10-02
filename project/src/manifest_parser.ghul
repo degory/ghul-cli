@@ -1,0 +1,456 @@
+namespace Ghul.Project is
+    use Collections.LIST
+    use Collections.MAP
+    use System.Text.Json.JsonElement
+    use System.Text.Json.JsonValueKind
+
+    // Walks a parsed manifest document into the MANIFEST it describes,
+    // reporting a problem for each thing wrong with it as it goes rather
+    // than stopping at the first. A manifest with anything wrong with it
+    // is not a manifest, so a walk that found any returns nothing.
+    class MANIFEST_PARSER is
+        _problems: Collections.LIST[MANIFEST_PROBLEM]
+
+        init() is
+            _problems = LIST[MANIFEST_PROBLEM]()
+        si
+
+        problems: Collections.List[MANIFEST_PROBLEM] => _problems
+
+        parse(root: JsonElement) -> MANIFEST? is
+            if root.value_kind != JsonValueKind.OBJECT then
+                _report("", "the manifest is not a JSON object")
+                return null
+            fi
+
+            _check_keys(root, _top_level_keys())
+
+            // Each of these reports what it can and moves on, so one
+            // malformed key does not hide the next one.
+            let name = _name(root)
+            let version = _string_member(root, "version")
+            let kind = _kind(root)
+            let targets = _targets(root)
+            let sources = _sources(root)
+            let compiler = _string_member(root, "compiler")
+            let options = _options(root)
+            let dependencies = _dependencies(root)
+
+            // A manifest with anything wrong with it is not a manifest,
+            // so anything the walk found rules the whole thing out - the
+            // problems having been reported as it went.
+            if !name? \/ _problems.count > 0 then
+                return null
+            fi
+
+            return MANIFEST(name, version, kind, targets, sources, compiler, options, dependencies)
+        si
+
+        // A member read as a string, or nothing when the key is absent.
+        // A value of another shape is a problem naming the key, and the
+        // member reads as absent.
+        _string_member(element: JsonElement, key: string) -> string? is
+            let value: JsonElement mut
+
+            if !element.try_get_property(key, value ref) then
+                return null
+            fi
+
+            if value.value_kind != JsonValueKind.STRING then
+                _report(key, "the value is not a string")
+                return null
+            fi
+
+            return value.get_string()
+        si
+
+        // What a `path` dependency reads as. Only `path` is its own key
+        // there; a git dependency is walked whole.
+        _path_dependency(name: string, value: JsonElement) -> DEPENDENCY? is
+            if value.value_kind != JsonValueKind.STRING then
+                _report("dependencies.{name}.path", "the value is not a string")
+                return null
+            fi
+
+            return DEPENDENCY.PATH(value.get_string()!)
+        si
+
+        _option_boolean(key: string, value: JsonElement) -> bool is
+            if value.value_kind != JsonValueKind.TRUE \/ value.value_kind == JsonValueKind.FALSE then
+                _report(key, "the value is not a boolean")
+                return false
+            fi
+
+            return value.get_boolean()
+        si
+
+        _string_list_option(name: string, value: JsonElement) -> Collections.List[string] is
+            if value.value_kind != JsonValueKind.ARRAY then
+                _report(name, "the value is not a list")
+                return LIST[string]()
+            fi
+
+            let entries = LIST[string]()
+
+            for entry in value.enumerate_array() do
+                if entry.value_kind != JsonValueKind.STRING then
+                    _report(name, "an entry is not a string")
+                else
+                    entries.add(entry.get_string()!)
+                fi
+            od
+
+            return entries
+        si
+
+        // `name` decides what the compiler calls the project, so it is
+        // checked more tightly than any other key: lowercase letters,
+        // digits and `-`, starting with a letter.
+        _name(root: JsonElement) -> string? is
+            let value: JsonElement mut
+
+            if !root.try_get_property("name", value ref) then
+                _report("name", "a name is required")
+                return null
+            fi
+
+            if value.value_kind != JsonValueKind.STRING then
+                _report("name", "the value is not a string")
+                return null
+            fi
+
+            let text = value.get_string()
+
+            if !_is_library_name(text!) then
+                _report("name", "the name is not a library name: lowercase letters, digits and '-', starting with a letter")
+                return null
+            fi
+
+            return text
+        si
+
+        _kind(root: JsonElement) -> ManifestKind is
+            let value: JsonElement mut
+
+            if !root.try_get_property("kind", value ref) then
+                return ManifestKind.PROGRAM
+            fi
+
+            if value.value_kind != JsonValueKind.STRING then
+                _report("kind", "the value is not a string")
+                return ManifestKind.PROGRAM
+            fi
+
+            let text = value.get_string()
+
+            if text =~ "library" then
+                return ManifestKind.LIBRARY
+            fi
+
+            if text =~ "program" then
+                return ManifestKind.PROGRAM
+            fi
+
+            _report("kind", "unknown kind '{text}'")
+
+            return ManifestKind.PROGRAM
+        si
+
+        _is_library_name(text: string) -> bool is
+            if text.length == 0 then
+                return false
+            fi
+
+            if !_is_lower(text[0]) then
+                return false
+            fi
+
+            let i mut = 1
+
+            while i < text.length do
+                let c = text[i]
+
+                if !(_is_lower(c) \/ _is_digit(c) \/ c == '-') then
+                    return false
+                fi
+
+                i = i + 1
+            od
+
+            return true
+        si
+
+        _is_lower(c: char) -> bool static => int(c) >= 97 /\ int(c) <= 122
+
+        _is_digit(c: char) -> bool static => int(c) >= 48 /\ int(c) <= 57
+
+        _dependencies(root: JsonElement) -> Collections.Map[string, DEPENDENCY] is
+            let dependencies = MAP[string, DEPENDENCY]()
+
+            let value: JsonElement mut
+
+            if !root.try_get_property("dependencies", value ref) then
+                return dependencies
+            fi
+
+            if value.value_kind != JsonValueKind.OBJECT then
+                _report("dependencies", "the value is not an object")
+                return dependencies
+            fi
+
+            for member in value.enumerate_object() do
+                let dependency = _dependency(member.name, member.value)
+
+                // A name written twice is one library declared twice. The
+                // map holds one entry per library, so the second is a
+                // problem rather than an overwrite.
+                if dependency? then
+                    if dependencies.contains_key(member.name) then
+                        _report("dependencies.{member.name}", "the library is declared more than once")
+                    else
+                        dependencies.add(member.name, dependency)
+                    fi
+                fi
+            od
+
+            return dependencies
+        si
+
+        _report(key: string, message: string) is
+            _problems.add(MANIFEST_PROBLEM(key, message))
+        si
+
+        // Every problem, rather than the first, so one reading of the
+        // manifest answers for the whole file.
+        _check_keys(element: JsonElement, known: Collections.LIST[string]) is
+            for member in element.enumerate_object() do
+                if !known.contains(member.name) then
+                    _report(member.name, "unknown key")
+                fi
+            od
+        si
+
+        _check_option_keys(options: JsonElement) is
+            let known = LIST[string]()
+
+            known.add("underscore-access")
+            known.add("default-use")
+            known.add("define")
+            known.add("global-namespace")
+            known.add("suppress")
+            known.add("warn-as-error")
+
+            _check_keys(options, known)
+        si
+
+        _dependency(name: string, value: JsonElement) -> DEPENDENCY? is
+            if value.value_kind != JsonValueKind.OBJECT then
+                _report("dependencies.{name}", "the value is not an object")
+                return null
+            fi
+
+            let git_value: JsonElement mut
+            let path_value: JsonElement mut
+
+            let has_git = value.try_get_property("git", git_value ref)
+            let has_path = value.try_get_property("path", path_value ref)
+
+            if has_git /\ has_path then
+                _report("dependencies.{name}", "a dependency has both git and path")
+                return null
+            fi
+
+            if !has_git /\ !has_path then
+                _report("dependencies.{name}", "a dependency has neither git nor path")
+                return null
+            fi
+
+            // Which keys a dependency may carry is settled by which form
+            // it turned out to be: a `tag` says nothing about where a
+            // directory on disk came from.
+            if has_path then
+                _check_keys(value, _path_keys())
+
+                return _path_dependency(name, path_value)
+            fi
+
+            _check_keys(value, _git_keys())
+
+            return _git_dependency(name, value, git_value)
+        si
+
+        _path_keys() -> Collections.LIST[string] static is
+            let keys = LIST[string]()
+
+            keys.add("path")
+
+            return keys
+        si
+
+        _git_keys() -> Collections.LIST[string] static is
+            let keys = LIST[string]()
+
+            keys.add("branch")
+            keys.add("directory")
+            keys.add("git")
+            keys.add("tag")
+
+            return keys
+        si
+
+        // A git dependency is a repository to read, and either a tag or a
+        // branch to read it at. With neither there is nothing to fetch.
+        _git_dependency(name: string, entry: JsonElement, git_value: JsonElement) -> DEPENDENCY? is
+            if git_value.value_kind != JsonValueKind.STRING then
+                _report("dependencies.{name}.git", "the value is not a string")
+                return null
+            fi
+
+            let tag = _dependency_string(name, entry, "tag")
+            let branch = _dependency_string(name, entry, "branch")
+            let directory = _dependency_string(name, entry, "directory")
+
+            if !tag? /\ !branch? then
+                _report("dependencies.{name}", "a git dependency has neither tag nor branch")
+                return null
+            fi
+
+            return DEPENDENCY.GIT(git_value.get_string()!, tag, branch, directory)
+        si
+
+        _dependency_string(name: string, entry: JsonElement, key: string) -> string? is
+            let value: JsonElement mut
+
+            if !entry.try_get_property(key, value ref) then
+                return null
+            fi
+
+            if value.value_kind != JsonValueKind.STRING then
+                _report("dependencies.{name}.{key}", "the value is not a string")
+                return null
+            fi
+
+            return value.get_string()
+        si
+
+        _options(root: JsonElement) -> MANIFEST_OPTIONS is
+            let underscore_access: string? mut = null
+            let global_namespace mut = false
+            let default_use mut = LIST[string]()
+            let define mut = LIST[string]()
+            let suppress mut = LIST[string]()
+            let warn_as_error mut = LIST[string]()
+
+            let value: JsonElement mut
+
+            if !root.try_get_property("options", value ref) then
+                return MANIFEST_OPTIONS(underscore_access, global_namespace, default_use, define, suppress, warn_as_error)
+            fi
+
+            if value.value_kind != JsonValueKind.OBJECT then
+                _report("options", "the value is not an object")
+                return MANIFEST_OPTIONS(underscore_access, global_namespace, default_use, define, suppress, warn_as_error)
+            fi
+
+            _check_option_keys(value)
+
+            for member in value.enumerate_object() do
+                if member.name =~ "underscore-access" then
+                    underscore_access = _string_option(member.name, member.value)
+                elif member.name =~ "global-namespace" then
+                    global_namespace = _option_boolean(member.name, member.value)
+                elif member.name =~ "default-use" then
+                    default_use = _string_list_option(member.name, member.value)
+                elif member.name =~ "define" then
+                    define = _string_list_option(member.name, member.value)
+                elif member.name =~ "suppress" then
+                    suppress = _string_list_option(member.name, member.value)
+                elif member.name =~ "warn-as-error" then
+                    warn_as_error = _string_list_option(member.name, member.value)
+                fi
+            od
+
+            return MANIFEST_OPTIONS(underscore_access, global_namespace, default_use, define, suppress, warn_as_error)
+        si
+
+        _string_option(name: string, value: JsonElement) -> string? is
+            if value.value_kind != JsonValueKind.STRING then
+                _report(name, "the value is not a string")
+                return null
+            fi
+
+            return value.get_string()
+        si
+
+        _sources(root: JsonElement) -> Collections.List[string] is
+            let value: JsonElement mut
+
+            if !root.try_get_property("sources", value ref) then
+                return LIST[string](["src/**/*.ghul"])
+            fi
+
+            if value.value_kind != JsonValueKind.ARRAY then
+                _report("sources", "the value is not a list")
+                return LIST[string]()
+            fi
+
+            let sources = LIST[string]()
+
+            for entry in value.enumerate_array() do
+                if entry.value_kind != JsonValueKind.STRING then
+                    _report("sources", "an entry is not a string")
+                else
+                    sources.add(entry.get_string()!)
+                fi
+            od
+
+            return sources
+        si
+
+        _targets(root: JsonElement) -> Collections.List[BuildTarget] is
+            let value: JsonElement mut
+
+            if !root.try_get_property("targets", value ref) then
+                return LIST[BuildTarget]([BuildTarget.DOTNET])
+            fi
+
+            if value.value_kind != JsonValueKind.ARRAY then
+                _report("targets", "the value is not a list")
+                return LIST[BuildTarget]()
+            fi
+
+            let targets = LIST[BuildTarget]()
+
+            for entry in value.enumerate_array() do
+                if entry.value_kind != JsonValueKind.STRING then
+                    _report("targets", "an entry is not a string")
+                elif entry.get_string() =~ "dotnet" then
+                    targets.add(BuildTarget.DOTNET)
+                elif entry.get_string() =~ "wasm" then
+                    targets.add(BuildTarget.WASM)
+                else
+                    _report("targets", "unknown target '{entry.get_string()}'")
+                fi
+            od
+
+            return targets
+        si
+
+        // The keys a manifest's own object may carry, so a misspelling is
+        // reported rather than read as a key that does nothing.
+        _top_level_keys() -> Collections.LIST[string] static is
+            let keys = LIST[string]()
+
+            keys.add("compiler")
+            keys.add("dependencies")
+            keys.add("kind")
+            keys.add("name")
+            keys.add("options")
+            keys.add("sources")
+            keys.add("targets")
+            keys.add("version")
+
+            return keys
+        si
+    si
+si

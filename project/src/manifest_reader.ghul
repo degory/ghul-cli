@@ -1,0 +1,52 @@
+namespace Ghul.Project is
+    use Collections.LIST
+    use System.Text.Json.JsonCommentHandling
+    use System.Text.Json.JsonDocument
+    use System.Text.Json.JsonDocumentOptions
+
+    // What reading a manifest produced: the manifest, or everything wrong
+    // with it. A manifest with a problem in it is not a manifest, so
+    // there is no middle answer.
+    //
+    // The union compares by reference on the manifest it carries. Two
+    // readings that agree are two objects, and nothing here asks whether
+    // they are the same one.
+    @suppress("synthesized-equality-fallback")
+    union ReadOutcome is
+        OK(manifest: MANIFEST);
+        PROBLEMS(problems: Collections.List[MANIFEST_PROBLEM]);
+    si
+
+    // Reads a manifest from text it is handed, touching no file and
+    // fetching nothing. The path says where the text came from, so text
+    // that is not a manifest at all can be reported against somewhere.
+    class MANIFEST_READER is
+        read(text: string, path: string) -> ReadOutcome static is
+            // A manifest is JSON, but written by hand, so it may carry a
+            // comment or a trailing comma.
+            let options = _[JsonDocumentOptions]
+
+            options.comment_handling = JsonCommentHandling.SKIP
+            options.allow_trailing_commas = true
+
+            try
+                let document = JsonDocument.parse(text, options)
+                let parser = MANIFEST_PARSER()
+
+                let manifest = parser.parse(document.root_element)
+
+                if manifest? then
+                    return ReadOutcome.OK(manifest)
+                fi
+
+                return ReadOutcome.PROBLEMS(parser.problems)
+            catch e: System.Text.Json.JsonException
+                let problems = LIST[MANIFEST_PROBLEM]()
+
+                problems.add(MANIFEST_PROBLEM(path, "the manifest is not valid JSON: {e.message}"))
+
+                return ReadOutcome.PROBLEMS(problems)
+            yrt
+        si
+    si
+si

@@ -1,0 +1,49 @@
+namespace Ghul.Project is
+    // What a project is: its name, its kind, where its sources are, and
+    // what it needs to build. Read from a `ghul-project.json` by
+    // Ghul.Project.MANIFEST_READER, which is what fills in the members
+    // the manifest leaves out.
+    class MANIFEST(
+        name: string,
+        version: string?,
+        kind: ManifestKind,
+        targets: Collections.List[BuildTarget],
+        sources: Collections.List[string],
+        compiler_version: string?,
+        options: MANIFEST_OPTIONS,
+        dependencies: Collections.Map[string, DEPENDENCY]
+    ) is si
+
+    // Whether the project is something to run or something to depend on.
+    enum ManifestKind is
+        PROGRAM,
+        LIBRARY
+    si
+
+    // What a build produces, as a name a build asks for by.
+    enum BuildTarget is
+        DOTNET,
+        WASM
+    si
+
+    // The compiler options a manifest sets, one member per option. A
+    // member the manifest leaves out reads as the compiler's own default:
+    // null for `underscore-access`, false for `global-namespace` and an
+    // empty list for each of the others.
+    class MANIFEST_OPTIONS(
+        underscore_access: string?,
+        global_namespace: bool,
+        default_use: Collections.List[string],
+        define: Collections.List[string],
+        suppress: Collections.List[string],
+        warn_as_error: Collections.List[string]
+    ) is si
+
+    // Where a library comes from: a git repository at a tag or a branch,
+    // or a directory already on disk. A dependency with both a `git` and
+    // a `path` is a problem rather than a third form of this.
+    union DEPENDENCY is
+        GIT(url: string, tag: string?, branch: string?, directory: string?);
+        PATH(path: string);
+    si
+si
