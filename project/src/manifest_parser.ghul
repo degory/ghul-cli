@@ -76,7 +76,7 @@ namespace Ghul.Project is
         si
 
         _option_boolean(key: string, value: JsonElement) -> bool is
-            if value.value_kind != JsonValueKind.TRUE \/ value.value_kind == JsonValueKind.FALSE then
+            if value.value_kind != JsonValueKind.TRUE /\ value.value_kind != JsonValueKind.FALSE then
                 _report(key, "the value is not a boolean")
                 return false
             fi

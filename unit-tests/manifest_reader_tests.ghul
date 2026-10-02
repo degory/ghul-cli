@@ -32,6 +32,8 @@ namespace Ghul.Cli.Tests is
             "    \"dependencies\": {{\"ghul-core\": {{\"git\": \"https://github.com/ghul-lang/ghul-core\", \"tag\": \"v1.2.0\"}}, \"parsing\": {{\"git\": \"https://example.com/libs.git\", \"branch\": \"main\", \"directory\": \"parsing\"}}, \"scratch\": {{\"path\": \"../scratch\"}}}}\n"
             "}}"
 
+    EXPLICIT_FALSE: string static => "{{\"name\": \"app\", \"options\": {{\"global-namespace\": false}}}}"
+
     DEFAULT: string static => "{{\"name\": \"small\"}}"
     NO_NAME: string static => "{{\"version\": \"0.1.0\"}}"
     BAD_NAME_UPPER: string static => "{{\"name\": \"Example App\"}}"
@@ -189,6 +191,13 @@ namespace Ghul.Cli.Tests is
             assert options.define.count == 0;
             assert options.suppress.count == 0;
             assert options.warn_as_error.count == 0;
+        si
+
+        @Test()
+        a_boolean_option_spelled_false__reads_as_false() is
+            let options = (_read(EXPLICIT_FALSE)!).options
+
+            assert !options.global_namespace;
         si
 
         @Test()
