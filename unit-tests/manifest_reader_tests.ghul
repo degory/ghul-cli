@@ -1,0 +1,344 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+    use Ghul.Pipes
+
+    use Ghul.Project.BuildTarget
+    use Ghul.Project.DEPENDENCY
+    use Ghul.Project.MANIFEST
+    use Ghul.Project.MANIFEST_PROBLEM
+    use Ghul.Project.MANIFEST_READER
+    use Ghul.Project.ManifestKind
+    use Ghul.Project.ReadOutcome
+
+    use Assert = Microsoft.VisualStudio.TestTools.UnitTesting.Assert;
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    // The manifests the tests read. Written as adjacent literals, which
+    // chain into one, with every brace doubled: a literal brace is two.
+    //
+    // COMPLETE carries a comment and is written with one key per line so
+    // that what each key says is readable.
+    COMPLETE: string static =>
+        "{{\n"
+            "    // a comment, which a manifest may carry\n"
+            "    \"name\": \"example-app\",\n"
+            "    \"version\": \"0.1.0\",\n"
+            "    \"kind\": \"program\",\n"
+            "    \"targets\": [\"wasm\", \"dotnet\"],\n"
+            "    \"sources\": [\"src/**/*.ghul\", \"extra/*.ghul\"],\n"
+            "    \"compiler\": \"64.5.38\",\n"
+            "    \"options\": {{\"underscore-access\": \"private\", \"global-namespace\": true, \"default-use\": [\"Collections\", \"IO.Std.write_line\"], \"define\": [\"DEBUG\"], \"suppress\": [\"redundant-semicolon\"], \"warn-as-error\": [\"cast-may-throw\"]}},\n"
+            "    \"dependencies\": {{\"ghul-core\": {{\"git\": \"https://github.com/ghul-lang/ghul-core\", \"tag\": \"v1.2.0\"}}, \"parsing\": {{\"git\": \"https://example.com/libs.git\", \"branch\": \"main\", \"directory\": \"parsing\"}}, \"scratch\": {{\"path\": \"../scratch\"}}}}\n"
+            "}}"
+
+    EXPLICIT_FALSE: string static => "{{\"name\": \"app\", \"options\": {{\"global-namespace\": false}}}}"
+
+    DEFAULT: string static => "{{\"name\": \"small\"}}"
+    NO_NAME: string static => "{{\"version\": \"0.1.0\"}}"
+    BAD_NAME_UPPER: string static => "{{\"name\": \"Example App\"}}"
+    BAD_NAME_DIGIT: string static => "{{\"name\": \"1app\"}}"
+    BAD_NAME_EMPTY: string static => "{{\"name\": \"\"}}"
+    BAD_NAME_UNDERSCORE: string static => "{{\"name\": \"app_1\"}}"
+    GOOD_NAME: string static => "{{\"name\": \"my-app-2\"}}"
+    UNKNOWN_KEY: string static => "{{\"name\": \"app\", \"nmae\": \"typo\"}}"
+    UNKNOWN_OPTION: string static => "{{\"name\": \"app\", \"options\": {{\"under-score-access\": \"private\"}}}}"
+    UNKNOWN_DEPENDENCY_KEY: string static => "{{\"name\": \"app\", \"dependencies\": {{\"lib\": {{\"git\": \"u\", \"tag\": \"v1\", \"rev\": \"abc\"}}}}}}"
+    UNKNOWN_TARGET: string static => "{{\"name\": \"app\", \"targets\": [\"dotnet\", \"js\"]}}"
+    UNKNOWN_KIND: string static => "{{\"name\": \"app\", \"kind\": \"script\"}}"
+    OPTION_WRONG_TYPE: string static => "{{\"name\": \"app\", \"options\": {{\"global-namespace\": \"yes\"}}}}"
+    OPTION_WRONG_ENTRY: string static => "{{\"name\": \"app\", \"options\": {{\"suppress\": [1]}}}}"
+    BOTH_GIT_AND_PATH: string static => "{{\"name\": \"app\", \"dependencies\": {{\"lib\": {{\"git\": \"u\", \"path\": \"../lib\"}}}}}}"
+    NEITHER_GIT_NOR_PATH: string static => "{{\"name\": \"app\", \"dependencies\": {{\"lib\": {{}}}}}}"
+    GIT_NO_TAG_NO_BRANCH: string static => "{{\"name\": \"app\", \"dependencies\": {{\"lib\": {{\"git\": \"u\"}}}}}}"
+    GIT_TAG_AND_BRANCH: string static => "{{\"name\": \"app\", \"dependencies\": {{\"lib\": {{\"git\": \"u\", \"tag\": \"v1\", \"branch\": \"main\"}}}}}}"
+    WRONG_VERSION: string static => "{{\"name\": \"app\", \"version\": 1}}"
+    WRONG_SOURCES: string static => "{{\"name\": \"app\", \"sources\": \"src\"}}"
+    WRONG_OPTIONS: string static => "{{\"name\": \"app\", \"options\": []}}"
+    WRONG_DEPENDENCIES: string static => "{{\"name\": \"app\", \"dependencies\": []}}"
+    WRONG_TARGETS: string static => "{{\"name\": \"app\", \"targets\": \"dotnet\"}}"
+    TWO_PROBLEMS: string static => "{{\"name\": \"app\", \"kind\": \"script\", \"targets\": [\"js\"]}}"
+    TRAILING_COMMA: string static => "{{\"name\": \"app\",}}"
+    NOT_JSON: string static => "this is not json"
+    NOT_AN_OBJECT_ARRAY: string static => "[]"
+    NOT_AN_OBJECT_STRING: string static => "\"app\""
+
+    _descriptions(problems: Collections.List[MANIFEST_PROBLEM]) -> string{} =>
+        problems |> map(problem => problem.describe())
+
+    @TestClass()
+    class MANIFEST_READER_TESTS is
+        init() is si
+
+        // A manifest known to be well formed. Nothing about the text says
+        // so, so a read that found problems fails here rather than
+        // returning a model that is partly made up.
+        _read(text: string) -> MANIFEST? is
+            let outcome = MANIFEST_READER.read(text, "ghul-project.json")
+
+            if let read: ReadOutcome.OK = outcome then
+                return read.manifest
+            fi
+
+            if let failed: ReadOutcome.PROBLEMS = outcome then
+                Assert.fail("expected a manifest, got: {failed.problems |> _descriptions() |> join("; ")}")
+            fi
+
+            return null
+        si
+
+        // What reading a manifest that should not have read produced, as
+        // the messages a caller would report.
+        _problems(text: string) -> Collections.List[string] is
+            let outcome = MANIFEST_READER.read(text, "ghul-project.json")
+
+            if let failed: ReadOutcome.PROBLEMS = outcome then
+                return failed.problems |> _descriptions() |> collect()
+            fi
+
+            Assert.fail("expected problems, got a manifest")
+
+            return LIST[string]()
+        si
+
+        @Test()
+        a_complete_manifest__reads_every_member() is
+            let manifest = _read(COMPLETE)!
+
+            assert manifest.name =~ "example-app";
+            assert manifest.version =~ "0.1.0";
+            assert manifest.kind == ManifestKind.PROGRAM;
+            assert manifest.compiler_version =~ "64.5.38";
+            assert manifest.targets.count == 2;
+            assert manifest.targets[0] == BuildTarget.WASM;
+            assert manifest.targets[1] == BuildTarget.DOTNET;
+            assert manifest.sources.count == 2;
+            assert manifest.sources[0] =~ "src/**/*.ghul";
+            assert manifest.sources[1] =~ "extra/*.ghul";
+        si
+
+        @Test()
+        the_options__read_one_member_each() is
+            let options = (_read(COMPLETE)!).options
+
+            assert options.underscore_access =~ "private";
+            assert options.global_namespace;
+            assert options.default_use.count == 2;
+            assert options.default_use[0] =~ "Collections";
+            assert options.define[0] =~ "DEBUG";
+            assert options.suppress[0] =~ "redundant-semicolon";
+            assert options.warn_as_error[0] =~ "cast-may-throw";
+        si
+
+        @Test()
+        a_git_dependency__reads_its_url_and_where_it_points() is
+            let dependencies = (_read(COMPLETE)!).dependencies
+
+            assert dependencies.count == 3;
+
+            if let core: DEPENDENCY.GIT = dependencies["ghul-core"] then
+                assert core.url =~ "https://github.com/ghul-lang/ghul-core";
+                assert core.tag =~ "v1.2.0";
+                assert !core.branch?;
+                assert !core.directory?;
+            else
+                Assert.fail("ghul-core is not a git dependency");
+            fi
+
+            if let parsing: DEPENDENCY.GIT = dependencies["parsing"] then
+                assert parsing.url =~ "https://example.com/libs.git";
+                assert !parsing.tag?;
+                assert parsing.branch =~ "main";
+                assert parsing.directory =~ "parsing";
+            else
+                Assert.fail("parsing is not a git dependency");
+            fi
+        si
+
+        @Test()
+        a_path_dependency__reads_its_path() is
+            let dependencies = (_read(COMPLETE)!).dependencies
+
+            if let scratch: DEPENDENCY.PATH = dependencies["scratch"] then
+                assert scratch.path =~ "../scratch";
+            else
+                Assert.fail("scratch is not a path dependency");
+            fi
+        si
+
+        @Test()
+        a_manifest_with_only_a_name__takes_every_default() is
+            let manifest = _read(DEFAULT)!
+
+            assert manifest.name =~ "small";
+            assert !manifest.version?;
+            assert manifest.kind == ManifestKind.PROGRAM;
+            assert !manifest.compiler_version?;
+            assert manifest.targets.count == 1;
+            assert manifest.targets[0] == BuildTarget.DOTNET;
+            assert manifest.sources.count == 1;
+            assert manifest.sources[0] =~ "src/**/*.ghul";
+            assert manifest.dependencies.count == 0;
+        si
+
+        @Test()
+        options_left_out__take_the_compilers_own_defaults() is
+            let options = (_read(DEFAULT)!).options
+
+            assert !options.underscore_access?;
+            assert !options.global_namespace;
+            assert options.default_use.count == 0;
+            assert options.define.count == 0;
+            assert options.suppress.count == 0;
+            assert options.warn_as_error.count == 0;
+        si
+
+        @Test()
+        a_boolean_option_spelled_false__reads_as_false() is
+            let options = (_read(EXPLICIT_FALSE)!).options
+
+            assert !options.global_namespace;
+        si
+
+        @Test()
+        no_name__is_a_problem() is
+            let problems = _problems(NO_NAME)
+
+            assert problems.count == 1;
+            assert problems[0].contains("name");
+        si
+
+        @Test()
+        a_name_that_is_not_a_library_name__is_a_problem() is
+            assert _problems(BAD_NAME_UPPER).count == 1;
+            assert _problems(BAD_NAME_DIGIT).count == 1;
+            assert _problems(BAD_NAME_EMPTY).count == 1;
+            assert _problems(BAD_NAME_UNDERSCORE).count == 1;
+
+            // A name the compiler would take is still a library name.
+            assert (_read(GOOD_NAME)!).name =~ "my-app-2";
+        si
+
+        @Test()
+        an_unknown_key__is_a_problem_naming_it() is
+            let problems = _problems(UNKNOWN_KEY)
+
+            assert problems.count == 1;
+            assert problems[0].contains("nmae");
+        si
+
+        @Test()
+        an_unknown_key_in_options__is_a_problem_naming_it() is
+            let problems = _problems(UNKNOWN_OPTION)
+
+            assert problems.count == 1;
+            assert problems[0].contains("under-score-access");
+        si
+
+        @Test()
+        an_unknown_key_in_a_dependency__is_a_problem_naming_it() is
+            let problems = _problems(UNKNOWN_DEPENDENCY_KEY)
+
+            assert problems.count == 1;
+            assert problems[0].contains("rev");
+        si
+
+        @Test()
+        an_unknown_target__is_a_problem() is
+            let problems = _problems(UNKNOWN_TARGET)
+
+            assert problems.count == 1;
+            assert problems[0].contains("targets");
+        si
+
+        @Test()
+        an_unknown_kind__is_a_problem() is
+            let problems = _problems(UNKNOWN_KIND)
+
+            assert problems.count == 1;
+            assert problems[0].contains("kind");
+        si
+
+        @Test()
+        an_option_of_the_wrong_type__is_a_problem_naming_it() is
+            let problems = _problems(OPTION_WRONG_TYPE)
+
+            assert problems.count == 1;
+            assert problems[0].contains("global-namespace");
+        si
+
+        @Test()
+        a_list_option_holding_something_else__is_a_problem() is
+            let problems = _problems(OPTION_WRONG_ENTRY)
+
+            assert problems.count == 1;
+            assert problems[0].contains("suppress");
+        si
+
+        @Test()
+        a_dependency_with_both_git_and_path__is_a_problem() is
+            let problems = _problems(BOTH_GIT_AND_PATH)
+
+            assert problems.count == 1;
+            assert problems[0].contains("dependencies.lib");
+        si
+
+        @Test()
+        a_dependency_with_neither_git_nor_path__is_a_problem() is
+            let problems = _problems(NEITHER_GIT_NOR_PATH)
+
+            assert problems.count == 1;
+            assert problems[0].contains("dependencies.lib");
+        si
+
+        @Test()
+        a_git_dependency_with_neither_tag_nor_branch__is_a_problem() is
+            let problems = _problems(GIT_NO_TAG_NO_BRANCH)
+
+            assert problems.count == 1;
+            assert problems[0].contains("dependencies.lib");
+        si
+
+        @Test()
+        a_git_dependency_with_a_tag_and_a_branch__is_read() is
+            assert (_read(GIT_TAG_AND_BRANCH)!).dependencies.count == 1;
+        si
+
+        @Test()
+        a_member_of_the_wrong_type__is_a_problem_naming_it() is
+            assert _problems(WRONG_VERSION)[0].contains("version");
+            assert _problems(WRONG_SOURCES)[0].contains("sources");
+            assert _problems(WRONG_OPTIONS)[0].contains("options");
+            assert _problems(WRONG_DEPENDENCIES)[0].contains("dependencies");
+            assert _problems(WRONG_TARGETS)[0].contains("targets");
+        si
+
+        @Test()
+        two_problems__are_both_reported() is
+            let problems = _problems(TWO_PROBLEMS)
+
+            assert problems.count == 2;
+            assert problems[0].contains("kind");
+            assert problems[1].contains("targets");
+        si
+
+        @Test()
+        text_that_is_not_json__is_one_problem() is
+            let problems = _problems(NOT_JSON)
+
+            assert problems.count == 1;
+            assert problems[0].contains("not valid JSON");
+        si
+
+        @Test()
+        json_that_is_not_an_object__is_one_problem() is
+            assert _problems(NOT_AN_OBJECT_ARRAY).count == 1;
+            assert _problems(NOT_AN_OBJECT_STRING).count == 1;
+        si
+
+        @Test()
+        a_trailing_comma__is_allowed() is
+            assert (_read(TRAILING_COMMA)!).name =~ "app";
+        si
+    si
+si

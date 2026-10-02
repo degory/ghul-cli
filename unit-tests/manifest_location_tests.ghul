@@ -1,0 +1,73 @@
+namespace Ghul.Cli.Tests is
+    use IO
+
+    use Ghul.Project.MANIFEST_LOCATION
+
+    use Assert = Microsoft.VisualStudio.TestTools.UnitTesting.Assert;
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    @TestClass()
+    class MANIFEST_LOCATION_TESTS is
+        init() is si
+
+        _directory() -> string =>
+            IO.Path.join([IO.Path.get_temp_path(), "ghul-cli-tests-{System.Guid.new_guid().to_string("N")}"])
+
+        _with_a_manifest(directory: string) is
+            IO.Directory.create_directory(directory)
+            IO.File.write_all_text(IO.Path.combine(directory, MANIFEST_LOCATION.FILE_NAME), "{{\"name\": \"app\"}}")
+        si
+
+        @Test()
+        the_manifest__is_named_ghul_project_json() is
+            assert MANIFEST_LOCATION.FILE_NAME =~ "ghul-project.json";
+        si
+
+        @Test()
+        a_directory_holding_one__finds_it() is
+            let directory = _directory()
+
+            _with_a_manifest(directory)
+
+            assert MANIFEST_LOCATION.find_in(directory) =~ IO.Path.combine(directory, "ghul-project.json");
+        si
+
+        @Test()
+        a_directory_holding_none__finds_nothing() is
+            let directory = _directory()
+
+            IO.Directory.create_directory(directory)
+
+            assert !MANIFEST_LOCATION.find_in(directory)?;
+        si
+
+        @Test()
+        a_directory_that_does_not_exist__finds_nothing() is
+            assert !MANIFEST_LOCATION.find_in(IO.Path.combine([_directory(), "nowhere"]))?;
+        si
+
+        @Test()
+        a_parent_directories_manifest__is_not_found() is
+            // A parent holding a manifest does not make a subdirectory a
+            // project: a project is what its own root says it is.
+            let parent = _directory()
+            let child = IO.Path.combine([parent, "nested"])
+
+            _with_a_manifest(parent)
+            IO.Directory.create_directory(child)
+
+            assert !MANIFEST_LOCATION.find_in(child)?;
+        si
+
+        @Test()
+        a_manifest_of_another_name__is_not_found() is
+            let directory = _directory()
+
+            IO.Directory.create_directory(directory)
+            IO.File.write_all_text(IO.Path.combine(directory, "ghul.json"), "{{}}")
+
+            assert !MANIFEST_LOCATION.find_in(directory)?;
+        si
+    si
+si

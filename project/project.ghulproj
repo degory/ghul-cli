@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <GhulCompiler>dotnet ghul-compiler</GhulCompiler>
+
+    <!-- What a ghūl project's manifest says about it, and how a reader
+         checks one. Pure text in and models out: no file system and no
+         network, so the same reader serves an editor, a build and a
+         command line. -->
+    <PackageId>ghul.project</PackageId>
+    <AssemblyName>ghul.project</AssemblyName>
+
+    <Title>ghūl project manifest</Title>
+    <Authors>degory</Authors>
+    <Description>Reads and checks a ghūl project manifest: the ghul-project.json that says what a project is called, where its sources are and what it depends on.</Description>
+    <PackageDescription>Reads and checks a ghūl project manifest: the ghul-project.json that says what a project is called, where its sources are and what it depends on.</PackageDescription>
+    <PackageTags>ghul;ghūl;manifest;project;cli</PackageTags>
+    <PackageOutputPath>../nupkg</PackageOutputPath>
+    <PackageProjectUrl>https://ghul.dev</PackageProjectUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>ghul-logo-icon.png</PackageIcon>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/degory/ghul-cli</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryBranch>main</RepositoryBranch>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="../LICENSE*" Pack="true" PackagePath="\" />
+    <None Include="../images/ghul-logo-icon.png" Pack="true" PackagePath="" />
+
+    <GhulSources Include="src/**/*.ghul" />
+  </ItemGroup>
+</Project>

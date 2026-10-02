@@ -11,7 +11,7 @@ on Linux. See `.github/claude-review.md` for the fuller design summary.
 ## Layout
 
 Each package is a folder of its own - `cli/`, `repl/`, `host/`,
-`jupyter/` - beside `unit-tests/` and `tests/`, with what they share
+`jupyter/`, `project/` - beside `unit-tests/` and `tests/`, with what they share
 (README, LICENSE, VERSION, `Directory.*.props`, the tool manifest) at the
 root. `ghul-cli.slnx` lists every project, so `dotnet build` at the root
 builds them all, and `ghul-cli.code-workspace` opens each folder in VS Code.
@@ -142,6 +142,15 @@ looks for them.
   process and a compiler. It records the kernel's pid where the script
   can kill it, since a client killed before its own cleanup runs would
   otherwise leave one behind.
+- `project/` — the `ghul.project` package: a ghūl project's manifest.
+  `MANIFEST` and the kinds, targets, options and dependencies a manifest
+  describes; `MANIFEST_READER.read(text, path)` turns manifest text into
+  either a `MANIFEST` or a `MANIFEST_PROBLEM` per fault, every fault
+  rather than the first, and touches no file and no network itself;
+  `MANIFEST_LOCATION.find_in(directory)` finds the `ghul-project.json` in
+  one directory and does not search upwards. Nothing builds from this yet
+  - the commands, the source globs, fetching and the lockfile are the
+  tasks under ghul-lang/ghul#3211 that follow it.
 - `unit-tests/` — MSTest project covering the pure path/cache-key/
   runnable-by-default/stdin-marker/source-resolution logic.
 - `tests/smoke.sh` — end-to-end test: builds the tool, points it at a real
