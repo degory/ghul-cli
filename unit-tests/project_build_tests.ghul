@@ -1,0 +1,160 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+    use Collections.MAP
+
+    use Ghul.Project.BuildTarget
+    use Ghul.Project.CORE_LIBRARY
+    use Ghul.Project.DEPENDENCY
+    use Ghul.Project.LOADED_PROJECT
+    use Ghul.Project.MANIFEST
+    use Ghul.Project.MANIFEST_OPTIONS
+    use Ghul.Project.ManifestKind
+    use Ghul.Project.PROJECT_BUILD
+    use Ghul.Project.PROJECT_COMMAND_LINE
+    use Ghul.Project.PROJECT_LOADER
+    use Ghul.Project.PROJECT_RUN
+    use Ghul.Project.RESPONSE_FILE
+
+    use Assert = Microsoft.VisualStudio.TestTools.UnitTesting.Assert;
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    // What a project build decides before and after the compiler runs: the
+    // target, where the output goes, what runs it, and how its arguments
+    // are written for the compiler to read back.
+    @TestClass()
+    class PROJECT_BUILD_TESTS is
+        init() is si
+
+        _same(expected: string, actual: string) is
+            assert actual =~ expected else "expected '{expected}', got '{actual}'"
+        si
+
+        _project(kind: ManifestKind, target: BuildTarget) -> LOADED_PROJECT =>
+            LOADED_PROJECT(
+                MANIFEST(
+                    "app",
+                    null,
+                    kind,
+                    LIST[BuildTarget]([target]),
+                    LIST[string](["src/**/*.ghul"]),
+                    null,
+                    MANIFEST_OPTIONS(null, false, LIST[string](), LIST[string](), LIST[string](), LIST[string]()),
+                    MAP[string, DEPENDENCY]()),
+                IO.Path.combine("/", "project"),
+                target)
+
+        _targets(targets: BuildTarget[]) -> Collections.List[BuildTarget] => LIST[BuildTarget](targets)
+
+        @Test()
+        the_only_target_is_taken_when_none_is_named() is
+            let chosen = PROJECT_LOADER.choose_target(_targets([BuildTarget.WASM]), null)
+
+            assert !chosen.problem?
+            assert chosen.target == BuildTarget.WASM
+        si
+
+        @Test()
+        a_named_target_has_to_be_one_the_manifest_lists() is
+            let chosen = PROJECT_LOADER.choose_target(_targets([BuildTarget.DOTNET]), "wasm")
+
+            _same("the manifest does not list the target wasm; it lists dotnet", chosen.problem ?? "")
+        si
+
+        @Test()
+        with_several_targets_one_has_to_be_named() is
+            let chosen = PROJECT_LOADER.choose_target(_targets([BuildTarget.DOTNET, BuildTarget.WASM]), null)
+
+            _same("the manifest lists more than one target; name one with --target: dotnet, wasm", chosen.problem ?? "")
+
+            let named = PROJECT_LOADER.choose_target(_targets([BuildTarget.DOTNET, BuildTarget.WASM]), "wasm")
+
+            assert !named.problem?
+            assert named.target == BuildTarget.WASM
+        si
+
+        @Test()
+        output_goes_under_out_and_the_target() is
+            let root = IO.Path.combine("/", "project", "out")
+
+            _same(IO.Path.combine(root, "dotnet", "app.exe"), PROJECT_BUILD.output_path(_project(ManifestKind.PROGRAM, BuildTarget.DOTNET)))
+            _same(IO.Path.combine(root, "dotnet", "app.dll"), PROJECT_BUILD.output_path(_project(ManifestKind.LIBRARY, BuildTarget.DOTNET)))
+            _same(IO.Path.combine(root, "wasm", "app.wasm"), PROJECT_BUILD.output_path(_project(ManifestKind.PROGRAM, BuildTarget.WASM)))
+        si
+
+        @Test()
+        a_dotnet_program_runs_with_the_dotnet_host() is
+            let command = PROJECT_RUN.command(_project(ManifestKind.PROGRAM, BuildTarget.DOTNET), "/p/out/dotnet/app.exe", LIST[string](["a", "b"]))
+
+            assert !command.problem?
+            _same("dotnet", command.file_name)
+            _same("/p/out/dotnet/app.exe a b", string.join(" ", command.arguments))
+        si
+
+        @Test()
+        a_wasm_program_runs_under_node_through_its_loader() is
+            let command = PROJECT_RUN.command(_project(ManifestKind.PROGRAM, BuildTarget.WASM), "/p/out/wasm/app.wasm", LIST[string](["a"]))
+
+            assert !command.problem?
+            _same("node", command.file_name)
+            _same("/p/out/wasm/app.mjs a", string.join(" ", command.arguments))
+        si
+
+        @Test()
+        a_library_is_not_run() is
+            let command = PROJECT_RUN.command(_project(ManifestKind.LIBRARY, BuildTarget.DOTNET), "/p/out/dotnet/app.dll", LIST[string]())
+
+            _same("app is a library, which cannot be run", command.problem ?? "")
+        si
+
+        @Test()
+        response_file_holds_one_argument_a_line_quoting_white_space() is
+            _same(
+                "-o\n\"/a path/out.exe\"\n'say \"hi\"'\nplain.ghul\n\"\"\n",
+                RESPONSE_FILE.text(LIST[string](["-o", "/a path/out.exe", "say \"hi\"", "plain.ghul", ""])))
+        si
+
+        @Test()
+        the_core_library_tag_follows_the_compiler_version() is
+            _same("v0.3.0", CORE_LIBRARY.pinned_tag("64.11.0"))
+            _same("v0.3.0", CORE_LIBRARY.pinned_tag("70.0.0"))
+        si
+
+        @Test()
+        a_compiler_older_than_every_pin_or_not_a_release_takes_the_oldest() is
+            _same("v0.3.0", CORE_LIBRARY.pinned_tag("1.0.0"))
+            _same("v0.3.0", CORE_LIBRARY.pinned_tag("0.0.0-local-x.1"))
+        si
+
+        @Test()
+        a_run_names_the_project_with_no_script_or_a_project_option() is
+            assert PROJECT_COMMAND_LINE.names_project(LIST[string]())
+            assert PROJECT_COMMAND_LINE.names_project(LIST[string](["--target", "wasm"]))
+            assert PROJECT_COMMAND_LINE.names_project(LIST[string](["--", "x"]))
+            assert !PROJECT_COMMAND_LINE.names_project(LIST[string](["script.ghul"]))
+        si
+
+        @Test()
+        the_command_line_takes_a_target_and_program_arguments() is
+            let parsed = PROJECT_COMMAND_LINE.parse(LIST[string](["--target", "wasm", "--", "a", "--target"]), true)
+
+            assert !parsed.problem?
+            _same("wasm", parsed.target ?? "")
+            _same("a --target", string.join(" ", parsed.program_arguments))
+        si
+
+        @Test()
+        a_build_takes_no_program_arguments() is
+            let parsed = PROJECT_COMMAND_LINE.parse(LIST[string](["--", "a"]), false)
+
+            _same("unexpected argument --", parsed.problem ?? "")
+        si
+
+        @Test()
+        a_target_option_needs_a_name() is
+            let parsed = PROJECT_COMMAND_LINE.parse(LIST[string](["--target"]), false)
+
+            _same("--target needs a target name", parsed.problem ?? "")
+        si
+    si
+si
