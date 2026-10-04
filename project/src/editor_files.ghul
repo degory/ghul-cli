@@ -1,0 +1,145 @@
+namespace Ghul.Project is
+    use Collections.LIST
+    use IO.Directory
+    use IO.File
+    use IO.Path
+
+    /// The files an editor reads to analyse a project as its build compiles
+    /// it: a response file holding the build's compiler options, and a list
+    /// of the project's source globs.
+    class EDITOR_FILES is
+        /// The response file for `groups`: one flag a line with its value on
+        /// the same line, and each source library file on a line of its own,
+        /// quoted as the compiler reads them back.
+        ///
+        /// - groups: the build's options, as `COMPILER_ARGUMENTS.option_groups`
+        ///   groups them
+        response_file_text(groups: Collections.List[Collections.List[string]]) -> string static is
+            let lines = LIST[string]()
+
+            for group in groups do
+                lines.add(string.join(" ", group |> Ghul.Pipes.map(argument => RESPONSE_FILE.quoted(argument))))
+            od
+
+            return "{string.join("\n", lines)}\n"
+        si
+
+        /// A manifest's source globs, one a line, as the manifest writes them:
+        /// relative to the directory holding it.
+        source_globs_text(manifest: MANIFEST) -> string static =>
+            "{string.join("\n", manifest.sources)}\n"
+
+        /// Writes the response file for `project` to `output`, and its source
+        /// globs to `source_globs_output` where that is given. The response
+        /// file holds what a build passes the compiler, less the output and
+        /// the project's own sources. False, with the problem reported to
+        /// `say`, where the build's libraries cannot be found.
+        ///
+        /// - project: the project an editor is analysing
+        /// - compiler_version: the compiler the project builds with
+        /// - cache: where fetched libraries are kept
+        /// - output: the response file to write
+        /// - source_globs_output: the globs file to write, or null for none
+        /// - say: where a problem is reported
+        write(
+            project: LOADED_PROJECT,
+            compiler_version: string,
+            cache: LIBRARY_CACHE,
+            output: string,
+            source_globs_output: string?,
+            say: (string) -> void
+        ) -> bool static is
+            let libraries = PROJECT_BUILD.libraries(project, compiler_version, cache, say)
+
+            if !libraries? then
+                return false
+            fi
+
+            let groups = COMPILER_ARGUMENTS.option_groups(project.manifest, project.target, libraries)
+
+            _write(output, response_file_text(groups))
+
+            if let globs: string = source_globs_output then
+                _write(globs, source_globs_text(project.manifest))
+            fi
+
+            return true
+        si
+
+        /// The command that runs the compiler, as one line: the program and
+        /// the arguments before a build's own, each quoted where it holds
+        /// white space.
+        ///
+        /// - compiler: how the compiler is started
+        command_line(compiler: COMPILER_PROCESS) -> string static is
+            let parts = LIST[string]()
+
+            parts.add(RESPONSE_FILE.quoted(compiler.file_name))
+
+            for argument in compiler.leading_arguments do
+                parts.add(RESPONSE_FILE.quoted(argument))
+            od
+
+            return string.join(" ", parts)
+        si
+
+        _write(path: string, text: string) static is
+            let directory = Path.get_directory_name(Path.get_full_path(path))
+
+            if directory? then
+                Directory.create_directory(directory)
+            fi
+
+            File.write_all_text(path, text)
+        si
+    si
+
+    /// What `ghul project response-file` was asked for: where to write the
+    /// response file and, optionally, the globs file, and which target.
+    class RESPONSE_FILE_COMMAND_LINE(
+        output: string?,
+        source_globs: string?,
+        target: string?,
+        problem: string?
+    ) is
+        /// Reads `--output <path> [--source-globs <path>] [--target <name>]`.
+        ///
+        /// - arguments: what follows `response-file` on the command line
+        parse(arguments: Collections.List[string]) -> RESPONSE_FILE_COMMAND_LINE static is
+            let output: string? mut = null
+            let source_globs: string? mut = null
+            let target: string? mut = null
+            let i mut = 0
+
+            while i < arguments.count do
+                let option = arguments[i]
+
+                if option !~ "--output" /\ option !~ "--source-globs" /\ option !~ "--target" then
+                    return RESPONSE_FILE_COMMAND_LINE(null, null, null, "unexpected argument {option}")
+                fi
+
+                if i + 1 >= arguments.count then
+                    return RESPONSE_FILE_COMMAND_LINE(null, null, null, "{option} needs a value")
+                fi
+
+                let value = arguments[i + 1]
+
+                if option =~ "--output" then
+                    output = value
+                elif option =~ "--source-globs" then
+                    source_globs = value
+                else
+                    target = value
+                fi
+
+                i = i + 2
+            od
+
+            if !output? then
+                return RESPONSE_FILE_COMMAND_LINE(null, null, null, "--output is required")
+            fi
+
+            return RESPONSE_FILE_COMMAND_LINE(output, source_globs, target, null)
+        si
+    si
+si
