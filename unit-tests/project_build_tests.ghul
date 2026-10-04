@@ -148,7 +148,9 @@ namespace Ghul.Cli.Tests is
         @Test()
         the_core_library_tag_follows_the_compiler_version() is
             _same("v0.3.0", CORE_LIBRARY.pinned_tag("64.11.0"))
-            _same("v0.3.0", CORE_LIBRARY.pinned_tag("70.0.0"))
+            _same("v0.3.0", CORE_LIBRARY.pinned_tag("64.12.4"))
+            _same("v0.6.1", CORE_LIBRARY.pinned_tag("64.13.0"))
+            _same("v0.6.1", CORE_LIBRARY.pinned_tag("70.0.0"))
         si
 
         @Test()

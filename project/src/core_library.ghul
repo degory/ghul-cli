@@ -64,7 +64,10 @@ namespace Ghul.Project is
         // Each release of ghul-core and the earliest compiler that builds
         // it, oldest first. A new release of either adds a line.
         _pins() -> (earliest_compiler: string, tag: string)[] static =>
-            [(earliest_compiler = "64.11.0", tag = "v0.3.0")]
+            [
+                (earliest_compiler = "64.11.0", tag = "v0.3.0"),
+                (earliest_compiler = "64.13.0", tag = "v0.6.1")
+            ]
 
         /// The core library for `manifest`, fetching it into `cache` if it
         /// is not there already.
