@@ -3,9 +3,8 @@
 # ghul-project.json, driving the built CLI as an installed tool would run,
 # under a scratch HOME so the compiler is installed on demand.
 #
-# The wasm build-and-run check needs a compiler whose wasm backend can
-# generate a program that writes a line, which no release has yet. It runs
-# only with GHUL_PROJECT_TEST_WASM=1, and is skipped with a note otherwise.
+# The wasm checks build with the core and runtime libraries fetched from Git
+# and run the program under Node.js.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -103,7 +102,7 @@ if err="$(cd "$broken" && dotnet "$cli" build 2>&1)"; then
 fi
 [[ "$err" == *"ghul: ghul-project.json: name:"* ]] || fail "unexpected message for a bad manifest: $err"
 
-echo "project: dependencies other than ghul-core are refused..." >&2
+echo "project: dependencies other than ghul-core and ghul-runtime are refused..." >&2
 dependent="$scratch/dependent"
 mkdir -p "$dependent/src"
 cat > "$dependent/ghul-project.json" <<'JSON'
@@ -170,22 +169,29 @@ if err="$(cd "$broken" && dotnet "$cli" project compiler 2>&1)"; then
 fi
 [[ "$err" == *"ghul: ghul-project.json: name:"* ]] || fail "unexpected message from ghul project compiler: $err"
 
-if [[ "${GHUL_PROJECT_TEST_WASM:-}" == "1" ]]; then
-    echo "project: a wasm program builds with the core library and runs under Node..." >&2
-    wasm="$scratch/wasm-greeter"
-    mkdir -p "$wasm/src"
-    cat > "$wasm/ghul-project.json" <<'JSON'
+echo "project: a wasm program builds with the core and runtime libraries and runs under Node..." >&2
+wasm="$scratch/wasm-greeter"
+mkdir -p "$wasm/src"
+cat > "$wasm/ghul-project.json" <<'JSON'
 { "name": "wasm-greeter", "targets": ["wasm"] }
 JSON
-    cat > "$wasm/src/main.ghul" <<'GHUL'
+cat > "$wasm/src/main.ghul" <<'GHUL'
 entry() is
     IO.Std.write_line("hello from wasm")
 si
 GHUL
-    out="$(cd "$wasm" && dotnet "$cli" run 2>/dev/null)" || fail "ghul run of a wasm program failed"
-    check "$out" "hello from wasm" "wasm run output"
-else
-    echo "project: skipping the wasm build-and-run check (set GHUL_PROJECT_TEST_WASM=1 once the compiler's wasm backend handles strings)" >&2
-fi
+out="$(cd "$wasm" && dotnet "$cli" run 2>/dev/null)" || fail "ghul run of a wasm program failed"
+check "$out" "hello from wasm" "wasm run output"
+
+echo "project: a wasm program with use default resolves the runtime's imports..." >&2
+cat > "$wasm/src/main.ghul" <<'GHUL'
+use default
+
+entry() is
+    write_line("hello with use default")
+si
+GHUL
+out="$(cd "$wasm" && dotnet "$cli" run 2>/dev/null)" || fail "ghul run of a wasm program with use default failed"
+check "$out" "hello with use default" "wasm run output with use default"
 
 echo "project: all checks passed" >&2

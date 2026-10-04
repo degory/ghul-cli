@@ -76,6 +76,13 @@ jobs:
     - name: Run smoke test
       run: ./tests/smoke.sh
 
+    # A wasm program runs under Node.js, which needs WebAssembly GC: on by
+    # default from Node.js 22.
+    - name: Set up Node.js
+      uses: actions/setup-node@v7
+      with:
+        node-version: '24'
+
     - name: Run the project test
       run: ./tests/project.sh
 
