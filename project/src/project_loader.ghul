@@ -64,7 +64,7 @@ namespace Ghul.Project is
             let manifest = read.manifest!
 
             for name in manifest.dependencies.keys do
-                if name !~ CORE_LIBRARY.NAME then
+                if name !~ CORE_LIBRARY.NAME /\ name !~ RUNTIME_LIBRARY.NAME then
                     return _failed("dependencies are not supported yet")
                 fi
             od

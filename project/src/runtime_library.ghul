@@ -1,0 +1,137 @@
+namespace Ghul.Project is
+    use Collections.LIST
+    use IO.File
+    use IO.Path
+
+    /// The runtime library a build for the wasm target compiles in after
+    /// the core library: ghul-runtime, which supplies the pipes, ranges and
+    /// the rest of what `Ghul` and `Ghul.Pipes` declare, from the files its
+    /// `wasm-sources.rsp` lists.
+    ///
+    /// A project gets the release of ghul-runtime this tool pins for the
+    /// compiler it builds with, or none with a compiler older than every
+    /// pinned release. Declaring `ghul-runtime` among the manifest's
+    /// dependencies, at a tag or as a path, uses that instead.
+    class RUNTIME_LIBRARY is
+        /// The library's name, which a manifest declares it under.
+        NAME: string static => "ghul-runtime"
+
+        /// The file in the library's root listing the sources a wasm build
+        /// compiles, one a line, relative to that root.
+        SOURCE_LIST: string static => "wasm-sources.rsp"
+
+        /// Where ghul-runtime is fetched from: `GHUL_RUNTIME_REPOSITORY`
+        /// where that is set, for a mirror or a test, and its own repository
+        /// otherwise.
+        repository() -> string static is
+            let named = System.Environment.get_environment_variable("GHUL_RUNTIME_REPOSITORY")
+
+            if named? /\ named.length > 0 then
+                return named
+            fi
+
+            return "https://github.com/ghul-lang/ghul-runtime"
+        si
+
+        /// The release of ghul-runtime to build with a compiler: the newest
+        /// whose earliest compiler is no newer than `compiler_version`, or
+        /// null where the version is earlier than all of them or is not a
+        /// release number.
+        ///
+        /// - compiler_version: the `ghul.compiler` version the build uses
+        pinned_tag(compiler_version: string) -> string? static is
+            let result: string? mut = null
+            let compiler: System.Version? mut
+
+            if !System.Version.try_parse(compiler_version, compiler ref) \/ !compiler? then
+                return result
+            fi
+
+            for pin in _pins() do
+                if System.Version.parse(pin.earliest_compiler) <= compiler then
+                    result = pin.tag
+                fi
+            od
+
+            return result
+        si
+
+        // Each release of ghul-runtime that lists its wasm sources, and the
+        // earliest compiler that builds them, oldest first. A new release of
+        // either adds a line.
+        _pins() -> (earliest_compiler: string, tag: string)[] static =>
+            [
+                (earliest_compiler = "64.15.0", tag = "v25.0.3")
+            ]
+
+        /// The runtime library for `manifest`, fetching it into `cache` if it
+        /// is not there already; null where none is pinned for the compiler
+        /// and the manifest declares none.
+        ///
+        /// - manifest: the project being built
+        /// - manifest_directory: the directory holding the manifest, which a
+        ///   path dependency is relative to
+        /// - compiler_version: the compiler the build uses
+        /// - cache: where fetched libraries are kept
+        find(
+            manifest: MANIFEST,
+            manifest_directory: string,
+            compiler_version: string,
+            cache: LIBRARY_CACHE
+        ) -> LibraryOutcome? static is
+            let declared: DEPENDENCY mut
+
+            if manifest.dependencies.try_get_value(NAME, declared ref) then
+                if let path: DEPENDENCY.PATH = declared then
+                    return _read(Path.get_full_path(Path.join([manifest_directory, path.path])), "0.0.0")
+                fi
+
+                let git = cast DEPENDENCY.GIT(declared)
+
+                if let tag: string = git.tag then
+                    return _fetched(cache.fetch_tag(git.url, tag), git.directory, tag)
+                fi
+
+                return LibraryOutcome.PROBLEM("{NAME} must be declared with a tag or a path")
+            fi
+
+            if let tag = pinned_tag(compiler_version) then
+                return _fetched(cache.fetch_tag(repository(), tag), null, tag)
+            fi
+
+            return null
+        si
+
+        _fetched(outcome: CacheOutcome, directory: string?, tag: string) -> LibraryOutcome static is
+            if let problem: CacheOutcome.PROBLEM = outcome then
+                return LibraryOutcome.PROBLEM(problem.message)
+            fi
+
+            let found = cast CacheOutcome.FOUND(outcome)
+            let version = if tag.starts_with("v") then tag.substring(1) else tag fi
+
+            return _read(if let sub: string = directory then Path.join([found.directory, sub]) else found.directory fi, version)
+        si
+
+        // The library in `root`, with the sources its source list names.
+        _read(root: string, version: string) -> LibraryOutcome static is
+            let list_path = Path.join([root, SOURCE_LIST])
+
+            if !File.exists(list_path) then
+                return LibraryOutcome.PROBLEM("{NAME} at {root} has no {SOURCE_LIST}")
+            fi
+
+            let files = LIST[string]()
+
+            for line in File.read_all_lines(list_path) do
+                let entry = line.trim()
+
+                if entry.length > 0 then
+                    files.add(Path.get_full_path(Path.join([root, entry])))
+                fi
+            od
+
+            return LibraryOutcome.FOUND(SOURCE_LIBRARY(NAME, version, root, files))
+        si
+    si
+si

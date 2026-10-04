@@ -124,11 +124,47 @@ without it, the newest installed is used.
 The `dotnet` target writes `<name>.exe` (or `<name>.dll` for a library), with
 `ghul-runtime.dll` beside it, and runs with `dotnet`. The `wasm` target writes
 a WebAssembly module and the JavaScript loader the compiler puts beside it,
-and runs under Node.js. A wasm build compiles in ghul-core, the library that
-gives the built-in types their members, fetched from Git into
-`~/.cache/ghul-cli/libraries` at the release this tool pins for the compiler
-in use. Declaring `ghul-core` in the manifest's `dependencies`, at a `tag` or
-a `path`, uses that instead. No other dependencies are supported yet.
+and runs under Node.js 22 or newer. A wasm build compiles in two libraries,
+fetched from Git into `~/.cache/ghul-cli/libraries` at the releases this tool
+pins for the compiler in use: ghul-core, which gives the built-in types their
+members, and then ghul-runtime, which supplies the pipes and the rest of
+`Ghul`. Declaring `ghul-core` or `ghul-runtime` in the manifest's
+`dependencies`, at a `tag` or a `path`, uses that instead. No other
+dependencies are supported yet.
+
+### hello world on WebAssembly
+
+In an empty directory, write a manifest, `ghul-project.json`, and one source
+file:
+
+```json
+{
+    "name": "hello",
+    "kind": "program",
+    "targets": ["dotnet", "wasm"],
+    "sources": ["src/**/*.ghul"]
+}
+```
+
+```ghul
+use IO.Std.write_line
+
+entry() is
+    write_line("hello")
+si
+```
+
+Save the second as `src/hello.ghul`, then build and run it for either target:
+
+```sh
+ghul run --target wasm      # builds into out/wasm/ and runs it under Node.js
+ghul run --target dotnet    # builds into out/dotnet/ and runs it with dotnet
+```
+
+The first build installs the compiler and fetches the libraries; later builds
+reuse them. A project's sources get no implicit imports, so they `use` what
+they call, or start with `use default` for `write_line`, the pipes and the
+collections.
 
 ## tools for editors
 

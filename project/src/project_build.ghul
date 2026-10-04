@@ -28,9 +28,9 @@ namespace Ghul.Project is
         si
 
         /// The source libraries a build of `project` compiles in: the core
-        /// library for the wasm target, and nothing for `dotnet`. Null, with
-        /// the problem reported to `say`, where the core library cannot be
-        /// found.
+        /// library and then the runtime library for the wasm target, and
+        /// nothing for `dotnet`. Null, with the problem reported to `say`,
+        /// where either cannot be found.
         ///
         /// - project: the project being built
         /// - compiler_version: the compiler the build uses
@@ -50,12 +50,23 @@ namespace Ghul.Project is
 
             let found = CORE_LIBRARY.find(project.manifest, project.directory, compiler_version, cache)
 
-            if let problem: CoreOutcome.PROBLEM = found then
+            if let problem: LibraryOutcome.PROBLEM = found then
                 say(problem.message)
                 return null
             fi
 
-            result.add(cast CoreOutcome.FOUND(found).library)
+            result.add(cast LibraryOutcome.FOUND(found).library)
+
+            let runtime = RUNTIME_LIBRARY.find(project.manifest, project.directory, compiler_version, cache)
+
+            if let problem: LibraryOutcome.PROBLEM = runtime then
+                say(problem.message)
+                return null
+            fi
+
+            if let library: LibraryOutcome.FOUND = runtime then
+                result.add(library.library)
+            fi
 
             return result
         si
