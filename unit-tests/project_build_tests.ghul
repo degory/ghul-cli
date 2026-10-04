@@ -14,6 +14,9 @@ namespace Ghul.Cli.Tests is
     use Ghul.Project.PROJECT_LOADER
     use Ghul.Project.PROJECT_RUN
     use Ghul.Project.RESPONSE_FILE
+    use Ghul.Project.EDITOR_FILES
+    use Ghul.Project.COMPILER_PROCESS
+    use Ghul.Project.RESPONSE_FILE_COMMAND_LINE
 
     use Assert = Microsoft.VisualStudio.TestTools.UnitTesting.Assert;
     use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
@@ -112,6 +115,34 @@ namespace Ghul.Cli.Tests is
             _same(
                 "-o\n\"/a path/out.exe\"\n'say \"hi\"'\nplain.ghul\n\"\"\n",
                 RESPONSE_FILE.text(LIST[string](["-o", "/a path/out.exe", "say \"hi\"", "plain.ghul", ""])))
+        si
+
+        @Test()
+        an_editor_response_file_holds_a_group_a_line() is
+            let groups = LIST[Collections.List[string]]([
+                LIST[string](["--define", "X"]),
+                LIST[string](["--library-source", "core@1.0.0=/a b"]),
+                LIST[string](["/a b/c.ghul"])
+            ])
+
+            _same("--define X\n--library-source \"core@1.0.0=/a b\"\n\"/a b/c.ghul\"\n", EDITOR_FILES.response_file_text(groups))
+        si
+
+        @Test()
+        the_compiler_command_is_one_line() is
+            _same(
+                "dotnet \"/a path/ghul.dll\"",
+                EDITOR_FILES.command_line(COMPILER_PROCESS("dotnet", LIST[string](["/a path/ghul.dll"]))))
+        si
+
+        @Test()
+        a_response_file_command_needs_an_output() is
+            _same("--output is required", RESPONSE_FILE_COMMAND_LINE.parse(LIST[string](["--target", "wasm"])).problem ?? "")
+
+            let parsed = RESPONSE_FILE_COMMAND_LINE.parse(LIST[string](["--output", "r", "--source-globs", "g", "--target", "wasm"]))
+
+            assert !parsed.problem?
+            _same("r g wasm", "{parsed.output} {parsed.source_globs} {parsed.target}")
         si
 
         @Test()

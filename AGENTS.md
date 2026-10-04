@@ -174,7 +174,10 @@ looks for them.
   tag pinned per compiler version unless the manifest declares it, through
   `LIBRARY_CACHE` (a tag fetched by `GIT` into a read-only per-user cache
   entry, found again with no `git` call). `FILE_LOCK` is the advisory lock
-  the cache and the CLI's script cache share. The lockfile, transitive
+  the cache and the CLI's script cache share. `EDITOR_FILES` writes what
+  `ghul project response-file` hands an editor (the build's option groups
+  from `COMPILER_ARGUMENTS.option_groups`, one a line, and the manifest's
+  globs) and the one-line compiler command `ghul project compiler` prints. The lockfile, transitive
   dependencies and dependencies other than ghul-core are the tasks under
   ghul-lang/ghul#3211 still to come.
 - `unit-tests/` — MSTest project covering the pure path/cache-key/

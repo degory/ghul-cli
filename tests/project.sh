@@ -144,6 +144,32 @@ if err="$(cd "$empty" && dotnet "$cli" build 2>&1)"; then
 fi
 [[ "$err" == *"ghul: no ghul-project.json in $empty"* ]] || fail "unexpected message for no manifest: $err"
 
+echo "project: the editor files round-trip through the compiler ghul names..." >&2
+response_file="$scratch/editor.rsp"
+globs_file="$scratch/editor.globs"
+(cd "$program" && dotnet "$cli" project response-file --output "$response_file" --source-globs "$globs_file") >&2 \
+    || fail "ghul project response-file failed"
+check "$(cat "$globs_file")" "src/**/*.ghul" "source globs file"
+grep -q -- '^-o' "$response_file" && fail "the response file should not hold the output"
+grep -q 'main.ghul' "$response_file" && fail "the response file should not hold the project's sources"
+compiler="$(cd "$program" && dotnet "$cli" project compiler 2>/dev/null)"
+[[ -n "$compiler" ]] || fail "ghul project compiler printed nothing"
+editor_build="$scratch/editor-build"
+mkdir -p "$editor_build"
+(cd "$program" && eval "$compiler" "@$response_file" src/main.ghul src/greeting.ghul -o "$editor_build/greeter.exe") >&2 \
+    || fail "the compiler ghul named did not compile the project's sources with the response file"
+[[ -f "$editor_build/greeter.exe" ]] || fail "expected the editor round trip to produce greeter.exe"
+
+echo "project: the editor files report a manifest's problems..." >&2
+if err="$(cd "$broken" && dotnet "$cli" project response-file --output "$scratch/x.rsp" 2>&1)"; then
+    fail "expected ghul project response-file to fail on a bad manifest"
+fi
+[[ "$err" == *"ghul: ghul-project.json: name:"* ]] || fail "unexpected message from ghul project response-file: $err"
+if err="$(cd "$broken" && dotnet "$cli" project compiler 2>&1)"; then
+    fail "expected ghul project compiler to fail on a bad manifest"
+fi
+[[ "$err" == *"ghul: ghul-project.json: name:"* ]] || fail "unexpected message from ghul project compiler: $err"
+
 if [[ "${GHUL_PROJECT_TEST_WASM:-}" == "1" ]]; then
     echo "project: a wasm program builds with the core library and runs under Node..." >&2
     wasm="$scratch/wasm-greeter"
