@@ -53,8 +53,8 @@ ghul [--no-cache] [--] <script> [args...]   # run a script (see below)
 ghul run [--no-cache] <script> [args...]    # run any file as a script
 ghul compile [--no-cache] <script.ghul>     # compile, and print the path to the result
 ghul new <name> [--target <names>]           # create a project to build and run
-ghul build [--target <name>]                # build the project in this directory
-ghul run [--target <name>] [-- args...]     # build the project, then run it
+ghul build [--target <name>] [overrides]    # build the project in this directory
+ghul run [--target <name>] [overrides] [-- args...]  # build the project, then run it
 ghul project response-file|compiler         # what editors read (see below)
 ghul install-compiler [version]             # install or update ghul.compiler
 ghul cache clear                            # empty the compiled-script cache
@@ -136,6 +136,15 @@ dependencies are supported yet.
 A wasm build needs `ghul.compiler` 64.15.0 or newer. Where the newest
 installed is older, the build installs the newest release and uses that; a
 manifest whose `compiler` names an older version is an error.
+
+Two options override the manifest for one build, which is how a repository
+tests its own checkout. `--compiler <command>` builds with the command given,
+such as `dotnet /path/to/publish/ghul.dll`, in place of an installed compiler;
+the libraries pinned for it are chosen by the version it prints when run with
+no arguments. `--library <name>=<path>`, which can be given more than once,
+compiles the source library `name` (`ghul-core` or `ghul-runtime`) from the
+directory at `path`. Both work with `build`, `run` and `ghul project
+response-file`, and `--compiler` with `ghul project compiler`.
 
 ### hello world on WebAssembly
 

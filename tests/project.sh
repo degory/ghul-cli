@@ -194,6 +194,28 @@ GHUL
 out="$(cd "$wasm" && dotnet "$cli" run 2>/dev/null)" || fail "ghul run of a wasm program with use default failed"
 check "$out" "hello with use default" "wasm run output with use default"
 
+echo "project: --library builds a wasm program against library checkouts..." >&2
+git clone -q --depth 1 https://github.com/ghul-lang/ghul-core "$scratch/core-checkout"
+git clone -q --depth 1 https://github.com/ghul-lang/ghul-runtime "$scratch/runtime-checkout"
+out="$(cd "$wasm" && dotnet "$cli" run --library "ghul-core=$scratch/core-checkout" \
+    --library "ghul-runtime=$scratch/runtime-checkout" 2>/dev/null)" \
+    || fail "ghul run with --library failed"
+check "$out" "hello with use default" "wasm run output with --library"
+
+if err="$(cd "$wasm" && dotnet "$cli" build --library "ghul-core=$scratch/no-such-core" 2>&1)"; then
+    fail "expected --library naming a missing directory to fail"
+fi
+[[ "$err" == *"no-such-core"* ]] || fail "unexpected message for a missing library directory: $err"
+
+echo "project: --compiler builds with the command given..." >&2
+compiler="$(cd "$wasm" && dotnet "$cli" project compiler)"
+out="$(cd "$wasm" && dotnet "$cli" run --compiler "$compiler" 2>/dev/null)" || fail "ghul run with --compiler failed"
+check "$out" "hello with use default" "wasm run output with --compiler"
+
+if (cd "$wasm" && dotnet "$cli" build --compiler /bin/false >/dev/null 2>&1); then
+    fail "expected a build with --compiler /bin/false to fail"
+fi
+
 echo "project: ghul new creates a project that builds and runs on both targets..." >&2
 (cd "$scratch" && dotnet "$cli" new scaffolded --target dotnet,wasm 2>/dev/null) || fail "ghul new failed"
 [[ -f "$scratch/scaffolded/.gitignore" ]] || fail "ghul new wrote no .gitignore"

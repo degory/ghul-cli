@@ -772,21 +772,21 @@ namespace Ghul.Cli is
             return 1
         fi
 
-        let project = cast Ghul.Project.LoadOutcome.LOADED(loaded).project
+        let as_loaded = cast Ghul.Project.LoadOutcome.LOADED(loaded).project
+        let overrides = command_line.overrides
+
+        let project =
+            Ghul.Project.LOADED_PROJECT(overrides.apply(as_loaded.manifest), as_loaded.directory, as_loaded.target)
+
         let store = Host.COMPILER_STORE.for_this_user()
 
-        if let compiler_version: string = project_compiler(store, project, say) then
-            let command = store.command(compiler_version)
-
-            let compiler =
-                Ghul.Project.COMPILER_PROCESS(command.file_name, Collections.LIST[string](command.leading_arguments()))
-
+        if let (compiler, compiler_version, runtime_assembly) = build_compiler(store, project, overrides, say) then
             let exit_code =
                 Ghul.Project.PROJECT_BUILD.build(
                     project,
                     compiler,
                     compiler_version,
-                    store.runtime_assembly(compiler_version),
+                    runtime_assembly,
                     Ghul.Project.LIBRARY_CACHE.for_this_user(),
                     say)
 
@@ -808,6 +808,93 @@ namespace Ghul.Cli is
 
     // The compiler a project build uses, installed if need be, or null
     // with the reason reported to `say`.
+    // The compiler a project build runs, its version and the runtime
+    // assembly beside it: the command `--compiler` gave, or one installed
+    // for the project. Null, with the reason reported to `say`, where none
+    // can be had.
+    build_compiler(
+        store: Host.COMPILER_STORE,
+        project: Ghul.Project.LOADED_PROJECT,
+        overrides: Ghul.Project.BUILD_OVERRIDES,
+        say: (string) -> void
+    ) -> (compiler: Ghul.Project.COMPILER_PROCESS, version: string, runtime_assembly: string?)? is
+        if let command: string = overrides.compiler_command then
+            let words = Ghul.Project.BUILD_OVERRIDES.command_words(command)
+            let compiler = Ghul.Project.COMPILER_PROCESS(words[0], Collections.LIST[string](words[1..<0]))
+            let version = compiler_command_version(words) ?? "0.0.0"
+
+            return (compiler, version, Ghul.Project.BUILD_OVERRIDES.runtime_assembly_beside(command))
+        fi
+
+        if let version: string = project_compiler(store, project, say) then
+            let command = store.command(version)
+
+            let compiler =
+                Ghul.Project.COMPILER_PROCESS(command.file_name, Collections.LIST[string](command.leading_arguments()))
+
+            return (compiler, version, store.runtime_assembly(version))
+        fi
+
+        return null
+    si
+
+    // The compiler an editor analyses a project with: the command
+    // `--compiler` gave, or the one the manifest names, installed if need be.
+    tool_compiler(
+        store: Host.COMPILER_STORE,
+        manifest: Ghul.Project.MANIFEST,
+        overrides: Ghul.Project.BUILD_OVERRIDES
+    ) -> (compiler: Ghul.Project.COMPILER_PROCESS, version: string, runtime_assembly: string?)? is
+        if let command: string = overrides.compiler_command then
+            let words = Ghul.Project.BUILD_OVERRIDES.command_words(command)
+            let compiler = Ghul.Project.COMPILER_PROCESS(words[0], Collections.LIST[string](words[1..<0]))
+
+            return (compiler, compiler_command_version(words) ?? "0.0.0", Ghul.Project.BUILD_OVERRIDES.runtime_assembly_beside(command))
+        fi
+
+        if let version: string = ensure_compiler_installed(store, manifest.compiler_version, false) then
+            let command = store.command(version)
+
+            let compiler =
+                Ghul.Project.COMPILER_PROCESS(command.file_name, Collections.LIST[string](command.leading_arguments()))
+
+            return (compiler, version, store.runtime_assembly(version))
+        fi
+
+        return null
+    si
+
+    // What a compiler command prints as its version when run with no
+    // arguments, or null where it prints none or cannot be run.
+    compiler_command_version(words: Collections.List[string]) -> string? is
+        try
+            let start_info = System.Diagnostics.ProcessStartInfo()
+
+            start_info.file_name = words[0]
+            start_info.use_shell_execute = false
+            start_info.redirect_standard_output = true
+            start_info.redirect_standard_error = true
+
+            for word in words[1..<0] do
+                start_info.argument_list.add(word)
+            od
+
+            let process = System.Diagnostics.Process.start(start_info)
+
+            if !process? then
+                return null
+            fi
+
+            let output = process.standard_output.read_to_end()
+
+            process.wait_for_exit()
+
+            return Ghul.Project.BUILD_OVERRIDES.version_in(output)
+        catch ex: System.Exception
+            return null
+        yrt
+    si
+
     project_compiler(store: Host.COMPILER_STORE, project: Ghul.Project.LOADED_PROJECT, say: (string) -> void) -> string? is
         let choice =
             Ghul.Project.COMPILER_CHOICE.choose(project.target, project.manifest.compiler_version, store.highest_version())
@@ -847,15 +934,10 @@ namespace Ghul.Cli is
         fi
 
         let wants_response_file = rest[0] =~ "response-file"
-        let options = Ghul.Project.RESPONSE_FILE_COMMAND_LINE.parse(rest[1..<0])
+        let options = Ghul.Project.RESPONSE_FILE_COMMAND_LINE.parse(rest[1..<0], wants_response_file)
 
-        if wants_response_file then
-            if let problem: string = options.problem then
-                say(problem)
-                return 1
-            fi
-        elif rest.count > 1 then
-            say("unexpected argument {rest[1]}")
+        if let problem: string = options.problem then
+            say(problem)
             return 1
         fi
 
@@ -873,12 +955,7 @@ namespace Ghul.Cli is
 
         let store = Host.COMPILER_STORE.for_this_user()
 
-        if let compiler_version: string = ensure_compiler_installed(store, manifest.compiler_version, false) then
-            let command = store.command(compiler_version)
-
-            let compiler =
-                Ghul.Project.COMPILER_PROCESS(command.file_name, Collections.LIST[string](command.leading_arguments()))
-
+        if let (compiler, compiler_version, _) = tool_compiler(store, manifest, options.overrides) then
             if !wants_response_file then
                 Std.out.write_line(Ghul.Project.EDITOR_FILES.command_line(compiler))
                 return 0
@@ -894,7 +971,11 @@ namespace Ghul.Cli is
                 return 1
             fi
 
-            let project = cast Ghul.Project.LoadOutcome.LOADED(loaded).project
+            let as_loaded = cast Ghul.Project.LoadOutcome.LOADED(loaded).project
+
+            let project =
+                Ghul.Project.LOADED_PROJECT(
+                    options.overrides.apply(as_loaded.manifest), as_loaded.directory, as_loaded.target)
 
             if Ghul.Project.EDITOR_FILES.write(
                 project,
