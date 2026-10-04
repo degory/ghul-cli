@@ -885,9 +885,13 @@ namespace Ghul.Cli is
                 return null
             fi
 
+            // Standard error is drained alongside standard output, so a command
+            // that writes enough to it to fill the pipe cannot block the read.
+            let errors = process.standard_error.read_to_end_async()
             let output = process.standard_output.read_to_end()
 
             process.wait_for_exit()
+            errors.wait()
 
             return Ghul.Project.BUILD_OVERRIDES.version_in(output)
         catch ex: System.Exception
