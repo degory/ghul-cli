@@ -20,7 +20,7 @@ namespace Ghul.Cli.Tests is
         init() is si
 
         _scratch() -> string =>
-            Path.combine(Path.get_temp_path(), "ghul-library-cache-{System.Guid.new_guid().to_string("N")}")
+            Path.combine(Path.get_temp_path(), "ghul-lc-{System.Guid.new_guid().to_string("N").substring(0, 8)}")
 
         _git(directory: string, arguments: string[]) is
             let result = GIT.run(LIST[string](arguments), directory)
@@ -175,6 +175,21 @@ namespace Ghul.Cli.Tests is
             finally
                 _delete(scratch)
             yrt
+        si
+
+        @Test()
+        a_short_url_names_its_directory_as_written() is
+            assert LIBRARY_CACHE.repository_directory_name("https://github.com/ghul-lang/ghul-core") =~ "https___github.com_ghul-lang_ghul-core"
+        si
+
+        @Test()
+        a_long_url_keeps_its_start_and_a_hash_of_the_whole() is
+            let first = LIBRARY_CACHE.repository_directory_name("https://example.com/a/very/long/path/to/one/repository.git")
+            let second = LIBRARY_CACHE.repository_directory_name("https://example.com/a/very/long/path/to/another/repository.git")
+
+            assert first.length <= 48 else first
+            assert first.starts_with("https___example.com_a_very_long_") else first
+            assert first !~ second
         si
 
         @Test()
