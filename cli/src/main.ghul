@@ -775,7 +775,7 @@ namespace Ghul.Cli is
         let project = cast Ghul.Project.LoadOutcome.LOADED(loaded).project
         let store = Host.COMPILER_STORE.for_this_user()
 
-        if let compiler_version: string = ensure_compiler_installed(store, project.manifest.compiler_version, false) then
+        if let compiler_version: string = project_compiler(store, project, say) then
             let command = store.command(compiler_version)
 
             let compiler =
@@ -804,6 +804,35 @@ namespace Ghul.Cli is
 
         say("could not install ghul.compiler")
         return 1
+    si
+
+    // The compiler a project build uses, installed if need be, or null
+    // with the reason reported to `say`.
+    project_compiler(store: Host.COMPILER_STORE, project: Ghul.Project.LOADED_PROJECT, say: (string) -> void) -> string? is
+        let choice =
+            Ghul.Project.COMPILER_CHOICE.choose(project.target, project.manifest.compiler_version, store.highest_version())
+
+        if let problem: Ghul.Project.CompilerChoice.PROBLEM = choice then
+            say(problem.message)
+            return null
+        fi
+
+        if let newest: Ghul.Project.CompilerChoice.NEWEST = choice then
+            say(
+                "ghul.compiler {newest.installed} is too old for the wasm target, "
+                "which needs {Ghul.Project.CORE_LIBRARY.MINIMUM_COMPILER} or newer; installing the newest")
+
+            return update_compiler_to_latest(store)
+        fi
+
+        let requested = cast Ghul.Project.CompilerChoice.REQUESTED(choice)
+
+        if let version = ensure_compiler_installed(store, requested.version, false) then
+            return version
+        fi
+
+        say("could not install ghul.compiler")
+        return null
     si
 
     // `ghul project response-file` and `ghul project compiler`: what an
