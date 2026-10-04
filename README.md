@@ -52,6 +52,7 @@ where none is named, the highest installed is the one used.
 ghul [--no-cache] [--] <script> [args...]   # run a script (see below)
 ghul run [--no-cache] <script> [args...]    # run any file as a script
 ghul compile [--no-cache] <script.ghul>     # compile, and print the path to the result
+ghul new <name> [--target <names>]           # create a project to build and run
 ghul build [--target <name>]                # build the project in this directory
 ghul run [--target <name>] [-- args...]     # build the project, then run it
 ghul project response-file|compiler         # what editors read (see below)
@@ -68,7 +69,7 @@ is a file whose name ends in `.ghul`, or an executable file that starts with
 `ghul run` runs the file it is given, whatever the file looks like. A
 `#!/usr/bin/env ghul` line runs the script this way.
 
-To run a script named `run`, `compile`, `cache`, `install-compiler` or
+To run a script named `run`, `new`, `compile`, `cache`, `install-compiler` or
 `version`, write `ghul -- <name>`.
 
 `ghul compile` compiles the script and prints the path to the compiled
@@ -134,17 +135,19 @@ dependencies are supported yet.
 
 ### hello world on WebAssembly
 
-In an empty directory, write a manifest, `ghul-project.json`, and one source
-file:
+`ghul new` creates a project, then `ghul run` builds and runs it:
 
-```json
-{
-    "name": "hello",
-    "kind": "program",
-    "targets": ["dotnet", "wasm"],
-    "sources": ["src/**/*.ghul"]
-}
+```sh
+ghul new hello --target dotnet,wasm
+cd hello
+ghul run --target wasm      # builds into out/wasm/ and runs it under Node.js
+ghul run --target dotnet    # builds into out/dotnet/ and runs it with dotnet
 ```
+
+`--target` takes `dotnet`, `wasm` or `dotnet,wasm`, and defaults to `dotnet`.
+The new directory holds the manifest, `ghul-project.json`; `src/main.ghul`,
+whose entry writes `hello`; and a `.gitignore` for `out/`. A directory that
+already exists and is not empty is refused. The program is:
 
 ```ghul
 use IO.Std.write_line
@@ -152,13 +155,6 @@ use IO.Std.write_line
 entry() is
     write_line("hello")
 si
-```
-
-Save the second as `src/hello.ghul`, then build and run it for either target:
-
-```sh
-ghul run --target wasm      # builds into out/wasm/ and runs it under Node.js
-ghul run --target dotnet    # builds into out/dotnet/ and runs it with dotnet
 ```
 
 The first build installs the compiler and fetches the libraries; later builds

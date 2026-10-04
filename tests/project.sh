@@ -194,4 +194,18 @@ GHUL
 out="$(cd "$wasm" && dotnet "$cli" run 2>/dev/null)" || fail "ghul run of a wasm program with use default failed"
 check "$out" "hello with use default" "wasm run output with use default"
 
+echo "project: ghul new creates a project that builds and runs on both targets..." >&2
+(cd "$scratch" && dotnet "$cli" new scaffolded --target dotnet,wasm 2>/dev/null) || fail "ghul new failed"
+[[ -f "$scratch/scaffolded/.gitignore" ]] || fail "ghul new wrote no .gitignore"
+out="$(cd "$scratch/scaffolded" && dotnet "$cli" run --target dotnet 2>/dev/null)" || fail "ghul run of a new project failed on dotnet"
+check "$out" "hello" "new project output on dotnet"
+out="$(cd "$scratch/scaffolded" && dotnet "$cli" run --target wasm 2>/dev/null)" || fail "ghul run of a new project failed on wasm"
+check "$out" "hello" "new project output on wasm"
+
+echo "project: ghul new refuses a directory that is not empty..." >&2
+if err="$(cd "$scratch" && dotnet "$cli" new scaffolded 2>&1)"; then
+    fail "expected ghul new to refuse a non-empty directory"
+fi
+[[ "$err" == *"ghul: scaffolded already exists and is not empty"* ]] || fail "unexpected message from ghul new: $err"
+
 echo "project: all checks passed" >&2

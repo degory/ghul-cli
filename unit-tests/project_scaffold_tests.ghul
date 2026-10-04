@@ -1,0 +1,71 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+
+    use Ghul.Project.BuildTarget
+    use Ghul.Project.MANIFEST_READER
+    use Ghul.Project.PROJECT_SCAFFOLD
+    use Ghul.Project.ReadOutcome
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    // What `ghul new` reads from its arguments, and the project it writes.
+    @TestClass()
+    class PROJECT_SCAFFOLD_TESTS is
+        init() is si
+
+        _same(expected: string, actual: string) is
+            assert actual =~ expected else "expected '{expected}', got '{actual}'"
+        si
+
+        _targets(targets: Collections.List[BuildTarget]) -> string =>
+            string.join(",", targets |> Ghul.Pipes.map(t => if t == BuildTarget.WASM then "wasm" else "dotnet" fi))
+
+        @Test()
+        a_name_alone_targets_dotnet() is
+            let parsed = PROJECT_SCAFFOLD.parse(LIST[string](["hello"]))
+
+            assert !parsed.problem?
+            _same("hello", parsed.directory ?? "")
+            _same("dotnet", _targets(parsed.targets))
+        si
+
+        @Test()
+        target_names_both_targets_in_the_order_given() is
+            let parsed = PROJECT_SCAFFOLD.parse(LIST[string](["--target", "wasm,dotnet", "hello"]))
+
+            assert !parsed.problem?
+            _same("wasm,dotnet", _targets(parsed.targets))
+        si
+
+        @Test()
+        an_unknown_target_a_missing_name_or_a_second_name_is_a_problem() is
+            _same("unknown target java; expected dotnet or wasm", PROJECT_SCAFFOLD.parse(LIST[string](["x", "--target", "java"])).problem ?? "")
+            _same("a project name is needed", PROJECT_SCAFFOLD.parse(LIST[string]()).problem ?? "")
+            _same("expected one project name, not y as well", PROJECT_SCAFFOLD.parse(LIST[string](["x", "y"])).problem ?? "")
+            _same("--target needs dotnet, wasm or dotnet,wasm", PROJECT_SCAFFOLD.parse(LIST[string](["x", "--target"])).problem ?? "")
+        si
+
+        @Test()
+        the_manifest_reads_back_as_a_program_with_the_targets_asked_for() is
+            let text = PROJECT_SCAFFOLD.manifest_text("hello", LIST[BuildTarget]([BuildTarget.DOTNET, BuildTarget.WASM]))
+            let read = MANIFEST_READER.read(text, "ghul-project.json")
+
+            assert isa ReadOutcome.OK(read) else "the scaffold's manifest does not read back"
+
+            let manifest = cast ReadOutcome.OK(read).manifest
+
+            _same("hello", manifest.name)
+            _same("dotnet,wasm", _targets(manifest.targets))
+        si
+
+        @Test()
+        a_project_holds_a_manifest_a_hello_program_and_a_gitignore() is
+            let files = PROJECT_SCAFFOLD.files("hello", LIST[BuildTarget]([BuildTarget.DOTNET]))
+
+            _same("ghul-project.json src/main.ghul .gitignore", string.join(" ", files |> Ghul.Pipes.map(f => f.path.replace('\\', '/'))))
+            _same("out/\n", files[2].text)
+            assert files[1].text.contains("write_line(\"hello\")")
+        si
+    si
+si
