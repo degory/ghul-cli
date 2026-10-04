@@ -82,6 +82,7 @@ unit test.
   "this looks like data" — a change to its extension/shebang/executable-bit
   logic changes what a bare `ghul <file>` will silently refuse or accept,
   which is worth being deliberate about.
+- **Doc comments on the stable surface.** For the shared doc-comment rule, the stable surface here is the `ghul` command line: its verbs, options and output contract.
 
 ## Versioning
 
