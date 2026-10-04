@@ -55,52 +55,70 @@ namespace Ghul.Project is
             libraries: Collections.List[SOURCE_LIBRARY]
         ) -> Collections.List[string] static is
             let result = LIST[string]()
+
+            for group in option_groups(manifest, target, libraries) do
+                for argument in group do
+                    result.add(argument)
+                od
+            od
+
+            return result
+        si
+
+        /// The same arguments as `options`, grouped as an editor's response
+        /// file writes them: each flag with its value, and each source
+        /// library file on its own.
+        ///
+        /// - manifest: the project being built
+        /// - target: what the build produces
+        /// - libraries: source libraries compiled into the build
+        option_groups(
+            manifest: MANIFEST,
+            target: BuildTarget,
+            libraries: Collections.List[SOURCE_LIBRARY]
+        ) -> Collections.List[Collections.List[string]] static is
+            let result = LIST[Collections.List[string]]()
             let options = manifest.options
 
+            let add = (group: string[]) -> void => result.add(LIST[string](group))
+
             if let access = options.underscore_access then
-                result.add("--underscore-access")
-                result.add(access)
+                add(["--underscore-access", access])
             fi
 
             if options.global_namespace then
-                result.add("--global-namespace")
+                add(["--global-namespace"])
             fi
 
             if options.default_use.count > 0 then
-                result.add("--default-use")
-                result.add(string.join(",", options.default_use))
+                add(["--default-use", string.join(",", options.default_use)])
             fi
 
             for symbol in options.define do
-                result.add("--define")
-                result.add(symbol)
+                add(["--define", symbol])
             od
 
             if options.suppress.count > 0 then
-                result.add("--suppress")
-                result.add(string.join(",", options.suppress))
+                add(["--suppress", string.join(",", options.suppress)])
             fi
 
             if options.warn_as_error.count > 0 then
-                result.add("--warn-as-error")
-                result.add(string.join(",", options.warn_as_error))
+                add(["--warn-as-error", string.join(",", options.warn_as_error)])
             fi
 
             if manifest.kind == ManifestKind.LIBRARY then
-                result.add("--library")
+                add(["--library"])
             fi
 
             if target != BuildTarget.DOTNET then
-                result.add("--target")
-                result.add(target_name(target))
+                add(["--target", target_name(target)])
             fi
 
             for library in libraries do
-                result.add("--library-source")
-                result.add("{library.name}@{library.version}={library.root}")
+                add(["--library-source", "{library.name}@{library.version}={library.root}"])
 
                 for file in library.files do
-                    result.add(file)
+                    add([file])
                 od
             od
 
