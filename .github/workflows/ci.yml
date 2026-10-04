@@ -76,6 +76,9 @@ jobs:
     - name: Run smoke test
       run: ./tests/smoke.sh
 
+    - name: Run the project test
+      run: ./tests/project.sh
+
     - name: Run the Jupyter kernel test
       run: ./tests/jupyter.sh
 
