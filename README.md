@@ -52,6 +52,8 @@ where none is named, the highest installed is the one used.
 ghul [--no-cache] [--] <script> [args...]   # run a script (see below)
 ghul run [--no-cache] <script> [args...]    # run any file as a script
 ghul compile [--no-cache] <script.ghul>     # compile, and print the path to the result
+ghul build [--target <name>]                # build the project in this directory
+ghul run [--target <name>] [-- args...]     # build the project, then run it
 ghul install-compiler [version]             # install or update ghul.compiler
 ghul cache clear                            # empty the compiled-script cache
 ghul repl [--no-server] [--no-default-use]  # start an interactive session
@@ -93,6 +95,39 @@ curl -fsSL https://example.com/greet.ghul | ghul -
 result for it. Write it before the script, or before `run` or `compile`. Use
 it when a cached result looks wrong. `ghul cache clear` empties the whole
 cache.
+
+## projects
+
+A directory holding a `ghul-project.json` is a project. The manifest names
+the project, says whether it is a program or a library, which targets it
+builds for and where its sources are:
+
+```json
+{
+    "name": "greeter",
+    "kind": "program",
+    "targets": ["dotnet", "wasm"],
+    "sources": ["src/**/*.ghul"]
+}
+```
+
+`ghul build` builds the project in the current directory into
+`out/<target>/`. `ghul run` builds it and then runs it, passing the arguments
+after `--` to the program; `ghul run <script>` still runs a script, project
+or not. A manifest that lists more than one target needs `--target` to say
+which. The compiler's messages go to standard error, and a failed build exits
+with the compiler's status. `compiler` in the manifest names the
+`ghul.compiler` version to build with, which is installed if need be;
+without it, the newest installed is used.
+
+The `dotnet` target writes `<name>.exe` (or `<name>.dll` for a library), with
+`ghul-runtime.dll` beside it, and runs with `dotnet`. The `wasm` target writes
+a WebAssembly module and the JavaScript loader the compiler puts beside it,
+and runs under Node.js. A wasm build compiles in ghul-core, the library that
+gives the built-in types their members, fetched from Git into
+`~/.cache/ghul-cli/libraries` at the release this tool pins for the compiler
+in use. Declaring `ghul-core` in the manifest's `dependencies`, at a `tag` or
+a `path`, uses that instead. No other dependencies are supported yet.
 
 ## the REPL
 

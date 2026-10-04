@@ -1,0 +1,37 @@
+namespace Ghul.Project is
+    use Collections.LIST
+
+    /// The compiler's arguments as the text of a response file, which the
+    /// compiler reads from `@<path>` in place of a command line that could
+    /// be too long for the system.
+    class RESPONSE_FILE is
+        /// One argument a line. An argument holding white space is quoted,
+        /// with single quotes where it holds a double quote.
+        ///
+        /// - arguments: the compiler's arguments, in order
+        text(arguments: Collections.List[string]) -> string static is
+            let lines = LIST[string]()
+
+            for argument in arguments do
+                lines.add(quoted(argument))
+            od
+
+            return "{string.join("\n", lines)}\n"
+        si
+
+        /// One argument as the compiler reads it back from a response file.
+        quoted(argument: string) -> string static is
+            let needs_quotes = argument.length == 0 \/ (argument |> Ghul.Pipes.any(c => char.is_white_space(c) \/ c == '"' \/ c == '\''))
+
+            if !needs_quotes then
+                return argument
+            fi
+
+            if argument.contains('"') then
+                return "'{argument}'"
+            fi
+
+            return "\"{argument}\""
+        si
+    si
+si

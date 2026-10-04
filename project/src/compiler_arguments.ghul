@@ -1,0 +1,114 @@
+namespace Ghul.Project is
+    use Collections.LIST
+
+    /// A library compiled from source into a build: its name and version,
+    /// the directory its files are under, and those files.
+    class SOURCE_LIBRARY(
+        name: string,
+        version: string,
+        root: string,
+        files: Collections.List[string]
+    ) is si
+
+    /// The compiler's command line for building a project. This is the
+    /// only place it is put together, so a build and an editor reading
+    /// the project are given the same options.
+    class COMPILER_ARGUMENTS is
+        /// The arguments that build `manifest` for `target` into `output`:
+        /// the options, then `-o` and the output, then `sources`.
+        ///
+        /// - manifest: the project being built
+        /// - target: what the build produces
+        /// - libraries: source libraries compiled into the build
+        /// - output: the file the compiler writes
+        /// - sources: the project's own source files
+        for_build(
+            manifest: MANIFEST,
+            target: BuildTarget,
+            libraries: Collections.List[SOURCE_LIBRARY],
+            output: string,
+            sources: Collections.List[string]
+        ) -> Collections.List[string] static is
+            let result = LIST[string](options(manifest, target, libraries))
+
+            result.add("-o")
+            result.add(output)
+
+            for source in sources do
+                result.add(source)
+            od
+
+            return result
+        si
+
+        /// Everything but the output and the project's own sources: each
+        /// option the manifest sets, `--library` for a library, `--target`
+        /// for a target other than `dotnet`, and each source library as a
+        /// `--library-source` declaration followed by its files.
+        ///
+        /// - manifest: the project being built
+        /// - target: what the build produces
+        /// - libraries: source libraries compiled into the build
+        options(
+            manifest: MANIFEST,
+            target: BuildTarget,
+            libraries: Collections.List[SOURCE_LIBRARY]
+        ) -> Collections.List[string] static is
+            let result = LIST[string]()
+            let options = manifest.options
+
+            if let access = options.underscore_access then
+                result.add("--underscore-access")
+                result.add(access)
+            fi
+
+            if options.global_namespace then
+                result.add("--global-namespace")
+            fi
+
+            if options.default_use.count > 0 then
+                result.add("--default-use")
+                result.add(string.join(",", options.default_use))
+            fi
+
+            for symbol in options.define do
+                result.add("--define")
+                result.add(symbol)
+            od
+
+            if options.suppress.count > 0 then
+                result.add("--suppress")
+                result.add(string.join(",", options.suppress))
+            fi
+
+            if options.warn_as_error.count > 0 then
+                result.add("--warn-as-error")
+                result.add(string.join(",", options.warn_as_error))
+            fi
+
+            if manifest.kind == ManifestKind.LIBRARY then
+                result.add("--library")
+            fi
+
+            if target != BuildTarget.DOTNET then
+                result.add("--target")
+                result.add(target_name(target))
+            fi
+
+            for library in libraries do
+                result.add("--library-source")
+                result.add("{library.name}@{library.version}={library.root}")
+
+                for file in library.files do
+                    result.add(file)
+                od
+            od
+
+            return result
+        si
+
+        /// A target as the compiler and a manifest spell it.
+        target_name(target: BuildTarget) -> string static =>
+            if target == BuildTarget.WASM then "wasm" else "dotnet" fi
+    si
+si

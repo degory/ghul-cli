@@ -1,0 +1,236 @@
+namespace Ghul.Project is
+    use Collections.LIST
+    use IO.Directory
+    use IO.File
+    use IO.Path
+
+    /// How the compiler is started: the program, and the arguments that
+    /// come before the build's own.
+    class COMPILER_PROCESS(file_name: string, leading_arguments: Collections.List[string]) is si
+
+    /// Builds a loaded project into `out/<target>/` beside its manifest by
+    /// running the compiler once.
+    class PROJECT_BUILD is
+        /// Where the build of `project` is written.
+        output_path(project: LOADED_PROJECT) -> string static is
+            let directory = Path.join([project.directory, "out", COMPILER_ARGUMENTS.target_name(project.target)])
+            let name = project.manifest.name
+
+            if project.target == BuildTarget.WASM then
+                return Path.join([directory, "{name}.wasm"])
+            fi
+
+            if project.manifest.kind == ManifestKind.LIBRARY then
+                return Path.join([directory, "{name}.dll"])
+            fi
+
+            return Path.join([directory, "{name}.exe"])
+        si
+
+        /// The source libraries a build of `project` compiles in: the core
+        /// library for the wasm target, and nothing for `dotnet`. Null, with
+        /// the problem reported to `say`, where the core library cannot be
+        /// found.
+        ///
+        /// - project: the project being built
+        /// - compiler_version: the compiler the build uses
+        /// - cache: where fetched libraries are kept
+        /// - say: where a problem is reported
+        libraries(
+            project: LOADED_PROJECT,
+            compiler_version: string,
+            cache: LIBRARY_CACHE,
+            say: (string) -> void
+        ) -> Collections.List[SOURCE_LIBRARY]? static is
+            let result = LIST[SOURCE_LIBRARY]()
+
+            if project.target != BuildTarget.WASM then
+                return result
+            fi
+
+            let found = CORE_LIBRARY.find(project.manifest, project.directory, compiler_version, cache)
+
+            if let problem: CoreOutcome.PROBLEM = found then
+                say(problem.message)
+                return null
+            fi
+
+            result.add(cast CoreOutcome.FOUND(found).library)
+
+            return result
+        si
+
+        /// Compiles `project`, returning the compiler's exit status, or 1
+        /// where the build could not get as far as running it. The
+        /// compiler's messages go to standard error unchanged.
+        ///
+        /// - project: the project to build
+        /// - compiler: how the compiler is started
+        /// - compiler_version: the compiler's version, which picks the core
+        ///   library for the wasm target
+        /// - runtime_assembly: the runtime copied beside a `dotnet` build,
+        ///   where there is one
+        /// - cache: where fetched libraries are kept
+        /// - say: where a problem of the build's own is reported
+        build(
+            project: LOADED_PROJECT,
+            compiler: COMPILER_PROCESS,
+            compiler_version: string,
+            runtime_assembly: string?,
+            cache: LIBRARY_CACHE,
+            say: (string) -> void
+        ) -> int static is
+            let compiled_in = libraries(project, compiler_version, cache, say)
+
+            if !compiled_in? then
+                return 1
+            fi
+
+            let output = output_path(project)
+            let sources = SOURCE_SET.expand(project.directory, project.manifest.sources)
+
+            Directory.create_directory(Path.get_directory_name(output)!)
+
+            let arguments = COMPILER_ARGUMENTS.for_build(project.manifest, project.target, compiled_in, output, sources)
+
+            let scratch = Path.join([Path.get_temp_path(), "ghul-build-{System.Environment.process_id}-{System.Guid.new_guid().to_string("N")}"])
+
+            Directory.create_directory(scratch)
+
+            try
+                let response_file = Path.join([scratch, "arguments.rsp"])
+
+                File.write_all_text(response_file, RESPONSE_FILE.text(arguments))
+
+                let exit_code = _compile(compiler, response_file, project.directory, say)
+
+                if exit_code == 0 /\ project.target == BuildTarget.DOTNET then
+                    if let runtime: string = runtime_assembly /\ File.exists(runtime) then
+                        File.copy(runtime, Path.join([Path.get_directory_name(output)!, Path.get_file_name(runtime)!]), true)
+                    fi
+                fi
+
+                return exit_code
+            finally
+                Directory.delete(scratch, true)
+            yrt
+        si
+
+        // Runs the compiler on the response file. Its standard output goes
+        // to standard error, so this tool's own standard output is left to
+        // the program a `run` starts.
+        _compile(compiler: COMPILER_PROCESS, response_file: string, directory: string, say: (string) -> void) -> int static is
+            let start_info = System.Diagnostics.ProcessStartInfo()
+
+            start_info.file_name = compiler.file_name
+            start_info.use_shell_execute = false
+            start_info.redirect_standard_output = true
+            start_info.working_directory = directory
+
+            for argument in compiler.leading_arguments do
+                start_info.argument_list.add(argument)
+            od
+
+            start_info.argument_list.add("@{response_file}")
+
+            if let process: System.Diagnostics.Process = System.Diagnostics.Process.start(start_info) then
+                let copied = process.standard_output.base_stream.copy_to_async(IO.Std.open_standard_error())
+
+                process.wait_for_exit()
+                copied.wait()
+
+                return process.exit_code
+            fi
+
+            say("failed to start the compiler")
+            return 1
+        si
+    si
+
+    /// Runs a project's build: a `dotnet` program with the .NET host, and a
+    /// wasm program with Node, through the loader the compiler writes beside
+    /// the module.
+    class PROJECT_RUN is
+        /// The program that runs `output` and the arguments it is given, or
+        /// null with the reason the build cannot be run.
+        ///
+        /// - project: the project that was built
+        /// - output: what the build wrote
+        /// - arguments: the arguments for the program being run
+        command(
+            project: LOADED_PROJECT,
+            output: string,
+            arguments: Collections.List[string]
+        ) -> (file_name: string, arguments: Collections.List[string], problem: string?) static is
+            let all = LIST[string]()
+
+            if project.manifest.kind == ManifestKind.LIBRARY then
+                return (file_name = "", arguments = all, problem = "{project.manifest.name} is a library, which cannot be run")
+            fi
+
+            let file_name =
+                if project.target == BuildTarget.WASM then
+                    all.add(Path.change_extension(output, ".mjs") ?? output)
+                    "node"
+                else
+                    all.add(output)
+                    "dotnet"
+                fi
+
+            for argument in arguments do
+                all.add(argument)
+            od
+
+            return (file_name = file_name, arguments = all, problem = null)
+        si
+
+        /// Runs the build, returning the program's exit status, or 1 where it
+        /// cannot be started.
+        ///
+        /// - project: the project that was built
+        /// - output: what the build wrote
+        /// - arguments: the arguments for the program being run
+        /// - say: where a problem is reported
+        run(
+            project: LOADED_PROJECT,
+            output: string,
+            arguments: Collections.List[string],
+            say: (string) -> void
+        ) -> int static is
+            let to_run = command(project, output, arguments)
+
+            if let problem: string = to_run.problem then
+                say(problem)
+                return 1
+            fi
+
+            let start_info = System.Diagnostics.ProcessStartInfo()
+
+            start_info.file_name = to_run.file_name
+            start_info.use_shell_execute = false
+
+            for argument in to_run.arguments do
+                start_info.argument_list.add(argument)
+            od
+
+            try
+                if let process: System.Diagnostics.Process = System.Diagnostics.Process.start(start_info) then
+                    process.wait_for_exit()
+
+                    return process.exit_code
+                fi
+            catch e: System.ComponentModel.Win32Exception
+                if project.target == BuildTarget.WASM then
+                    say("node was not found; running the wasm target needs Node.js")
+                else
+                    say("dotnet was not found")
+                fi
+
+                return 1
+            yrt
+
+            say("failed to start {to_run.file_name}")
+            return 1
+        si
+    si
+si

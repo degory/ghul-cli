@@ -164,11 +164,27 @@ looks for them.
   either a `MANIFEST` or a `MANIFEST_PROBLEM` per fault, every fault
   rather than the first, and touches no file and no network itself;
   `MANIFEST_LOCATION.find_in(directory)` finds the `ghul-project.json` in
-  one directory and does not search upwards. Nothing builds from this yet
-  - the commands, the source globs, fetching and the lockfile are the
-  tasks under ghul-lang/ghul#3211 that follow it.
+  one directory and does not search upwards. `PROJECT_LOADER` reads the
+  project and picks its target, `SOURCE_SET` expands its source globs,
+  `COMPILER_ARGUMENTS` is the one place the compiler's argument list is
+  built (editors reuse it), and `PROJECT_BUILD` runs the compiler through
+  a response file (`RESPONSE_FILE`) into `out/<target>/`; `PROJECT_RUN`
+  runs the result with `dotnet`, or with `node` through the loader beside
+  a wasm module. `CORE_LIBRARY` supplies ghul-core to a wasm build, at a
+  tag pinned per compiler version unless the manifest declares it, through
+  `LIBRARY_CACHE` (a tag fetched by `GIT` into a read-only per-user cache
+  entry, found again with no `git` call). `FILE_LOCK` is the advisory lock
+  the cache and the CLI's script cache share. The lockfile, transitive
+  dependencies and dependencies other than ghul-core are the tasks under
+  ghul-lang/ghul#3211 still to come.
 - `unit-tests/` — MSTest project covering the pure path/cache-key/
   runnable-by-default/stdin-marker/source-resolution logic.
+- `tests/project.sh` — end-to-end test of `ghul build` and `ghul run` on
+  scratch projects under a scratch `HOME`: a two-file program, a library,
+  a bad manifest, refused dependencies, a source error, an unlisted target
+  and a missing manifest. The wasm build-and-run check runs only with
+  `GHUL_PROJECT_TEST_WASM=1`, since no compiler release can yet generate a
+  program that writes a line for wasm.
 - `tests/smoke.sh` — end-to-end test: builds the tool, points it at a real
   script under a scratch `HOME` with no `ghul.compiler` pre-installed, and
   drives it through the install/compile path, the cache path, each verb,

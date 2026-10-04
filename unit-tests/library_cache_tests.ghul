@@ -1,0 +1,213 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+    use IO.Directory
+    use IO.File
+    use IO.Path
+
+    use Ghul.Project.CacheOutcome
+    use Ghul.Project.GIT
+    use Ghul.Project.LIBRARY_CACHE
+
+    use Assert = Microsoft.VisualStudio.TestTools.UnitTesting.Assert;
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    // Fetching a library from a repository the test makes in a scratch
+    // directory and reaches by a file:// URL: two commits, with the tag
+    // v1 on the first and an annotated tag v2 on the second.
+    @TestClass()
+    class LIBRARY_CACHE_TESTS is
+        init() is si
+
+        _scratch() -> string =>
+            Path.combine(Path.get_temp_path(), "ghul-lc-{System.Guid.new_guid().to_string("N").substring(0, 8)}")
+
+        _git(directory: string, arguments: string[]) is
+            let result = GIT.run(LIST[string](arguments), directory)
+
+            assert result.succeeded else "git {string.join(" ", arguments)} failed: {result.error}"
+        si
+
+        _repository(scratch: string) -> string is
+            let repository = Path.combine(scratch, "repository")
+
+            Directory.create_directory(repository)
+
+            _git(repository, ["init", "--quiet"])
+            _git(repository, ["config", "user.email", "test@example.com"])
+            _git(repository, ["config", "user.name", "test"])
+
+            File.write_all_text(Path.combine(repository, "lib.ghul"), "first")
+            _git(repository, ["add", "."])
+            _git(repository, ["commit", "--quiet", "-m", "first"])
+            _git(repository, ["tag", "v1"])
+
+            Directory.create_directory(Path.combine(repository, "src"))
+            File.write_all_text(Path.combine(repository, "lib.ghul"), "second")
+            File.write_all_text(Path.combine(repository, "src", "more.ghul"), "more")
+            _git(repository, ["add", "."])
+            _git(repository, ["commit", "--quiet", "-m", "second"])
+            _git(repository, ["tag", "-a", "v2", "-m", "annotated"])
+
+            return repository
+        si
+
+        _url(repository: string) -> string => System.Uri(repository).absolute_uri
+
+        _commit_of(repository: string, revision: string) -> string is
+            let result = GIT.run(LIST[string](["rev-parse", "{revision}^{{commit}}"]), repository)
+
+            return result.output.trim()
+        si
+
+        _found(outcome: CacheOutcome) -> CacheOutcome.FOUND is
+            if let found: CacheOutcome.FOUND = outcome then
+                return found
+            fi
+
+            Assert.fail("expected the library, got: {cast CacheOutcome.PROBLEM(outcome).message}")
+
+            throw System.Exception("unreachable")
+        si
+
+        _delete(path: string) is
+            if Directory.exists(path) then
+                for file in Directory.get_files(path, "*", IO.SearchOption.ALL_DIRECTORIES) do
+                    File.set_attributes(file, IO.FileAttributes.NORMAL)
+                od
+
+                Directory.delete(path, true)
+            fi
+        si
+
+        @Test()
+        a_tag_is_fetched_as_the_files_of_its_commit() is
+            let scratch = _scratch()
+
+            try
+                let repository = _repository(scratch)
+                let cache = LIBRARY_CACHE(Path.combine(scratch, "cache"))
+
+                let found = _found(cache.fetch_tag(_url(repository), "v1"))
+
+                assert found.commit =~ _commit_of(repository, "v1")
+                assert File.read_all_text(Path.combine(found.directory, "lib.ghul")) =~ "first"
+                assert !Directory.exists(Path.combine(found.directory, "src"))
+                assert !Directory.exists(Path.combine(found.directory, ".git"))
+            finally
+                _delete(scratch)
+            yrt
+        si
+
+        @Test()
+        an_annotated_tag_stands_for_its_commit() is
+            let scratch = _scratch()
+
+            try
+                let repository = _repository(scratch)
+                let cache = LIBRARY_CACHE(Path.combine(scratch, "cache"))
+
+                let found = _found(cache.fetch_tag(_url(repository), "v2"))
+
+                assert found.commit =~ _commit_of(repository, "v2")
+                assert File.read_all_text(Path.combine(found.directory, "src", "more.ghul")) =~ "more"
+            finally
+                _delete(scratch)
+            yrt
+        si
+
+        // The repository is gone by the second fetch, so any git call
+        // would fail: finding the library means no git call was made.
+        @Test()
+        a_tag_already_fetched_is_found_without_git() is
+            let scratch = _scratch()
+
+            try
+                let repository = _repository(scratch)
+                let url = _url(repository)
+                let cache = LIBRARY_CACHE(Path.combine(scratch, "cache"))
+
+                let first = _found(cache.fetch_tag(url, "v1"))
+
+                _delete(repository)
+
+                let second = _found(cache.fetch_tag(url, "v1"))
+
+                assert second.directory =~ first.directory
+                assert second.commit =~ first.commit
+            finally
+                _delete(scratch)
+            yrt
+        si
+
+        @Test()
+        fetched_files_are_read_only() is
+            unix_only("read-only is a file mode here")
+
+            let scratch = _scratch()
+
+            try
+                let repository = _repository(scratch)
+                let cache = LIBRARY_CACHE(Path.combine(scratch, "cache"))
+
+                let found = _found(cache.fetch_tag(_url(repository), "v1"))
+                let mode = File.get_unix_file_mode(Path.combine(found.directory, "lib.ghul"))
+
+                assert (cast int(mode) & cast int(IO.UnixFileMode.USER_WRITE)) == 0
+            finally
+                _delete(scratch)
+            yrt
+        si
+
+        @Test()
+        a_tag_that_does_not_exist_is_a_problem_naming_it() is
+            let scratch = _scratch()
+
+            try
+                let repository = _repository(scratch)
+                let cache = LIBRARY_CACHE(Path.combine(scratch, "cache"))
+
+                if let problem: CacheOutcome.PROBLEM = cache.fetch_tag(_url(repository), "v9") then
+                    assert problem.message.contains("v9") else problem.message
+                else
+                    Assert.fail("expected a problem for a missing tag")
+                fi
+            finally
+                _delete(scratch)
+            yrt
+        si
+
+        @Test()
+        a_short_url_names_its_directory_as_written() is
+            assert LIBRARY_CACHE.repository_directory_name("https://github.com/ghul-lang/ghul-core") =~ "https___github.com_ghul-lang_ghul-core"
+        si
+
+        @Test()
+        a_long_url_keeps_its_start_and_a_hash_of_the_whole() is
+            let first = LIBRARY_CACHE.repository_directory_name("https://example.com/a/very/long/path/to/one/repository.git")
+            let second = LIBRARY_CACHE.repository_directory_name("https://example.com/a/very/long/path/to/another/repository.git")
+
+            assert first.length <= 48 else first
+            assert first.starts_with("https___example.com_a_very_long_") else first
+            assert first !~ second
+        si
+
+        @Test()
+        a_repository_that_cannot_be_read_is_a_problem_naming_it() is
+            let scratch = _scratch()
+
+            try
+                let missing = _url(Path.combine(scratch, "not-a-repository"))
+                let cache = LIBRARY_CACHE(Path.combine(scratch, "cache"))
+
+                if let problem: CacheOutcome.PROBLEM = cache.fetch_tag(missing, "v1") then
+                    assert problem.message.contains(missing) else problem.message
+                else
+                    Assert.fail("expected a problem for a repository that is not there")
+                fi
+            finally
+                _delete(scratch)
+            yrt
+        si
+    si
+si

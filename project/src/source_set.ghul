@@ -1,0 +1,106 @@
+namespace Ghul.Project is
+    use Collections.LIST
+    use Collections.SET
+    use IO.Directory
+    use IO.Path
+    use System.Text.RegularExpressions.Regex
+    use System.Text.RegularExpressions.RegexOptions
+
+    /// The files a project's source globs match under its root directory,
+    /// sorted and without duplicates.
+    ///
+    /// A glob is a path relative to the root, with `/` between its parts.
+    /// `**` matches any number of directories, `*` any run of characters
+    /// within one name and `?` any one character. A glob matching nothing
+    /// adds nothing.
+    class SOURCE_SET is
+        /// The files `globs` match under `root`, as full paths in ordinal
+        /// order.
+        ///
+        /// - root: the directory the globs are relative to, usually the one
+        ///   holding the manifest
+        /// - globs: the patterns, as a manifest's `sources` writes them
+        expand(root: string, globs: Collections.List[string]) -> Collections.List[string] static is
+            let full_root = Path.get_full_path(root)
+            let found = SET[string]()
+
+            for glob in globs do
+                let pattern = _pattern_for(glob)
+                let start = Path.join([full_root, _fixed_prefix(glob)])
+
+                if !Directory.exists(start) then
+                    continue
+                fi
+
+                for file in Directory.get_files(start, "*", IO.SearchOption.ALL_DIRECTORIES) do
+                    let relative = Path.get_relative_path(full_root, file).replace('\\', '/')
+
+                    if pattern.is_match(relative) then
+                        found.add(file)
+                    fi
+                od
+            od
+
+            let result = LIST[string](found)
+
+            result.sort(System.StringComparer.ordinal)
+
+            return result
+        si
+
+        // The leading directories of a glob that hold no wildcard, which is
+        // where a search for its files can start rather than at the root.
+        _fixed_prefix(glob: string) -> string static is
+            let parts = glob.split(['/'])
+            let fixed = LIST[string]()
+
+            for i in 0..parts.count - 1 do
+                let part = parts[i]
+
+                if part.contains("*") \/ part.contains("?") then
+                    break
+                fi
+
+                fixed.add(part)
+            od
+
+            return string.join("/", fixed)
+        si
+
+        // A regular expression matching a relative path the glob matches,
+        // with `/` between the path's parts.
+        _pattern_for(glob: string) -> Regex static is
+            let result = System.Text.StringBuilder()
+            let i mut = 0
+
+            result.append('^')
+
+            while i < glob.length do
+                let c = glob[i]
+
+                if c == '*' /\ i + 1 < glob.length /\ glob[i + 1] == '*' then
+                    if i + 2 < glob.length /\ glob[i + 2] == '/' then
+                        result.append("(?:.*/)?")
+                        i = i + 3
+                    else
+                        result.append(".*")
+                        i = i + 2
+                    fi
+                elif c == '*' then
+                    result.append("[^/]*")
+                    i = i + 1
+                elif c == '?' then
+                    result.append("[^/]")
+                    i = i + 1
+                else
+                    result.append(Regex.escape(c.to_string()))
+                    i = i + 1
+                fi
+            od
+
+            result.append('$')
+
+            return Regex(result.to_string(), RegexOptions.CULTURE_INVARIANT)
+        si
+    si
+si

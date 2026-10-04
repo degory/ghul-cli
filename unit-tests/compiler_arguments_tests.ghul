@@ -1,0 +1,149 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+    use Collections.MAP
+
+    use Ghul.Project.BuildTarget
+    use Ghul.Project.COMPILER_ARGUMENTS
+    use Ghul.Project.DEPENDENCY
+    use Ghul.Project.MANIFEST
+    use Ghul.Project.MANIFEST_OPTIONS
+    use Ghul.Project.ManifestKind
+    use Ghul.Project.SOURCE_LIBRARY
+
+    use Assert = Microsoft.VisualStudio.TestTools.UnitTesting.Assert;
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    // The compiler's command line for a manifest, one option at a time.
+    @TestClass()
+    class COMPILER_ARGUMENTS_TESTS is
+        init() is si
+
+        _options(
+            underscore_access: string?,
+            global_namespace: bool,
+            default_use: string[],
+            define: string[],
+            suppress: string[],
+            warn_as_error: string[]
+        ) -> MANIFEST_OPTIONS =>
+            MANIFEST_OPTIONS(
+                underscore_access,
+                global_namespace,
+                LIST[string](default_use),
+                LIST[string](define),
+                LIST[string](suppress),
+                LIST[string](warn_as_error))
+
+        _plain_options() -> MANIFEST_OPTIONS => _options(null, false, [], [], [], [])
+
+        _manifest(kind: ManifestKind, options: MANIFEST_OPTIONS) -> MANIFEST =>
+            MANIFEST(
+                "app",
+                null,
+                kind,
+                LIST[BuildTarget]([BuildTarget.DOTNET, BuildTarget.WASM]),
+                LIST[string](["src/**/*.ghul"]),
+                null,
+                options,
+                MAP[string, DEPENDENCY]())
+
+        _no_libraries() -> Collections.List[SOURCE_LIBRARY] => LIST[SOURCE_LIBRARY]()
+
+        _same(expected: string, actual: string) is
+            assert actual =~ expected else "expected '{expected}', got '{actual}'"
+        si
+
+        _joined(arguments: Collections.List[string]) -> string => string.join(" ", arguments)
+
+        @Test()
+        a_plain_program_for_dotnet_has_only_the_output_and_sources() is
+            _same(
+                "-o out/app.exe a.ghul b.ghul",
+                _joined(
+                    COMPILER_ARGUMENTS.for_build(
+                        _manifest(ManifestKind.PROGRAM, _plain_options()),
+                        BuildTarget.DOTNET,
+                        _no_libraries(),
+                        "out/app.exe",
+                        LIST[string](["a.ghul", "b.ghul"]))))
+        si
+
+        @Test()
+        a_library_is_built_with_the_library_flag() is
+            _same(
+                "--library",
+                _joined(
+                    COMPILER_ARGUMENTS.options(
+                        _manifest(ManifestKind.LIBRARY, _plain_options()), BuildTarget.DOTNET, _no_libraries())))
+        si
+
+        @Test()
+        a_target_other_than_dotnet_is_named() is
+            _same(
+                "--target wasm",
+                _joined(
+                    COMPILER_ARGUMENTS.options(
+                        _manifest(ManifestKind.PROGRAM, _plain_options()), BuildTarget.WASM, _no_libraries())))
+        si
+
+        @Test()
+        underscore_access_is_passed_when_set() is
+            _same(
+                "--underscore-access protected",
+                _joined(
+                    COMPILER_ARGUMENTS.options(
+                        _manifest(ManifestKind.PROGRAM, _options("protected", false, [], [], [], [])),
+                        BuildTarget.DOTNET,
+                        _no_libraries())))
+        si
+
+        @Test()
+        global_namespace_is_passed_only_when_true() is
+            _same(
+                "--global-namespace",
+                _joined(
+                    COMPILER_ARGUMENTS.options(
+                        _manifest(ManifestKind.PROGRAM, _options(null, true, [], [], [], [])),
+                        BuildTarget.DOTNET,
+                        _no_libraries())))
+        si
+
+        @Test()
+        list_options_are_one_comma_separated_flag_and_each_define_its_own() is
+            _same(
+                "--default-use Collections,IO.Std.write_line --define DEBUG --define TRACE --suppress a,b --warn-as-error c",
+                _joined(
+                    COMPILER_ARGUMENTS.options(
+                        _manifest(
+                            ManifestKind.PROGRAM,
+                            _options(null, false, ["Collections", "IO.Std.write_line"], ["DEBUG", "TRACE"], ["a", "b"], ["c"])),
+                        BuildTarget.DOTNET,
+                        _no_libraries())))
+        si
+
+        @Test()
+        a_source_library_is_declared_then_its_files_follow() is
+            let library = SOURCE_LIBRARY("ghul-core", "0.3.0", "/cache/core", LIST[string](["/cache/core/src/a.ghul", "/cache/core/src/b.ghul"]))
+
+            _same(
+                "--target wasm --library-source ghul-core@0.3.0=/cache/core /cache/core/src/a.ghul /cache/core/src/b.ghul -o out/app main.ghul",
+                _joined(
+                    COMPILER_ARGUMENTS.for_build(
+                        _manifest(ManifestKind.PROGRAM, _plain_options()),
+                        BuildTarget.WASM,
+                        LIST[SOURCE_LIBRARY]([library]),
+                        "out/app",
+                        LIST[string](["main.ghul"]))))
+        si
+
+        @Test()
+        options_are_the_build_arguments_less_the_output_and_sources() is
+            let manifest = _manifest(ManifestKind.LIBRARY, _options("private", true, [], ["X"], [], []))
+            let options = COMPILER_ARGUMENTS.options(manifest, BuildTarget.WASM, _no_libraries())
+            let build = COMPILER_ARGUMENTS.for_build(manifest, BuildTarget.WASM, _no_libraries(), "out/x", LIST[string](["s.ghul"]))
+
+            _same("{_joined(options)} -o out/x s.ghul", _joined(build))
+        si
+    si
+si
