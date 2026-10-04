@@ -136,11 +136,13 @@ namespace Ghul.Project is
         // checks it is the commit expected, leaves out the repository's
         // own metadata, and renames it into place. Null on success.
         _fetch_into(url: string, tag: string, commit: string, repository: string, directory: string) -> string? is
-            let scratch = Path.join([repository, ".{commit}.tmp-{System.Environment.process_id}-{System.Guid.new_guid().to_string("N")}"])
+            // Kept short: the whole path has to fit Windows' limit on
+            // the length of a path git can create.
+            let scratch = Path.join([repository, ".tmp-{System.Guid.new_guid().to_string("N").substring(0, 8)}"])
 
             try
                 let cloned = GIT.run(
-                    LIST[string](["-c", "advice.detachedHead=false", "clone", "--quiet", "--depth", "1", "--branch", tag, url, scratch]),
+                    LIST[string](["-c", "advice.detachedHead=false", "-c", "core.longpaths=true", "clone", "--quiet", "--depth", "1", "--branch", tag, url, scratch]),
                     null)
 
                 if !cloned.succeeded then
