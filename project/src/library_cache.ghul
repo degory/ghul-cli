@@ -1,0 +1,192 @@
+namespace Ghul.Project is
+    use Collections.LIST
+    use IO.Directory
+    use IO.File
+    use IO.Path
+
+    /// What asking the cache for a library produced: the directory holding
+    /// its files and the commit they are from, or what went wrong.
+    union CacheOutcome is
+        FOUND(directory: string, commit: string);
+        PROBLEM(message: string);
+    si
+
+    /// Source libraries fetched from Git, kept per user and per commit so a
+    /// build reads them from disk rather than fetching them again.
+    ///
+    /// A library is kept at `<root>/<repository>/<commit>/`: the files of
+    /// that commit and no `.git` directory, made read-only once written.
+    /// The commit a tag resolved to is remembered beside it, so a tag
+    /// already fetched is found with no `git` call and no network.
+    class LIBRARY_CACHE(root: string) is
+        /// The cache under `XDG_CACHE_HOME` where that is set, and under
+        /// `~/.cache` where it is not.
+        for_this_user() -> LIBRARY_CACHE static is
+            let xdg = System.Environment.get_environment_variable("XDG_CACHE_HOME")
+
+            if xdg? /\ xdg.length > 0 then
+                return LIBRARY_CACHE(Path.join([xdg, "ghul-cli", "libraries"]))
+            fi
+
+            let home = System.Environment.get_environment_variable("HOME")
+
+            let base =
+                if home? /\ home.length > 0 then
+                    home
+                else
+                    System.Environment.get_folder_path(System.Environment_SpecialFolder.USER_PROFILE)
+                fi
+
+            return LIBRARY_CACHE(Path.join([base, ".cache", "ghul-cli", "libraries"]))
+        si
+
+        /// The files of the commit `tag` names in the repository at `url`,
+        /// fetching them first if they are not already here.
+        ///
+        /// - url: the repository, as `git clone` takes it
+        /// - tag: a tag in it; an annotated tag stands for its commit
+        fetch_tag(url: string, tag: string) -> CacheOutcome is
+            let repository = Path.join([root, repository_directory_name(url)])
+            let tag_record = Path.join([repository, "tags", tag])
+
+            if File.exists(tag_record) then
+                let commit = File.read_all_text(tag_record).trim()
+                let directory = Path.join([repository, commit])
+
+                if Directory.exists(directory) then
+                    return CacheOutcome.FOUND(directory, commit)
+                fi
+            fi
+
+            let lock = FILE_LOCK.acquire(Path.join([repository, ".lock"]), "ghul: waiting for another ghul process to fetch {url}...")
+
+            try
+                let resolved = _resolve_tag(url, tag)
+
+                if let problem: CacheOutcome.PROBLEM = resolved then
+                    return problem
+                fi
+
+                let commit = cast CacheOutcome.FOUND(resolved).commit
+                let directory = Path.join([repository, commit])
+
+                if !Directory.exists(directory) then
+                    if let problem: string = _fetch_into(url, tag, commit, repository, directory) then
+                        return CacheOutcome.PROBLEM(problem)
+                    fi
+                fi
+
+                Directory.create_directory(Path.get_directory_name(tag_record)!)
+                File.write_all_text(tag_record, commit)
+
+                return CacheOutcome.FOUND(directory, commit)
+            finally
+                lock.close()
+            yrt
+        si
+
+        /// The directory a repository's commits are kept under: its URL
+        /// with every character that cannot be part of a file name replaced.
+        repository_directory_name(url: string) -> string static is
+            let result = System.Text.StringBuilder()
+
+            for c in url do
+                if char.is_letter_or_digit(c) \/ c == '-' \/ c == '.' then
+                    result.append(c)
+                else
+                    result.append('_')
+                fi
+            od
+
+            return result.to_string()
+        si
+
+        // The commit a tag points at, peeled through an annotated tag.
+        _resolve_tag(url: string, tag: string) -> CacheOutcome is
+            let tag_ref = "refs/tags/{tag}"
+            let result = GIT.run(LIST[string](["ls-remote", url, tag_ref, "{tag_ref}^{{}}"]), null)
+
+            if !result.succeeded then
+                return CacheOutcome.PROBLEM("cannot read {url}: {result.error.trim()}")
+            fi
+
+            let direct: string? mut = null
+            let peeled: string? mut = null
+
+            for line in result.output.split(['\n']) do
+                let fields = line.trim().split(['\t'])
+
+                if fields.count == 2 then
+                    if fields[1] =~ "{tag_ref}^{{}}" then
+                        peeled = fields[0]
+                    elif fields[1] =~ tag_ref then
+                        direct = fields[0]
+                    fi
+                fi
+            od
+
+            if let commit: string = peeled ?? direct then
+                return CacheOutcome.FOUND("", commit)
+            fi
+
+            return CacheOutcome.PROBLEM("tag {tag} was not found in {url}")
+        si
+
+        // Clones the tag into a scratch directory beside the final one,
+        // checks it is the commit expected, leaves out the repository's
+        // own metadata, and renames it into place. Null on success.
+        _fetch_into(url: string, tag: string, commit: string, repository: string, directory: string) -> string? is
+            let scratch = Path.join([repository, ".{commit}.tmp-{System.Environment.process_id}-{System.Guid.new_guid().to_string("N")}"])
+
+            try
+                let cloned = GIT.run(
+                    LIST[string](["-c", "advice.detachedHead=false", "clone", "--quiet", "--depth", "1", "--branch", tag, url, scratch]),
+                    null)
+
+                if !cloned.succeeded then
+                    return "cannot fetch {tag} from {url}: {cloned.error.trim()}"
+                fi
+
+                let head = GIT.run(LIST[string](["rev-parse", "HEAD"]), scratch)
+
+                if !head.succeeded \/ head.output.trim() !~ commit then
+                    return "tag {tag} in {url} moved while it was being fetched"
+                fi
+
+                _delete(Path.join([scratch, ".git"]))
+                _make_read_only(scratch)
+
+                Directory.move(scratch, directory)
+
+                return null
+            finally
+                _delete(scratch)
+            yrt
+        si
+
+        _make_read_only(directory: string) static is
+            for file in Directory.get_files(directory, "*", IO.SearchOption.ALL_DIRECTORIES) do
+                if System.OperatingSystem.is_windows() then
+                    File.set_attributes(file, IO.FileAttributes.READ_ONLY)
+                else
+                    File.set_unix_file_mode(
+                        file,
+                        cast IO.UnixFileMode(
+                            cast int(IO.UnixFileMode.USER_READ) |
+                            cast int(IO.UnixFileMode.GROUP_READ) |
+                            cast int(IO.UnixFileMode.OTHER_READ)))
+                fi
+            od
+        si
+
+        _delete(path: string) static is
+            if Directory.exists(path) then
+                for file in Directory.get_files(path, "*", IO.SearchOption.ALL_DIRECTORIES) do
+                    File.set_attributes(file, IO.FileAttributes.NORMAL)
+                od
+
+                Directory.delete(path, true)
+            fi
+        si
+    si
+si

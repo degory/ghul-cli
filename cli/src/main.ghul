@@ -102,32 +102,8 @@ namespace Ghul.Cli is
         return is_executable(path) /\ starts_with_shebang(path)
     si
 
-    // Opens an exclusive advisory lock on `lock_path`, blocking until it is
-    // free. The lock is held for as long as the returned stream stays open;
-    // closing it (including via process exit) releases it immediately, so
-    // a crashed holder can never leave a stale lock behind the way a
-    // lock-file-existence check would.
-    acquire_lock(lock_path: string, waiting_message: string?) -> IO.FileStream is
-        Directory.create_directory(Path.get_directory_name(lock_path) ?? ".")
-
-        let announced mut = false
-
-        do
-            try
-                return File.open(lock_path, FileMode.OPEN_OR_CREATE, FileAccess.READ_WRITE, FileShare.NONE)
-            catch e: IO.IOException
-                if !announced then
-                    if let message: string = waiting_message then
-                        Std.error.write_line(message)
-                    fi
-
-                    announced = true
-                fi
-
-                System.Threading.Thread.sleep(100)
-            yrt
-        od
-    si
+    acquire_lock(lock_path: string, waiting_message: string?) -> IO.FileStream =>
+        Ghul.Project.FILE_LOCK.acquire(lock_path, waiting_message)
 
     // The installed version the caller asked for: the one named, where
     // that is installed, and otherwise nothing. With no version named,

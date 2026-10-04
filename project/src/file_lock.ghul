@@ -1,0 +1,42 @@
+namespace Ghul.Project is
+    use IO.Directory
+    use IO.File
+    use IO.FileAccess
+    use IO.FileMode
+    use IO.FileShare
+    use IO.Path
+
+    /// An exclusive advisory lock held through a file, so that two
+    /// processes doing the same work take turns at it.
+    class FILE_LOCK is
+        /// Opens `path` exclusively, waiting until no other process holds
+        /// it. The lock is held while the returned stream stays open and is
+        /// released when it is closed or the process ends, so a holder that
+        /// crashes leaves nothing behind.
+        ///
+        /// - path: the lock file, created along with its directory if need be
+        /// - waiting_message: written to standard error once, if the lock is
+        ///   held elsewhere when first asked for
+        acquire(path: string, waiting_message: string?) -> IO.FileStream static is
+            Directory.create_directory(Path.get_directory_name(path) ?? ".")
+
+            let announced mut = false
+
+            do
+                try
+                    return File.open(path, FileMode.OPEN_OR_CREATE, FileAccess.READ_WRITE, FileShare.NONE)
+                catch e: IO.IOException
+                    if !announced then
+                        if let message: string = waiting_message then
+                            IO.Std.error.write_line(message)
+                        fi
+
+                        announced = true
+                    fi
+
+                    System.Threading.Thread.sleep(100)
+                yrt
+            od
+        si
+    si
+si
