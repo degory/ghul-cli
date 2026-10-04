@@ -373,6 +373,7 @@ namespace Ghul.Cli is
         Std.error.write_line("usage: ghul [--no-cache] [--] <script> [args...]")
         Std.error.write_line("       ghul run [--no-cache] <script> [args...]")
         Std.error.write_line("       ghul compile [--no-cache] <script.ghul>")
+        Std.error.write_line("       ghul new <name> [--target dotnet|wasm|dotnet,wasm]")
         Std.error.write_line("       ghul build [--target <name>]")
         Std.error.write_line("       ghul run [--target <name>] [-- args...]")
         Std.error.write_line("       ghul project response-file --output <path> [--source-globs <path>] [--target <name>]")
@@ -382,6 +383,27 @@ namespace Ghul.Cli is
         Std.error.write_line("       ghul repl")
         Std.error.write_line("       ghul version")
         Std.error.write_line("       a `-` in place of <script> reads the source from stdin")
+    si
+
+    // Creates a project to build and run: `ghul new <name> [--target ...]`.
+    cmd_new(rest: Collections.List[string]) -> int is
+        let command_line = Ghul.Project.PROJECT_SCAFFOLD.parse(rest)
+
+        if let problem: string = command_line.problem then
+            Std.error.write_line("ghul: {problem}")
+            Std.error.write_line("usage: ghul new <name> [--target dotnet|wasm|dotnet,wasm]")
+            return 1
+        fi
+
+        if let problem: string = Ghul.Project.PROJECT_SCAFFOLD.create(command_line) then
+            Std.error.write_line("ghul: {problem}")
+            return 1
+        fi
+
+        let run = if command_line.targets.count > 1 then "ghul run --target wasm" else "ghul run" fi
+
+        Std.error.write_line("ghul: created {command_line.directory}; cd into it and {run}")
+        return 0
     si
 
     cmd_install_compiler(rest: Collections.List[string]) -> int is
@@ -898,6 +920,10 @@ namespace Ghul.Cli is
             let after_verb = strip_no_cache(rest)
 
             return cmd_compile(after_verb.items, no_cache \/ after_verb.no_cache)
+        fi
+
+        if verb =~ "new" then
+            return cmd_new(rest)
         fi
 
         if verb =~ "build" then
