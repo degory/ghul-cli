@@ -61,6 +61,12 @@ namespace Ghul.Project is
             return result
         si
 
+        /// The earliest compiler that builds a project for the wasm target:
+        /// one that compiles the pinned ghul-core and has a ghul-runtime
+        /// release pinned for it. Raised when a compiler fix is one the
+        /// pinned libraries need.
+        MINIMUM_COMPILER: string static => "64.15.0"
+
         // Each release of ghul-core and the earliest compiler that builds
         // it, oldest first. A new release of either adds a line.
         _pins() -> (earliest_compiler: string, tag: string)[] static =>

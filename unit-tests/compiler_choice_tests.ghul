@@ -1,0 +1,75 @@
+namespace Ghul.Cli.Tests is
+    use Ghul.Project.BuildTarget
+    use Ghul.Project.COMPILER_CHOICE
+    use Ghul.Project.CompilerChoice
+    use Ghul.Project.CORE_LIBRARY
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    // Which compiler a project build uses: a wasm build will not use one
+    // older than the core library's minimum, and a dotnet build takes any.
+    @TestClass()
+    class COMPILER_CHOICE_TESTS is
+        init() is si
+
+        _requested(choice: CompilerChoice) -> string? is
+            assert isa CompilerChoice.REQUESTED(choice) else "expected REQUESTED"
+
+            return cast CompilerChoice.REQUESTED(choice).version
+        si
+
+        @Test()
+        dotnet_build_uses_the_named_compiler_however_old() is
+            assert _requested(COMPILER_CHOICE.choose(BuildTarget.DOTNET, "64.11.0", "64.11.0")) =~ "64.11.0"
+        si
+
+        @Test()
+        dotnet_build_uses_the_newest_installed_however_old() is
+            assert !_requested(COMPILER_CHOICE.choose(BuildTarget.DOTNET, null, "64.11.0"))?
+        si
+
+        @Test()
+        wasm_build_rejects_a_named_compiler_below_the_minimum() is
+            let choice = COMPILER_CHOICE.choose(BuildTarget.WASM, "64.11.0", "70.0.0")
+
+            assert isa CompilerChoice.PROBLEM(choice) else "expected PROBLEM"
+
+            let message = cast CompilerChoice.PROBLEM(choice).message
+
+            assert message.contains("64.11.0") /\ message.contains(CORE_LIBRARY.MINIMUM_COMPILER)
+        si
+
+        @Test()
+        wasm_build_uses_a_named_compiler_at_the_minimum() is
+            let minimum = CORE_LIBRARY.MINIMUM_COMPILER
+
+            assert _requested(COMPILER_CHOICE.choose(BuildTarget.WASM, minimum, null)) =~ minimum
+        si
+
+        @Test()
+        wasm_build_installs_the_newest_when_the_installed_is_below_the_minimum() is
+            let choice = COMPILER_CHOICE.choose(BuildTarget.WASM, null, "64.11.0")
+
+            assert isa CompilerChoice.NEWEST(choice) else "expected NEWEST"
+            assert cast CompilerChoice.NEWEST(choice).installed =~ "64.11.0"
+        si
+
+        @Test()
+        wasm_build_uses_the_newest_installed_at_or_above_the_minimum() is
+            assert !_requested(COMPILER_CHOICE.choose(BuildTarget.WASM, null, CORE_LIBRARY.MINIMUM_COMPILER))?
+        si
+
+        @Test()
+        wasm_build_with_nothing_installed_asks_for_the_newest() is
+            assert !_requested(COMPILER_CHOICE.choose(BuildTarget.WASM, null, null))?
+        si
+
+        @Test()
+        a_local_build_of_the_compiler_is_taken_to_be_current() is
+            assert !COMPILER_CHOICE.is_older_than("0.0.0-local-x.1", "64.15.0")
+            assert COMPILER_CHOICE.is_older_than("64.14.9", "64.15.0")
+            assert !COMPILER_CHOICE.is_older_than("64.15.0", "64.15.0")
+        si
+    si
+si

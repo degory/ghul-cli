@@ -208,4 +208,18 @@ if err="$(cd "$scratch" && dotnet "$cli" new scaffolded 2>&1)"; then
 fi
 [[ "$err" == *"ghul: scaffolded already exists and is not empty"* ]] || fail "unexpected message from ghul new: $err"
 
+echo "project: a wasm build refuses a manifest naming a compiler below the minimum..." >&2
+old_wasm="$scratch/old-wasm"
+mkdir -p "$old_wasm/src"
+cat > "$old_wasm/ghul-project.json" <<'JSON'
+{ "name": "old-wasm", "targets": ["dotnet", "wasm"], "compiler": "64.11.0" }
+JSON
+cat > "$old_wasm/src/main.ghul" <<'GHUL'
+IO.Std.write_line("hello")
+GHUL
+if err="$(cd "$old_wasm" && dotnet "$cli" build --target wasm 2>&1)"; then
+    fail "expected a wasm build naming an old compiler to fail"
+fi
+[[ "$err" == *"names ghul.compiler 64.11.0, but the wasm target needs"* ]] || fail "unexpected message for an old compiler: $err"
+
 echo "project: all checks passed" >&2

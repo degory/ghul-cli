@@ -1,0 +1,68 @@
+namespace Ghul.Project is
+    /// Which compiler a project build uses.
+    union CompilerChoice is
+        /// The version named, installing it if need be, or the newest
+        /// installed where `version` is null.
+        REQUESTED(version: string?);
+
+        /// The newest release, installed if need be, because the newest
+        /// installed is too old for the build.
+        NEWEST(installed: string);
+
+        /// No compiler will do: the manifest names one the build cannot use.
+        PROBLEM(message: string);
+    si
+
+    /// Chooses the compiler for a build from what the manifest names and
+    /// what is installed. A wasm build needs at least
+    /// `CORE_LIBRARY.MINIMUM_COMPILER`; a dotnet build takes any.
+    class COMPILER_CHOICE is
+        /// The compiler a build of `target` uses.
+        ///
+        /// - target: the target being built
+        /// - named: the version the manifest names, or null
+        /// - installed: the newest installed version, or null when none is
+        choose(target: BuildTarget, named: string?, installed: string?) -> CompilerChoice static is
+            if target != BuildTarget.WASM then
+                return CompilerChoice.REQUESTED(named)
+            fi
+
+            let minimum = CORE_LIBRARY.MINIMUM_COMPILER
+
+            if let version: string = named then
+                if is_older_than(version, minimum) then
+                    return CompilerChoice.PROBLEM(
+                        "the manifest names ghul.compiler {version}, but the wasm target needs {minimum} or newer")
+                fi
+
+                return CompilerChoice.REQUESTED(version)
+            fi
+
+            if let version: string = installed /\ is_older_than(version, minimum) then
+                return CompilerChoice.NEWEST(version)
+            fi
+
+            return CompilerChoice.REQUESTED(null)
+        si
+
+        /// Whether `version` is a release older than `minimum`. A version
+        /// that does not parse is a build of the compiler rather than a
+        /// release, and is taken to be current.
+        ///
+        /// - version: the version to check
+        /// - minimum: the earliest acceptable release
+        is_older_than(version: string, minimum: string) -> bool static is
+            let actual: System.Version? mut
+            let wanted: System.Version? mut
+
+            if
+                !System.Version.try_parse(version, actual ref) \/ !actual? \/
+                !System.Version.try_parse(minimum, wanted ref) \/ !wanted?
+            then
+                return false
+            fi
+
+            return actual < wanted
+        si
+    si
+si

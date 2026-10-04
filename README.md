@@ -133,6 +133,10 @@ members, and then ghul-runtime, which supplies the pipes and the rest of
 `dependencies`, at a `tag` or a `path`, uses that instead. No other
 dependencies are supported yet.
 
+A wasm build needs `ghul.compiler` 64.15.0 or newer. Where the newest
+installed is older, the build installs the newest release and uses that; a
+manifest whose `compiler` names an older version is an error.
+
 ### hello world on WebAssembly
 
 `ghul new` creates a project, then `ghul run` builds and runs it:
