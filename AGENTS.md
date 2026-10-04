@@ -182,12 +182,14 @@ looks for them.
   ghul-lang/ghul#3211 still to come.
 - `unit-tests/` — MSTest project covering the pure path/cache-key/
   runnable-by-default/stdin-marker/source-resolution logic.
-- `tests/project.sh` — end-to-end test of `ghul build` and `ghul run` on
-  scratch projects under a scratch `HOME`: a two-file program, a library,
-  a bad manifest, refused dependencies, a source error, an unlisted target
-  and a missing manifest. The wasm build-and-run check runs only with
-  `GHUL_PROJECT_TEST_WASM=1`, since no compiler release can yet generate a
-  program that writes a line for wasm.
+- `tests/project.sh` — end-to-end test of `ghul build`, `ghul run`, `ghul new`
+  and the editor files under a scratch `HOME`: a library, a bad manifest,
+  refused dependencies, an unlisted target, a missing manifest, the
+  `--library` and `--compiler` overrides and the wasm compiler minimum. It
+  then runs `tests/projects` with ghul-test against the CLI it built.
+- `tests/projects/` — ghul-test project tests (`--use-ghul-cli`): programs
+  for dotnet and wasm and a build that fails, each with the output or
+  diagnostics expected of it.
 - `tests/smoke.sh` — end-to-end test: builds the tool, points it at a real
   script under a scratch `HOME` with no `ghul.compiler` pre-installed, and
   drives it through the install/compile path, the cache path, each verb,

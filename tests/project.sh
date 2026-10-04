@@ -15,7 +15,8 @@ dotnet build -nologo -c Debug "$repo_root/cli/ghul-cli.ghulproj" -o "$scratch/bu
 cli="$scratch/build/ghul-cli.dll"
 
 # The local tools, ghul-test among them, are found in the packages folder
-# under the real HOME, which the scratch HOME would otherwise hide.
+# under the real HOME, which the scratch HOME would otherwise hide; the
+# tool cache under the scratch HOME is rebuilt from it before they run.
 export NUGET_PACKAGES="${NUGET_PACKAGES:-$HOME/.nuget/packages}"
 export HOME="$scratch/home"
 export XDG_CACHE_HOME="$scratch/cache"
@@ -217,7 +218,7 @@ fi
 [[ "$err" == *"names ghul.compiler 64.11.0, but the wasm target needs"* ]] || fail "unexpected message for an old compiler: $err"
 
 echo "project: the programs under tests/projects build and print what they should..." >&2
-(cd "$repo_root" && dotnet ghul-test --use-ghul-cli --ghul "dotnet $cli" tests/projects) >&2 \
+(cd "$repo_root" && dotnet tool restore >/dev/null && dotnet ghul-test --use-ghul-cli --ghul "dotnet $cli" tests/projects) >&2 \
     || fail "a project under tests/projects failed"
 
 echo "project: all checks passed" >&2
