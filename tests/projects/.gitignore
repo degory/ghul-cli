@@ -1,0 +1,8 @@
+**/out/
+**/failed
+**/*.out
+**/*.grep
+**/*.diff
+**/*.sort
+**/*.err
+**/run.exit

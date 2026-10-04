@@ -1,0 +1,5 @@
+use default
+
+entry() is
+    write_line("hello with use default")
+si
