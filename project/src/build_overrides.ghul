@@ -1,0 +1,145 @@
+namespace Ghul.Project is
+    use Collections.LIST
+    use Collections.MAP
+    use IO.Path
+
+    /// What a command line overrides about how a project is built: the
+    /// compiler to run in place of the one the manifest names, and source
+    /// libraries to compile from a directory in place of the manifest's
+    /// dependencies and the pinned releases.
+    class BUILD_OVERRIDES(compiler_command: string?, libraries: Collections.Map[string, string]) is
+        /// Nothing overridden.
+        none() -> BUILD_OVERRIDES static => BUILD_OVERRIDES(null, MAP[string, string]())
+
+        /// Whether `option` is one of the overriding options, `--compiler`
+        /// and `--library`, each of which takes a value.
+        ///
+        /// - option: an argument from the command line
+        is_option(option: string) -> bool static => option =~ "--compiler" \/ option =~ "--library"
+
+        /// `overrides` with `option` and its `value` applied, or null with the
+        /// reason in `problem` where the value is not one the option takes.
+        ///
+        /// - overrides: what earlier options set
+        /// - option: `--compiler` or `--library`
+        /// - value: the argument after it
+        /// - problem: set to why the value is refused, or null
+        with(overrides: BUILD_OVERRIDES, option: string, value: string, problem: string? ref) -> BUILD_OVERRIDES? static is
+            problem! = null
+
+            if option =~ "--compiler" then
+                if string.is_null_or_white_space(value) then
+                    problem! = "--compiler needs a command"
+                    return null
+                fi
+
+                return BUILD_OVERRIDES(value, overrides.libraries)
+            fi
+
+            let separator = value.index_of('=')
+
+            if separator <= 0 \/ separator == value.length - 1 then
+                problem! = "--library needs <name>=<path>, got {value}"
+                return null
+            fi
+
+            let libraries = MAP[string, string]()
+
+            for pair in overrides.libraries do
+                libraries[pair.key] = pair.value
+            od
+
+            libraries[value.substring(0, separator)] = Path.get_full_path(value.substring(separator + 1))
+
+            return BUILD_OVERRIDES(overrides.compiler_command, libraries)
+        si
+
+        /// `manifest` with each overridden library declared as a dependency
+        /// on the directory given for it.
+        ///
+        /// - manifest: the manifest as read
+        apply(manifest: MANIFEST) -> MANIFEST is
+            if libraries.count == 0 then
+                return manifest
+            fi
+
+            let dependencies = MAP[string, DEPENDENCY]()
+
+            for pair in manifest.dependencies do
+                dependencies[pair.key] = pair.value
+            od
+
+            for pair in libraries do
+                dependencies[pair.key] = DEPENDENCY.PATH(pair.value)
+            od
+
+            return MANIFEST(
+                manifest.name,
+                manifest.version,
+                manifest.kind,
+                manifest.targets,
+                manifest.sources,
+                manifest.compiler_version,
+                manifest.options,
+                dependencies)
+        si
+
+        /// The words of a compiler command: the program, then the arguments
+        /// that precede the compiler's own. Split on spaces.
+        ///
+        /// - command: as `--compiler` gave it
+        command_words(command: string) -> Collections.List[string] static is
+            let result = LIST[string]()
+
+            for word in command.split([' ']) do
+                if word.length > 0 then
+                    result.add(word)
+                fi
+            od
+
+            return result
+        si
+
+        /// The compiler version in what a compiler prints when run with no
+        /// arguments: the first run of digits and dots holding two dots.
+        /// Null where there is none.
+        ///
+        /// - output: the compiler's standard output
+        version_in(output: string) -> string? static is
+            let found = System.Text.RegularExpressions.Regex.match(output, "[0-9]+\\.[0-9]+\\.[0-9]+")
+
+            if found.success then
+                return found.value
+            fi
+
+            return null
+        si
+
+        /// The runtime assembly that runs with a compiler named by a command
+        /// ending in its `.dll`: the `ghul-runtime.dll` beside it, where there
+        /// is one. Null otherwise.
+        ///
+        /// - command: as `--compiler` gave it
+        runtime_assembly_beside(command: string) -> string? static is
+            let words = command_words(command)
+
+            if words.count == 0 then
+                return null
+            fi
+
+            let last = words[words.count - 1]
+
+            if !last.ends_with(".dll") then
+                return null
+            fi
+
+            let candidate = Path.join([Path.get_directory_name(Path.get_full_path(last)) ?? ".", "ghul-runtime.dll"])
+
+            if IO.File.exists(candidate) then
+                return candidate
+            fi
+
+            return null
+        si
+    si
+si

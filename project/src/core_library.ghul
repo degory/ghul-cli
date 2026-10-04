@@ -94,7 +94,7 @@ namespace Ghul.Project is
 
             if manifest.dependencies.try_get_value(NAME, declared ref) then
                 if let path: DEPENDENCY.PATH = declared then
-                    return _read(Path.get_full_path(Path.join([manifest_directory, path.path])))
+                    return _read(Path.get_full_path(Path.combine(manifest_directory, path.path)))
                 fi
 
                 let git = cast DEPENDENCY.GIT(declared)
