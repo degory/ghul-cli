@@ -14,6 +14,9 @@ trap 'rm -rf "$scratch"' EXIT
 dotnet build -nologo -c Debug "$repo_root/cli/ghul-cli.ghulproj" -o "$scratch/build" >&2
 cli="$scratch/build/ghul-cli.dll"
 
+# The local tools, ghul-test among them, are found in the packages folder
+# under the real HOME, which the scratch HOME would otherwise hide.
+export NUGET_PACKAGES="${NUGET_PACKAGES:-$HOME/.nuget/packages}"
 export HOME="$scratch/home"
 export XDG_CACHE_HOME="$scratch/cache"
 mkdir -p "$HOME"
@@ -57,10 +60,6 @@ echo "project: a two-file program builds..." >&2
 (cd "$program" && dotnet "$cli" build) >&2 || fail "ghul build failed"
 [[ -f "$program/out/dotnet/greeter.exe" ]] || fail "expected out/dotnet/greeter.exe"
 [[ -f "$program/out/dotnet/ghul-runtime.dll" ]] || fail "expected ghul-runtime.dll beside the build"
-
-echo "project: ... and runs, with its own arguments..." >&2
-out="$(cd "$program" && dotnet "$cli" run -- there 2>/dev/null)"
-check "$out" "hello, there" "ghul run output"
 
 echo "project: 'ghul run <script>' still runs the script, beside a manifest..." >&2
 cat > "$program/script.ghul" <<'GHUL'
@@ -113,22 +112,6 @@ if err="$(cd "$dependent" && dotnet "$cli" build 2>&1)"; then
 fi
 [[ "$err" == *"ghul: dependencies are not supported yet"* ]] || fail "unexpected message for dependencies: $err"
 
-echo "project: a source error fails with the compiler's diagnostic..." >&2
-erroneous="$scratch/erroneous"
-mkdir -p "$erroneous/src"
-cat > "$erroneous/ghul-project.json" <<'JSON'
-{ "name": "erroneous" }
-JSON
-cat > "$erroneous/src/main.ghul" <<'GHUL'
-entry() is
-    let n: int = "not an int"
-si
-GHUL
-status=0
-err="$(cd "$erroneous" && dotnet "$cli" build 2>&1)" || status=$?
-(( status != 0 )) || fail "expected a source error to fail the build"
-[[ "$err" == *"main.ghul"*"error"* ]] || fail "expected the compiler's diagnostic, got: $err"
-
 echo "project: a target the manifest does not list is refused..." >&2
 if err="$(cd "$program" && dotnet "$cli" build --target wasm 2>&1)"; then
     fail "expected an unlisted target to fail"
@@ -169,21 +152,12 @@ if err="$(cd "$broken" && dotnet "$cli" project compiler 2>&1)"; then
 fi
 [[ "$err" == *"ghul: ghul-project.json: name:"* ]] || fail "unexpected message from ghul project compiler: $err"
 
-echo "project: a wasm program builds with the core and runtime libraries and runs under Node..." >&2
+# A wasm program the overriding options below build.
 wasm="$scratch/wasm-greeter"
 mkdir -p "$wasm/src"
 cat > "$wasm/ghul-project.json" <<'JSON'
 { "name": "wasm-greeter", "targets": ["wasm"] }
 JSON
-cat > "$wasm/src/main.ghul" <<'GHUL'
-entry() is
-    IO.Std.write_line("hello from wasm")
-si
-GHUL
-out="$(cd "$wasm" && dotnet "$cli" run 2>/dev/null)" || fail "ghul run of a wasm program failed"
-check "$out" "hello from wasm" "wasm run output"
-
-echo "project: a wasm program with use default resolves the runtime's imports..." >&2
 cat > "$wasm/src/main.ghul" <<'GHUL'
 use default
 
@@ -191,8 +165,6 @@ entry() is
     write_line("hello with use default")
 si
 GHUL
-out="$(cd "$wasm" && dotnet "$cli" run 2>/dev/null)" || fail "ghul run of a wasm program with use default failed"
-check "$out" "hello with use default" "wasm run output with use default"
 
 echo "project: --library builds a wasm program against library checkouts..." >&2
 git clone -q --depth 1 https://github.com/ghul-lang/ghul-core "$scratch/core-checkout"
@@ -243,5 +215,9 @@ if err="$(cd "$old_wasm" && dotnet "$cli" build --target wasm 2>&1)"; then
     fail "expected a wasm build naming an old compiler to fail"
 fi
 [[ "$err" == *"names ghul.compiler 64.11.0, but the wasm target needs"* ]] || fail "unexpected message for an old compiler: $err"
+
+echo "project: the programs under tests/projects build and print what they should..." >&2
+(cd "$repo_root" && dotnet ghul-test --use-ghul-cli --ghul "dotnet $cli" tests/projects) >&2 \
+    || fail "a project under tests/projects failed"
 
 echo "project: all checks passed" >&2
