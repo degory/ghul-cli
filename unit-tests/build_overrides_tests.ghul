@@ -40,7 +40,7 @@ namespace Ghul.Cli.Tests is
             assert !parsed.problem?
             assert parsed.target =~ "wasm"
             assert parsed.overrides.compiler_command =~ "dotnet /c/ghul.dll"
-            assert parsed.overrides.libraries["ghul-core"] =~ "/l/core"
+            assert parsed.overrides.libraries["ghul-core"] =~ IO.Path.get_full_path("/l/core")
         si
 
         @Test()
@@ -74,8 +74,11 @@ namespace Ghul.Cli.Tests is
             let overrides = PROJECT_COMMAND_LINE.parse(LIST[string](["--library", "ghul-core=/l/core"]), false).overrides
             let applied = overrides.apply(_manifest(dependencies))
 
-            assert isa DEPENDENCY.PATH(applied.dependencies["ghul-core"])
-            assert cast DEPENDENCY.PATH(applied.dependencies["ghul-core"]).path =~ "/l/core"
+            if let path: DEPENDENCY.PATH = applied.dependencies["ghul-core"] then
+                assert path.path =~ IO.Path.get_full_path("/l/core")
+            else
+                assert false else "the dependency is not a path"
+            fi
         si
 
         @Test()
