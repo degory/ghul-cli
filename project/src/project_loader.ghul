@@ -21,6 +21,33 @@ namespace Ghul.Project is
     /// Reads the project in a directory and settles what a build of it is
     /// for, before any compiler is started.
     class PROJECT_LOADER is
+        /// The manifest in `directory`, or each reason it cannot be read, as
+        /// messages to show the user. No target is settled.
+        ///
+        /// - directory: the directory holding the manifest
+        read_manifest(directory: string) -> (manifest: MANIFEST?, messages: Collections.List[string]) static is
+            let full_directory = Path.get_full_path(directory)
+            let manifest_path = MANIFEST_LOCATION.find_in(full_directory)
+            let messages = LIST[string]()
+
+            if !manifest_path? then
+                messages.add("no {MANIFEST_LOCATION.FILE_NAME} in {full_directory}")
+                return (manifest = null, messages = messages)
+            fi
+
+            let outcome = MANIFEST_READER.read(File.read_all_text(manifest_path), manifest_path)
+
+            if let problems: ReadOutcome.PROBLEMS = outcome then
+                for problem in problems.problems do
+                    messages.add("{MANIFEST_LOCATION.FILE_NAME}: {problem.describe()}")
+                od
+
+                return (manifest = null, messages = messages)
+            fi
+
+            return (manifest = cast ReadOutcome.OK(outcome).manifest, messages = messages)
+        si
+
         /// The project in `directory`, built for `target_name`.
         ///
         /// - directory: the directory holding the manifest
@@ -28,25 +55,13 @@ namespace Ghul.Project is
         ///   the manifest lists
         load(directory: string, target_name: string?) -> LoadOutcome static is
             let full_directory = Path.get_full_path(directory)
-            let manifest_path = MANIFEST_LOCATION.find_in(full_directory)
+            let read = read_manifest(full_directory)
 
-            if !manifest_path? then
-                return _failed("no {MANIFEST_LOCATION.FILE_NAME} in {full_directory}")
+            if !read.manifest? then
+                return LoadOutcome.FAILED(read.messages)
             fi
 
-            let outcome = MANIFEST_READER.read(File.read_all_text(manifest_path), manifest_path)
-
-            if let problems: ReadOutcome.PROBLEMS = outcome then
-                let messages = LIST[string]()
-
-                for problem in problems.problems do
-                    messages.add("{MANIFEST_LOCATION.FILE_NAME}: {problem.describe()}")
-                od
-
-                return LoadOutcome.FAILED(messages)
-            fi
-
-            let manifest = cast ReadOutcome.OK(outcome).manifest
+            let manifest = read.manifest!
 
             for name in manifest.dependencies.keys do
                 if name !~ CORE_LIBRARY.NAME then

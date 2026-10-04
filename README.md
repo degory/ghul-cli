@@ -54,6 +54,7 @@ ghul run [--no-cache] <script> [args...]    # run any file as a script
 ghul compile [--no-cache] <script.ghul>     # compile, and print the path to the result
 ghul build [--target <name>]                # build the project in this directory
 ghul run [--target <name>] [-- args...]     # build the project, then run it
+ghul project response-file|compiler         # what editors read (see below)
 ghul install-compiler [version]             # install or update ghul.compiler
 ghul cache clear                            # empty the compiled-script cache
 ghul repl [--no-server] [--no-default-use]  # start an interactive session
@@ -128,6 +129,31 @@ gives the built-in types their members, fetched from Git into
 `~/.cache/ghul-cli/libraries` at the release this tool pins for the compiler
 in use. Declaring `ghul-core` in the manifest's `dependencies`, at a `tag` or
 a `path`, uses that instead. No other dependencies are supported yet.
+
+## tools for editors
+
+Two commands exist for editors and other tools that analyse a project the
+way its build compiles it, rather than for building it:
+
+```sh
+ghul project response-file --output <path> [--source-globs <path>] [--target <name>]
+ghul project compiler
+```
+
+`ghul project response-file` writes the options a build passes the compiler,
+one flag a line with its value, without the output or the project's own
+sources: the client passes it to the compiler as `@<path>`. A wasm build's
+core library is in it too, as its `--library-source` declaration and its
+files. `--source-globs` also writes the manifest's source globs, one a line
+and relative to the manifest, for the client to expand and watch.
+`--target` is needed when the manifest lists more than one target.
+
+`ghul project compiler` prints the command that runs the compiler the
+project builds with, installing it first if need be, as the only line on
+standard output. With no `compiler` in the manifest that is the newest
+installed, so it can change after a compiler is installed.
+
+Both report a manifest's problems on standard error and exit non-zero.
 
 ## the REPL
 

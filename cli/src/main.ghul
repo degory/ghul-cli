@@ -375,6 +375,8 @@ namespace Ghul.Cli is
         Std.error.write_line("       ghul compile [--no-cache] <script.ghul>")
         Std.error.write_line("       ghul build [--target <name>]")
         Std.error.write_line("       ghul run [--target <name>] [-- args...]")
+        Std.error.write_line("       ghul project response-file --output <path> [--source-globs <path>] [--target <name>]")
+        Std.error.write_line("       ghul project compiler")
         Std.error.write_line("       ghul install-compiler [version]")
         Std.error.write_line("       ghul cache clear")
         Std.error.write_line("       ghul repl")
@@ -782,6 +784,85 @@ namespace Ghul.Cli is
         return 1
     si
 
+    // `ghul project response-file` and `ghul project compiler`: what an
+    // editor reads to analyse a project the way its build compiles it.
+    cmd_project_tool(rest: Collections.List[string]) -> int is
+        let say = (message: string) -> void => Std.error.write_line("ghul: {message}")
+
+        if rest.count < 1 \/ (rest[0] !~ "response-file" /\ rest[0] !~ "compiler") then
+            Std.error.write_line("usage: ghul project response-file --output <path> [--source-globs <path>] [--target <name>]")
+            Std.error.write_line("       ghul project compiler")
+            return 1
+        fi
+
+        let wants_response_file = rest[0] =~ "response-file"
+        let options = Ghul.Project.RESPONSE_FILE_COMMAND_LINE.parse(rest[1..<0])
+
+        if wants_response_file then
+            if let problem: string = options.problem then
+                say(problem)
+                return 1
+            fi
+        elif rest.count > 1 then
+            say("unexpected argument {rest[1]}")
+            return 1
+        fi
+
+        let read = Ghul.Project.PROJECT_LOADER.read_manifest(Directory.get_current_directory())
+
+        if !read.manifest? then
+            for message in read.messages do
+                say(message)
+            od
+
+            return 1
+        fi
+
+        let manifest = read.manifest!
+
+        let store = Host.COMPILER_STORE.for_this_user()
+
+        if let compiler_version: string = ensure_compiler_installed(store, manifest.compiler_version, false) then
+            let command = store.command(compiler_version)
+
+            let compiler =
+                Ghul.Project.COMPILER_PROCESS(command.file_name, Collections.LIST[string](command.leading_arguments()))
+
+            if !wants_response_file then
+                Std.out.write_line(Ghul.Project.EDITOR_FILES.command_line(compiler))
+                return 0
+            fi
+
+            let loaded = Ghul.Project.PROJECT_LOADER.load(Directory.get_current_directory(), options.target)
+
+            if let failed: Ghul.Project.LoadOutcome.FAILED = loaded then
+                for message in failed.messages do
+                    say(message)
+                od
+
+                return 1
+            fi
+
+            let project = cast Ghul.Project.LoadOutcome.LOADED(loaded).project
+
+            if Ghul.Project.EDITOR_FILES.write(
+                project,
+                compiler_version,
+                Ghul.Project.LIBRARY_CACHE.for_this_user(),
+                options.output!,
+                options.source_globs,
+                say)
+            then
+                return 0
+            fi
+
+            return 1
+        fi
+
+        say("could not install ghul.compiler")
+        return 1
+    si
+
     entry(args: string[]) -> int is
         if args.count < 1 then
             print_usage()
@@ -821,6 +902,10 @@ namespace Ghul.Cli is
 
         if verb =~ "build" then
             return cmd_project(rest, false)
+        fi
+
+        if verb =~ "project" then
+            return cmd_project_tool(rest)
         fi
 
         if verb =~ "run" then
