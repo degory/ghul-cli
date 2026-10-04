@@ -1,0 +1,94 @@
+namespace Ghul.Project is
+    use Collections.LIST
+    use IO.File
+    use IO.Path
+
+    /// A project ready to build: its manifest, the directory holding it,
+    /// and the target the build is for.
+    class LOADED_PROJECT(manifest: MANIFEST, directory: string, target: BuildTarget) is si
+
+    /// What loading a project produced: the project, or each reason it
+    /// cannot be built, as messages to show the user.
+    ///
+    /// The loaded form compares by reference on the project it holds:
+    /// nothing asks whether two loads are the same one.
+    @suppress("synthesized-equality-fallback")
+    union LoadOutcome is
+        LOADED(project: LOADED_PROJECT);
+        FAILED(messages: Collections.List[string]);
+    si
+
+    /// Reads the project in a directory and settles what a build of it is
+    /// for, before any compiler is started.
+    class PROJECT_LOADER is
+        /// The project in `directory`, built for `target_name`.
+        ///
+        /// - directory: the directory holding the manifest
+        /// - target_name: the target asked for, or null to take the only one
+        ///   the manifest lists
+        load(directory: string, target_name: string?) -> LoadOutcome static is
+            let full_directory = Path.get_full_path(directory)
+            let manifest_path = MANIFEST_LOCATION.find_in(full_directory)
+
+            if !manifest_path? then
+                return _failed("no {MANIFEST_LOCATION.FILE_NAME} in {full_directory}")
+            fi
+
+            let outcome = MANIFEST_READER.read(File.read_all_text(manifest_path), manifest_path)
+
+            if let problems: ReadOutcome.PROBLEMS = outcome then
+                let messages = LIST[string]()
+
+                for problem in problems.problems do
+                    messages.add("{MANIFEST_LOCATION.FILE_NAME}: {problem.describe()}")
+                od
+
+                return LoadOutcome.FAILED(messages)
+            fi
+
+            let manifest = cast ReadOutcome.OK(outcome).manifest
+
+            for name in manifest.dependencies.keys do
+                if name !~ CORE_LIBRARY.NAME then
+                    return _failed("dependencies are not supported yet")
+                fi
+            od
+
+            let chosen = choose_target(manifest.targets, target_name)
+
+            if let message: string = chosen.problem then
+                return _failed(message)
+            fi
+
+            return LoadOutcome.LOADED(LOADED_PROJECT(manifest, full_directory, chosen.target))
+        si
+
+        /// The target a build is for: the one named, which the manifest has
+        /// to list, or the only one it lists.
+        ///
+        /// - targets: the targets the manifest lists
+        /// - target_name: the target asked for, or null
+        choose_target(targets: Collections.List[BuildTarget], target_name: string?) -> (target: BuildTarget, problem: string?) static is
+            let listed = string.join(", ", targets |> Ghul.Pipes.map(t => COMPILER_ARGUMENTS.target_name(t)))
+
+            if let name: string = target_name then
+                for target in targets do
+                    if COMPILER_ARGUMENTS.target_name(target) =~ name then
+                        return (target = target, problem = null)
+                    fi
+                od
+
+                return (target = BuildTarget.DOTNET, problem = "the manifest does not list the target {name}; it lists {listed}")
+            fi
+
+            if targets.count == 1 then
+                return (target = targets[0], problem = null)
+            fi
+
+            return (target = BuildTarget.DOTNET, problem = "the manifest lists more than one target; name one with --target: {listed}")
+        si
+
+        _failed(message: string) -> LoadOutcome static =>
+            LoadOutcome.FAILED(LIST[string]([message]))
+    si
+si

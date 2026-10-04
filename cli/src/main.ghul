@@ -373,6 +373,8 @@ namespace Ghul.Cli is
         Std.error.write_line("usage: ghul [--no-cache] [--] <script> [args...]")
         Std.error.write_line("       ghul run [--no-cache] <script> [args...]")
         Std.error.write_line("       ghul compile [--no-cache] <script.ghul>")
+        Std.error.write_line("       ghul build [--target <name>]")
+        Std.error.write_line("       ghul run [--target <name>] [-- args...]")
         Std.error.write_line("       ghul install-compiler [version]")
         Std.error.write_line("       ghul cache clear")
         Std.error.write_line("       ghul repl")
@@ -724,6 +726,62 @@ namespace Ghul.Cli is
         return terminal.run()
     si
 
+    // `ghul build` and `ghul run` in a directory with a manifest: the
+    // compiler the manifest names is installed if need be, the project is
+    // built into out/<target>/, and a run then starts what was built.
+    cmd_project(rest: Collections.List[string], wants_run: bool) -> int is
+        let say = (message: string) -> void => Std.error.write_line("ghul: {message}")
+        let command_line = Ghul.Project.PROJECT_COMMAND_LINE.parse(rest, wants_run)
+
+        if let problem: string = command_line.problem then
+            say(problem)
+            return 1
+        fi
+
+        let loaded = Ghul.Project.PROJECT_LOADER.load(Directory.get_current_directory(), command_line.target)
+
+        if let failed: Ghul.Project.LoadOutcome.FAILED = loaded then
+            for message in failed.messages do
+                say(message)
+            od
+
+            return 1
+        fi
+
+        let project = cast Ghul.Project.LoadOutcome.LOADED(loaded).project
+        let store = Host.COMPILER_STORE.for_this_user()
+
+        if let compiler_version: string = ensure_compiler_installed(store, project.manifest.compiler_version, false) then
+            let command = store.command(compiler_version)
+
+            let compiler =
+                Ghul.Project.COMPILER_PROCESS(command.file_name, Collections.LIST[string](command.leading_arguments()))
+
+            let exit_code =
+                Ghul.Project.PROJECT_BUILD.build(
+                    project,
+                    compiler,
+                    compiler_version,
+                    store.runtime_assembly(compiler_version),
+                    Ghul.Project.LIBRARY_CACHE.for_this_user(),
+                    say)
+
+            if exit_code != 0 \/ !wants_run then
+                return exit_code
+            fi
+
+            return
+                Ghul.Project.PROJECT_RUN.run(
+                    project,
+                    Ghul.Project.PROJECT_BUILD.output_path(project),
+                    command_line.program_arguments,
+                    say)
+        fi
+
+        say("could not install ghul.compiler")
+        return 1
+    si
+
     entry(args: string[]) -> int is
         if args.count < 1 then
             print_usage()
@@ -761,7 +819,15 @@ namespace Ghul.Cli is
             return cmd_compile(after_verb.items, no_cache \/ after_verb.no_cache)
         fi
 
+        if verb =~ "build" then
+            return cmd_project(rest, false)
+        fi
+
         if verb =~ "run" then
+            if Ghul.Project.PROJECT_COMMAND_LINE.names_project(rest) then
+                return cmd_project(rest, true)
+            fi
+
             let after_verb = strip_no_cache(rest)
 
             return cmd_run(after_verb.items, true, no_cache \/ after_verb.no_cache)
