@@ -1,0 +1,116 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+    use IO.Directory
+    use IO.File
+    use IO.Path
+
+    use Ghul.Project.SOURCE_SET
+
+    use Assert = Microsoft.VisualStudio.TestTools.UnitTesting.Assert;
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    // What a project's source globs match in a scratch directory tree:
+    //
+    //   src/main.ghul
+    //   src/util.ghul
+    //   src/notes.txt
+    //   src/deep/inner/more.ghul
+    //   extra/a1.ghul
+    //   extra/ab.ghul
+    //   tests/test.ghul
+    @TestClass()
+    class SOURCE_SET_TESTS is
+        init() is si
+
+        _tree() -> string is
+            let root = Path.combine(Path.get_temp_path(), "ghul-sources-{System.Guid.new_guid().to_string("N")}")
+
+            for file in [
+                "src/main.ghul",
+                "src/util.ghul",
+                "src/notes.txt",
+                "src/deep/inner/more.ghul",
+                "extra/a1.ghul",
+                "extra/ab.ghul",
+                "tests/test.ghul"
+            ] do
+                let path = Path.combine(root, file)
+
+                Directory.create_directory(Path.get_directory_name(path)!)
+                File.write_all_text(path, "")
+            od
+
+            return root
+        si
+
+        // The matched files, relative to the root and with `/` between
+        // their parts, so the expectations read the same on every system.
+        _relative(root: string, files: Collections.List[string]) -> string is
+            let names = LIST[string]()
+
+            for file in files do
+                names.add(Path.get_relative_path(root, file).replace('\\', '/'))
+            od
+
+            return string.join(" ", names)
+        si
+
+        _same(expected: string, actual: string) is
+            assert actual =~ expected else "expected '{expected}', got '{actual}'"
+        si
+
+        _expand(globs: string[]) -> string is
+            let root = _tree()
+
+            try
+                return _relative(root, SOURCE_SET.expand(root, LIST[string](globs)))
+            finally
+                Directory.delete(root, true)
+            yrt
+        si
+
+        @Test()
+        double_star_matches_any_depth_including_none() is
+            _same(
+                "src/deep/inner/more.ghul src/main.ghul src/util.ghul",
+                _expand(["src/**/*.ghul"]))
+        si
+
+        @Test()
+        single_star_stays_within_one_directory() is
+            _same("src/main.ghul src/util.ghul", _expand(["src/*.ghul"]))
+        si
+
+        @Test()
+        question_mark_matches_one_character() is
+            _same("extra/a1.ghul extra/ab.ghul", _expand(["extra/a?.ghul"]))
+            _same("", _expand(["extra/?.ghul"]))
+        si
+
+        @Test()
+        globs_are_combined_sorted_and_without_duplicates() is
+            _same(
+                "extra/a1.ghul src/main.ghul src/util.ghul",
+                _expand(["src/*.ghul", "extra/a1.ghul", "src/main.ghul"]))
+        si
+
+        @Test()
+        a_glob_under_a_directory_that_does_not_exist_matches_nothing() is
+            _same("", _expand(["missing/**/*.ghul"]))
+        si
+
+        @Test()
+        a_leading_double_star_matches_from_the_root() is
+            _same(
+                "extra/a1.ghul extra/ab.ghul src/deep/inner/more.ghul src/main.ghul src/util.ghul tests/test.ghul",
+                _expand(["**/*.ghul"]))
+        si
+
+        // A dot in a glob is a dot, not "any character".
+        @Test()
+        a_literal_character_matches_only_itself() is
+            _same("", _expand(["src/main.ghulx", "src/mainxghul"]))
+        si
+    si
+si
