@@ -94,5 +94,5 @@ the problems rather than a model that is partly made up.
 
 ## what is not here yet
 
-Commands, globbing the sources, fetching anything, and the lockfile are the
-tasks that follow. See [ghul-lang/ghul#3211](https://github.com/ghul-lang/ghul/issues/3211).
+The lockfile, a git dependency at a branch rather than a tag, and dependencies
+for the dotnet target are the tasks that follow. See [ghul-lang/ghul#3211](https://github.com/ghul-lang/ghul/issues/3211).

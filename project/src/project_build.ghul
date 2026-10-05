@@ -27,10 +27,11 @@ namespace Ghul.Project is
             return Path.join([directory, "{name}.exe"])
         si
 
-        /// The source libraries a build of `project` compiles in: the core
-        /// library and then the runtime library for the wasm target, and
-        /// nothing for `dotnet`. Null, with the problem reported to `say`,
-        /// where either cannot be found.
+        /// The source libraries a build of `project` compiles in: for the
+        /// wasm target the core library, the runtime library and then the
+        /// libraries the manifest's own dependencies name, and nothing for
+        /// `dotnet`. Null, with the problem reported to `say`, where any of
+        /// them cannot be found.
         ///
         /// - project: the project being built
         /// - compiler_version: the compiler the build uses
@@ -67,6 +68,15 @@ namespace Ghul.Project is
             if let library: LibraryOutcome.FOUND = runtime then
                 result.add(library.library)
             fi
+
+            let dependencies = DEPENDENCY_LIBRARIES.find(project.manifest, project.directory, cache)
+
+            if let problem: string = dependencies.problem then
+                say(problem)
+                return null
+            fi
+
+            result.add_range(dependencies.libraries)
 
             return result
         si

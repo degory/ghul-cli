@@ -1,0 +1,1 @@
+{ "name": "wasm-dependency", "targets": ["wasm"], "dependencies": { "greeting": { "path": "../../libraries/greeting" } } }

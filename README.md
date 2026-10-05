@@ -130,8 +130,15 @@ fetched from Git into `~/.cache/ghul-cli/libraries` at the releases this tool
 pins for the compiler in use: ghul-core, which gives the built-in types their
 members, and then ghul-runtime, which supplies the pipes and the rest of
 `Ghul`. Declaring `ghul-core` or `ghul-runtime` in the manifest's
-`dependencies`, at a `tag` or a `path`, uses that instead. No other
-dependencies are supported yet.
+`dependencies`, at a `tag` or a `path`, uses that instead.
+
+Any other entry in `dependencies` names a source library a wasm build compiles
+in after those two: a directory holding a `ghul-project.json` that lists
+`wasm` among its targets, declared by `path` or as a `git` repository at a
+`tag`, and fetched into the same cache. A library's own dependencies are
+compiled in too, each before the libraries that use it, and a `path` in a
+library's manifest is relative to that library. A `dotnet` build refuses a
+manifest with source library dependencies.
 
 A wasm build needs `ghul.compiler` 64.15.0 or newer. Where the newest
 installed is older, the build installs the newest release and uses that; a
