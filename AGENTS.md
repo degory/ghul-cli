@@ -173,22 +173,24 @@ looks for them.
   a wasm module. `CORE_LIBRARY` supplies ghul-core to a wasm build, at a
   tag pinned per compiler version unless the manifest declares it, through
   `LIBRARY_CACHE` (a tag fetched by `GIT` into a read-only per-user cache
-  entry, found again with no `git` call). `FILE_LOCK` is the advisory lock
+  entry, found again with no `git` call). `DEPENDENCY_LIBRARIES` supplies a
+  wasm build the other source libraries the manifest's dependencies name,
+  each after the libraries it depends on. `FILE_LOCK` is the advisory lock
   the cache and the CLI's script cache share. `EDITOR_FILES` writes what
   `ghul project response-file` hands an editor (the build's option groups
   from `COMPILER_ARGUMENTS.option_groups`, one a line, and the manifest's
-  globs) and the one-line compiler command `ghul project compiler` prints. The lockfile, transitive
-  dependencies and dependencies other than ghul-core are the tasks under
-  ghul-lang/ghul#3211 still to come.
+  globs) and the one-line compiler command `ghul project compiler` prints. The lockfile and dependencies for the
+  dotnet target are the tasks under ghul-lang/ghul#3211 still to come.
 - `unit-tests/` — MSTest project covering the pure path/cache-key/
   runnable-by-default/stdin-marker/source-resolution logic.
 - `tests/project.sh` — end-to-end test of `ghul build`, `ghul run`, `ghul new`
   and the editor files under a scratch `HOME`: a library, a bad manifest,
-  refused dependencies, an unlisted target, a missing manifest, the
+  a dependency refused for the dotnet target, an unlisted target, a missing manifest, the
   `--library` and `--compiler` overrides and the wasm compiler minimum. It
   then runs `tests/projects` with ghul-test against the CLI it built.
 - `tests/projects/` — ghul-test project tests (`--use-ghul-cli`): programs
-  for dotnet and wasm and a build that fails, each with the output or
+  for dotnet and wasm, one depending on the source library in
+  `tests/libraries`, and a build that fails, each with the output or
   diagnostics expected of it.
 - `tests/smoke.sh` — end-to-end test: builds the tool, points it at a real
   script under a scratch `HOME` with no `ghul.compiler` pre-installed, and

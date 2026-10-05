@@ -102,16 +102,16 @@ if err="$(cd "$broken" && dotnet "$cli" build 2>&1)"; then
 fi
 [[ "$err" == *"ghul: ghul-project.json: name:"* ]] || fail "unexpected message for a bad manifest: $err"
 
-echo "project: dependencies other than ghul-core and ghul-runtime are refused..." >&2
+echo "project: a source library dependency is refused for the dotnet target..." >&2
 dependent="$scratch/dependent"
 mkdir -p "$dependent/src"
 cat > "$dependent/ghul-project.json" <<'JSON'
 { "name": "dependent", "dependencies": { "scratch": { "path": "../shapes" } } }
 JSON
 if err="$(cd "$dependent" && dotnet "$cli" build 2>&1)"; then
-    fail "expected a manifest with dependencies to fail"
+    fail "expected a dotnet build with a source library dependency to fail"
 fi
-[[ "$err" == *"ghul: dependencies are not supported yet"* ]] || fail "unexpected message for dependencies: $err"
+[[ "$err" == *"ghul: scratch: source library dependencies are supported only for the wasm target"* ]] || fail "unexpected message for dependencies: $err"
 
 echo "project: a target the manifest does not list is refused..." >&2
 if err="$(cd "$program" && dotnet "$cli" build --target wasm 2>&1)"; then

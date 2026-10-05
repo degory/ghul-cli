@@ -1,0 +1,200 @@
+namespace Ghul.Cli.Tests is
+    use Collections.LIST
+    use IO.Directory
+    use IO.File
+    use IO.Path
+
+    use Ghul.Project.DEPENDENCY_LIBRARIES
+    use Ghul.Project.GIT
+    use Ghul.Project.LIBRARY_CACHE
+    use Ghul.Project.LoadOutcome
+    use Ghul.Project.MANIFEST
+    use Ghul.Project.MANIFEST_READER
+    use Ghul.Project.PROJECT_LOADER
+    use Ghul.Project.ReadOutcome
+
+    use TestClass = Microsoft.VisualStudio.TestTools.UnitTesting.TestClassAttribute;
+    use Test = Microsoft.VisualStudio.TestTools.UnitTesting.TestMethodAttribute;
+
+    // Finding the source libraries a manifest's dependencies name, from
+    // projects the test writes into a scratch directory.
+    @TestClass()
+    class DEPENDENCY_LIBRARIES_TESTS is
+        init() is si
+
+        _scratch() -> string =>
+            Path.combine(Path.get_temp_path(), "ghul-dl-{System.Guid.new_guid().to_string("N").substring(0, 8)}")
+
+        _delete(path: string) is
+            if Directory.exists(path) then
+                for file in Directory.get_files(path, "*", IO.SearchOption.ALL_DIRECTORIES) do
+                    File.set_attributes(file, IO.FileAttributes.NORMAL)
+                od
+
+                Directory.delete(path, true)
+            fi
+        si
+
+        _git(directory: string, arguments: string[]) is
+            let result = GIT.run(LIST[string](arguments), directory)
+
+            assert result.succeeded else "git {string.join(" ", arguments)} failed: {result.error}"
+        si
+
+        // A project directory holding a manifest with `dependencies`, and
+        // one source file.
+        _project(directory: string, name: string, targets: string, dependencies: string) is
+            Directory.create_directory(Path.combine(directory, "src"))
+
+            File.write_all_text(
+                Path.combine(directory, "ghul-project.json"),
+                "{{ \"name\": \"{name}\", \"kind\": \"library\", \"targets\": [{targets}], \"sources\": [\"src/**/*.ghul\"], \"dependencies\": {{ {dependencies} }} }}")
+
+            File.write_all_text(Path.combine(directory, "src", "{name}.ghul"), "")
+        si
+
+        _manifest(directory: string) -> MANIFEST is
+            let path = Path.combine(directory, "ghul-project.json")
+
+            return cast ReadOutcome.OK(MANIFEST_READER.read(File.read_all_text(path), path)).manifest
+        si
+
+        _names(found: (libraries: Collections.List[Ghul.Project.SOURCE_LIBRARY], problem: string?)) -> string =>
+            string.join(" ", found.libraries |> Ghul.Pipes.map(l => "{l.name}@{l.version}"))
+
+        @Test()
+        each_library_follows_the_libraries_it_depends_on() is
+            let scratch = _scratch()
+
+            try
+                _project(Path.combine(scratch, "app"), "app", "\"wasm\"", "\"zeta\": {{ \"path\": \"../zeta\" }}, \"alpha\": {{ \"path\": \"../alpha\" }}")
+                _project(Path.combine(scratch, "zeta"), "zeta", "\"wasm\"", "\"alpha\": {{ \"path\": \"../alpha\" }}, \"beta\": {{ \"path\": \"../beta\" }}")
+                _project(Path.combine(scratch, "beta"), "beta", "\"wasm\", \"dotnet\"", "\"alpha\": {{ \"path\": \"../alpha\" }}")
+                _project(Path.combine(scratch, "alpha"), "alpha", "\"wasm\"", "")
+
+                let found = DEPENDENCY_LIBRARIES.find(_manifest(Path.combine(scratch, "app")), Path.combine(scratch, "app"), LIBRARY_CACHE(Path.combine(scratch, "cache")))
+
+                assert !found.problem? else found.problem ?? ""
+                assert _names(found) =~ "alpha@0.0.0 beta@0.0.0 zeta@0.0.0" else _names(found)
+                assert found.libraries[0].files.count == 1
+                assert found.libraries[0].files[0] =~ Path.get_full_path(Path.combine(scratch, "alpha", "src", "alpha.ghul"))
+            finally
+                _delete(scratch)
+            yrt
+        si
+
+        @Test()
+        ghul_core_and_ghul_runtime_are_not_among_them() is
+            let scratch = _scratch()
+
+            try
+                _project(Path.combine(scratch, "app"), "app", "\"wasm\"", "\"ghul-core\": {{ \"path\": \"../none\" }}, \"ghul-runtime\": {{ \"path\": \"../none\" }}")
+
+                let found = DEPENDENCY_LIBRARIES.find(_manifest(Path.combine(scratch, "app")), Path.combine(scratch, "app"), LIBRARY_CACHE(Path.combine(scratch, "cache")))
+
+                assert !found.problem?
+                assert found.libraries.count == 0
+            finally
+                _delete(scratch)
+            yrt
+        si
+
+        @Test()
+        a_library_at_a_git_tag_is_fetched_and_takes_its_version_from_the_tag() is
+            let scratch = _scratch()
+
+            try
+                let repository = Path.combine(scratch, "repository")
+
+                _project(repository, "lib", "\"wasm\"", "")
+                _git(repository, ["init", "--quiet"])
+                _git(repository, ["config", "user.email", "test@example.com"])
+                _git(repository, ["config", "user.name", "test"])
+                _git(repository, ["add", "."])
+                _git(repository, ["commit", "--quiet", "-m", "first"])
+                _git(repository, ["tag", "v1.2.0"])
+
+                let url = System.Uri(repository).absolute_uri
+
+                _project(Path.combine(scratch, "app"), "app", "\"wasm\"", "\"lib\": {{ \"git\": \"{url}\", \"tag\": \"v1.2.0\" }}")
+
+                let found = DEPENDENCY_LIBRARIES.find(_manifest(Path.combine(scratch, "app")), Path.combine(scratch, "app"), LIBRARY_CACHE(Path.combine(scratch, "cache")))
+
+                assert !found.problem? else found.problem ?? ""
+                assert _names(found) =~ "lib@1.2.0" else _names(found)
+                assert !found.libraries[0].root.starts_with(repository)
+            finally
+                _delete(scratch)
+            yrt
+        si
+
+        @Test()
+        a_library_that_depends_on_itself_is_a_problem() is
+            let scratch = _scratch()
+
+            try
+                _project(Path.combine(scratch, "app"), "app", "\"wasm\"", "\"one\": {{ \"path\": \"../one\" }}")
+                _project(Path.combine(scratch, "one"), "one", "\"wasm\"", "\"two\": {{ \"path\": \"../two\" }}")
+                _project(Path.combine(scratch, "two"), "two", "\"wasm\"", "\"one\": {{ \"path\": \"../one\" }}")
+
+                let found = DEPENDENCY_LIBRARIES.find(_manifest(Path.combine(scratch, "app")), Path.combine(scratch, "app"), LIBRARY_CACHE(Path.combine(scratch, "cache")))
+
+                assert (found.problem ?? "") =~ "one depends on itself through two" else found.problem ?? "no problem"
+            finally
+                _delete(scratch)
+            yrt
+        si
+
+        @Test()
+        a_library_that_does_not_build_for_wasm_is_a_problem() is
+            let scratch = _scratch()
+
+            try
+                _project(Path.combine(scratch, "app"), "app", "\"wasm\"", "\"lib\": {{ \"path\": \"../lib\" }}")
+                _project(Path.combine(scratch, "lib"), "lib", "\"dotnet\"", "")
+
+                let found = DEPENDENCY_LIBRARIES.find(_manifest(Path.combine(scratch, "app")), Path.combine(scratch, "app"), LIBRARY_CACHE(Path.combine(scratch, "cache")))
+
+                assert (found.problem ?? "") =~ "lib does not build for the wasm target" else found.problem ?? "no problem"
+            finally
+                _delete(scratch)
+            yrt
+        si
+
+        @Test()
+        a_git_library_without_a_tag_is_a_problem() is
+            let scratch = _scratch()
+
+            try
+                _project(Path.combine(scratch, "app"), "app", "\"wasm\"", "\"lib\": {{ \"git\": \"https://example.com/lib\", \"branch\": \"main\" }}")
+
+                let found = DEPENDENCY_LIBRARIES.find(_manifest(Path.combine(scratch, "app")), Path.combine(scratch, "app"), LIBRARY_CACHE(Path.combine(scratch, "cache")))
+
+                assert (found.problem ?? "") =~ "lib must be declared with a tag or a path" else found.problem ?? "no problem"
+            finally
+                _delete(scratch)
+            yrt
+        si
+
+        @Test()
+        a_dotnet_build_with_a_source_library_dependency_is_refused() is
+            let scratch = _scratch()
+
+            try
+                _project(scratch, "app", "\"wasm\", \"dotnet\"", "\"lib\": {{ \"path\": \"../lib\" }}")
+
+                let refused = PROJECT_LOADER.load(scratch, "dotnet")
+
+                assert isa LoadOutcome.FAILED(refused)
+
+                let failed = cast LoadOutcome.FAILED(refused)
+
+                assert failed.messages |> Ghul.Pipes.any(m => m.contains("lib: source library dependencies are supported only for the wasm target"))
+
+                assert isa LoadOutcome.LOADED(PROJECT_LOADER.load(scratch, "wasm"))
+            finally
+                _delete(scratch)
+            yrt
+        si
+    si
+si

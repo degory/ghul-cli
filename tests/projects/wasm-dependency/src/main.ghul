@@ -1,0 +1,4 @@
+use IO.Std.write_line
+use Greeting.greet
+
+write_line(greet("a source library"))

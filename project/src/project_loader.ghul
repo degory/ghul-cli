@@ -63,16 +63,18 @@ namespace Ghul.Project is
 
             let manifest = read.manifest!
 
-            for name in manifest.dependencies.keys do
-                if name !~ CORE_LIBRARY.NAME /\ name !~ RUNTIME_LIBRARY.NAME then
-                    return _failed("dependencies are not supported yet")
-                fi
-            od
-
             let chosen = choose_target(manifest.targets, target_name)
 
             if let message: string = chosen.problem then
                 return _failed(message)
+            fi
+
+            if chosen.target != BuildTarget.WASM then
+                for name in manifest.dependencies.keys do
+                    if !DEPENDENCY_LIBRARIES.is_implicit(name) then
+                        return _failed("{name}: source library dependencies are supported only for the wasm target")
+                    fi
+                od
             fi
 
             return LoadOutcome.LOADED(LOADED_PROJECT(manifest, full_directory, chosen.target))
