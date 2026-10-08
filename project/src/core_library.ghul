@@ -79,7 +79,8 @@ namespace Ghul.Project is
                 (earliest_compiler = "65.0.1", tag = "v0.34.0"),
                 (earliest_compiler = "65.1.0", tag = "v0.35.0"),
                 (earliest_compiler = "65.1.4", tag = "v0.36.0"),
-                (earliest_compiler = "65.3.1", tag = "v0.37.0")
+                (earliest_compiler = "65.3.1", tag = "v0.37.0"),
+                (earliest_compiler = "65.4.2", tag = "v0.37.2")
             ]
 
         /// The core library for `manifest`, fetching it into `cache` if it
