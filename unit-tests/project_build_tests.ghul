@@ -166,7 +166,8 @@ namespace Ghul.Cli.Tests is
             _same("v0.37.0", CORE_LIBRARY.pinned_tag("65.3.1"))
             _same("v0.37.0", CORE_LIBRARY.pinned_tag("65.4.1"))
             _same("v0.38.0", CORE_LIBRARY.pinned_tag("65.4.2"))
-            _same("v0.38.0", CORE_LIBRARY.pinned_tag("70.0.0"))
+            _same("v0.39.0", CORE_LIBRARY.pinned_tag("65.4.3"))
+            _same("v0.39.0", CORE_LIBRARY.pinned_tag("70.0.0"))
         si
 
         @Test()
