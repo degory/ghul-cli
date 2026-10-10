@@ -35,13 +35,17 @@ looks for them.
   `resolve_source__materializes_a_dot_ghul_file_for_an_extensionless_script`
   unit test for why this needs a real regression test, not just a
   same-content smoke test). Finds its compiler through
-  `Ghul.Repl.Host.COMPILER_STORE` (`~/.local/share/ghul-cli/compilers/<version>/`,
-  one directory per version holding the package's `tools/net10.0/any`, several
-  versions at once, highest winning where none is named) and installs into it
-  on first use (or on-demand for a specific version via `install-compiler`)
-  with `Ghul.Repl.Host.COMPILER_DOWNLOAD`, which fetches the package straight
-  from the NuGet flat-container feed - no `dotnet tool` call, so a machine
-  with only the .NET runtime works; `GHUL_COMPILER_FEED` names another feed.
+  `Ghul.Repl.Host.COMPILER_STORE` and installs into it
+  on first use (or on-demand for a specific version via `install-compiler`),
+  choosing the one the machine can actually run: `COMPILER_DOWNLOAD`, which
+  fetches the package straight from the NuGet flat-container feed - no
+  `dotnet tool` call, so a machine with only the .NET runtime works -
+  where there is a .NET host, and `NATIVE_COMPILER_DOWNLOAD`, which
+  fetches the Native AOT archive the `ghul.compiler` release carries,
+  where there is none, since a managed compiler cannot be started without
+  one. The version is resolved from the NuGet index either way, being an
+  HTTP document rather than a .NET one. `GHUL_COMPILER_FEED` and
+  `GHUL_COMPILER_AOT_BASE` name another feed and another release base.
   Computes a cache key from the
   script's bytes and the installed compiler version, compiles into
   `~/.cache/ghul-cli/scripts/<key>` when that cache entry doesn't already
@@ -84,11 +88,27 @@ looks for them.
   process with an installed compiler, shared with the Jupyter kernel.
   `COMPILER_STORE` owns where compilers live
   (`~/.local/share/ghul-cli/compilers/<version>/`, several at once,
-  highest winning where none is named) and `COMPILER_DOWNLOAD` installs
-  one straight from the NuGet flat-container feed with no `dotnet tool`
-  call (`GHUL_COMPILER_FEED` names another feed); `COMPILER_COMMAND` is
-  how one is run (`dotnet` and its `ghul.dll`), threaded through
-  everything that starts the compiler. `REFERENCE_ASSEMBLIES` finds the
+  highest winning where none is named). A version there is either managed
+  - `dotnet` and its own `ghul.dll` - or the statically linked
+  `ghul-compiler` a Native AOT release ships, run with no assembly and no
+  .NET beside it, and the store reads either the same way. It also takes
+  a fallback root: `compilers/<version>/` beside the running executable
+  is where a `ghul.cli` release archive carries the compiler it ships, so
+  an installed bundle needs no download and no copy, while installs always
+  land in the user root and a version installed there outranks the
+  bundle's copy of it. `COMPILER_DOWNLOAD` installs a managed one from
+  the NuGet flat-container feed with no `dotnet tool` call
+  (`GHUL_COMPILER_FEED` names another feed) and `NATIVE_COMPILER_DOWNLOAD`
+  installs the AOT one from the `ghul.compiler` release that carries it
+  (`GHUL_COMPILER_AOT_BASE` names another base), which is what a machine
+  with no .NET uses; both unpack into a scratch directory and rename onto
+  the version's directory only once complete, under the store's install
+  lock. `COMPILER_COMMAND` is
+  how one is run, threaded through
+  everything that starts the compiler. `HOST` asks the machine what it
+  can run - the runtime identifier a release names its archives by, the
+  .NET host on DOTNET_ROOT or PATH, and node - rather than taking any of
+  it from configuration. `REFERENCE_ASSEMBLIES` finds the
   reference assemblies to point the compiler at where the machine has no
   SDK ref pack, so a script compiles with only the .NET runtime
   installed. `HOST_SESSIONS.start` assembles one. `SERVER_BACKEND` compiles on one
@@ -158,6 +178,21 @@ looks for them.
   process and a compiler. It records the kernel's pid where the script
   can kill it, since a client killed before its own cleanup runs would
   otherwise leave one behind.
+- `install.sh` — what a machine with no .NET installs: the AOT-compiled
+  tool and the AOT-compiled compiler beside it, in one archive
+  (`ghul-cli-<rid>.tar.gz`) that the release attaches alongside the
+  packages. POSIX `sh`, `tar`, and `curl` or `wget`, and nothing else —
+  no SDK, no runtime, no build tooling, since the two binaries are
+  statically linked and run on the C library alone. `GHUL_CLI_RELEASES`
+  and `GHUL_CLI_API` name another base for a mirror or a test. The tool is
+  installed to `~/.local/opt/ghul` with its `compilers/<version>/`
+  bundled compiler, which is the store's fallback root, so the first run
+  needs no download. The REPL and the Jupyter kernel are not in this build:
+  both host a session in this process and need a .NET runtime, so a
+  machine that wants them installs the SDK and `dotnet tool install -g
+  ghul.cli` instead. The release job checks the archive is exactly the
+  tool and one compiler and that neither binary links a .NET runtime or a
+  toolchain library, so what is installed cannot have grown a dependency.
 - `project/` — the `ghul.project` package: a ghūl project's manifest.
   `MANIFEST` and the kinds, targets, options and dependencies a manifest
   describes; `MANIFEST_READER.read(text, path)` turns manifest text into
@@ -165,7 +200,13 @@ looks for them.
   rather than the first, and touches no file and no network itself;
   `MANIFEST_LOCATION.find_in(directory)` finds the `ghul-project.json` in
   one directory and does not search upwards. `PROJECT_LOADER` reads the
-  project and picks its target, `SOURCE_SET` expands its source globs,
+  project and picks its target - where a project lists both and none is
+  named, `ghul build`/`ghul run` choose wasm on a machine with no .NET,
+  since that is the one it can build, and otherwise leave it to the loader
+  to ask which was meant - and `PROJECT_SCAFFOLD` writes a new project for
+  the target it is handed, which is wasm on a machine with no .NET and
+  dotnet otherwise, so `ghul new` starts something that can build.
+  `SOURCE_SET` expands its source globs,
   `COMPILER_ARGUMENTS` is the one place the compiler's argument list is
   built (editors reuse it), and `PROJECT_BUILD` runs the compiler through
   a response file (`RESPONSE_FILE`) into `out/<target>/`; `PROJECT_RUN`
