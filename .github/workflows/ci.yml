@@ -208,6 +208,7 @@ jobs:
         set -euo pipefail
         dotnet publish cli/ghul-cli.ghulproj -c Release -r linux-x64 \
           -p:PublishAot=true \
+          -p:Version=${{ needs.version.outputs.package }} \
           -o build
 
         mv build/ghul-cli build/ghul
@@ -215,6 +216,23 @@ jobs:
         # The native build's debug symbols: 25MB against a tool that is 8,
         # and nothing a user runs reads them.
         rm -f build/ghul-cli.dbg
+
+    # The tool reads its own version by reflection off the assembly the
+    # build produced, so a publish that forgets to be told the version
+    # ships a tool that calls itself 1.0.0 - which is the MSBuild default,
+    # and which nothing else in this job would notice. Checked rather than
+    # assumed.
+    - name: Check the tool reports this release's version
+      shell: bash
+      run: |
+        set -euo pipefail
+        reported="$(build/ghul --version 2>&1 | head -n 1)"
+        echo "${reported}"
+
+        if ! printf '%s' "${reported}" | grep -q -- "${{ needs.version.outputs.package }}"; then
+          echo "the tool reports '${reported}'; expected version ${{ needs.version.outputs.package }}" >&2
+          exit 1
+        fi
 
     # The newest compiler release, rather than a pinned one: the archive is
     # what a user installs to get going, and a compiler a version behind is

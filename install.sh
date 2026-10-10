@@ -37,6 +37,11 @@ usage: install.sh [--version <tag>] [--dir <path>] [--dry-run] [--help]
 
 Installing puts a directory on PATH if it is not already on it; the script
 says which, and prints the line to add if you would rather do it yourself.
+
+The tool goes to ~/.local/opt/ghul and the compiler it ships goes into the
+ghul-cli cache (~/.cache/ghul-cli, or XDG_CACHE_HOME where that is set),
+since that is where ghul-cli looks for it and where 'ghul cache clear'
+clears it.
 EOF
 }
 
@@ -201,14 +206,18 @@ else
     say "no published sha256 for this asset; continuing without checking it."
 fi
 
+# The tool goes where a program goes; the compiler goes where the tool
+# looks for it. It is not installed beside the executable because nothing
+# here is installed - a manifest names the compiler a project wants and the
+# tool fetches it into its cache - so the cache is where it belongs, and
+# `ghul cache clear` clears it with everything else.
+cache_home="${XDG_CACHE_HOME:-${HOME}/.cache}/ghul-cli"
+
 # --- unpack ------------------------------------------------------------------
 
 mkdir -p "${work}/unpack"
 tar -xzf "${work}/${archive}" -C "${work}/unpack" || fail "the archive could not be unpacked"
 
-# The archive holds the tool and the compiler it ships, and the compiler is
-# laid out as the compiler store lays a version out, so the tool finds it
-# where it was unpacked rather than copying it into the user's store first.
 if [ ! -x "${work}/unpack/ghul" ]; then
     fail "the archive holds no ghul executable at its root"
 fi
@@ -224,8 +233,8 @@ fi
 staged="${root}.new.$$"
 
 rm -rf "${staged}"
-mkdir -p "$(dirname "${root}")"
-mv "${work}/unpack" "${staged}" || fail "the tool could not be staged"
+mkdir -p "$(dirname "${root}")/$(basename "${staged}")"
+mv "${work}/unpack/ghul" "${staged}/ghul" || fail "the tool could not be staged"
 
 previous=""
 if [ -d "${root}" ]; then
@@ -243,6 +252,31 @@ if ! mv "${staged}" "${root}"; then
 fi
 
 rm -rf "${previous}"
+
+# --- put the compiler where the tool looks for it ----------------------------
+
+seeded=""
+
+for shipped in "${work}"/unpack/compilers/*; do
+    [ -d "${shipped}" ] || continue
+
+    version="$(basename "${shipped}")"
+    target="${cache_home}/compilers/${version}"
+
+    if [ -e "${target}" ]; then
+        say "ghul.compiler ${version} is already in the cache; leaving it."
+        continue
+    fi
+
+    mkdir -p "${target}"
+    cp -R "${shipped}/." "${target}/" || fail "ghul.compiler ${version} could not be put in the cache"
+
+    seeded="${seeded} ${version}"
+done
+
+if [ -z "${seeded}" ]; then
+    fail "the archive ships no compiler"
+fi
 
 # --- put it on PATH ----------------------------------------------------------
 
@@ -266,7 +300,9 @@ else
 fi
 
 say ""
-say "installed. Try:"
+say "installed${seeded:+ ghul.compiler${seeded} into ${cache_home}/compilers}."
+say ""
+say "Try:"
 say ""
 say "    ghul --version"
 say "    ghul new hello && cd hello && ghul run"
