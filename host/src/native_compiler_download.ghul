@@ -1,0 +1,180 @@
+namespace Ghul.Repl.Host is
+    use IO.Directory
+    use IO.File
+    use IO.FileMode
+    use IO.FileAccess
+    use IO.FileShare
+    use IO.FileStream
+    use IO.Path
+    use System.Formats.Tar.TarFile
+    use System.IO.Compression.GZipStream
+    use System.IO.Compression.CompressionMode
+
+    // Installs a compiler version from the Native AOT archive a
+    // ghul.compiler release carries, for a machine with no .NET to run the
+    // managed compiler with.
+    //
+    // The archive holds a statically linked compiler and the three files it
+    // reads beside it, and running one needs nothing installed beyond the C
+    // library: no .NET, and no toolchain. That is what makes it the compiler
+    // for a machine with neither the SDK nor a runtime.
+    //
+    // Shaped exactly as COMPILER_DOWNLOAD: the archive is downloaded to a
+    // scratch file, unpacked into a uniquely named scratch directory, and
+    // renamed onto the version's store directory only once complete, under
+    // the same install lock. A reader never sees a half-written version, and
+    // a failed download leaves nothing behind.
+    class NATIVE_COMPILER_DOWNLOAD(_store: COMPILER_STORE, _base: string?) is
+        DEFAULT_BASE: string static => "https://github.com/ghul-lang/ghul/releases/download"
+
+        // A download into `store`, with the release base named by
+        // GHUL_COMPILER_AOT_BASE where that is set, so a mirror or a test
+        // can serve the archives from elsewhere.
+        of(store: COMPILER_STORE) -> NATIVE_COMPILER_DOWNLOAD static =>
+            NATIVE_COMPILER_DOWNLOAD(
+                store, System.Environment.get_environment_variable("GHUL_COMPILER_AOT_BASE"))
+
+        base() -> string => _base ?? DEFAULT_BASE
+
+        // The directory the archive unpacks the compiler into.
+        ARCHIVE_DIRECTORY: string static => "ghul-compiler"
+
+        // The release tag a version is published under, which the compiler
+        // repository tags every version `v<version>`.
+        ARCHIVE_TAG_PREFIX: string static => "v"
+
+        // Where the archive for `version` on this machine is, or the reason
+        // there is none. A platform no release builds a Native AOT compiler
+        // for cannot install one however much .NET is missing.
+        archive_url(version: string) -> (url: string?, failure: string?) is
+            if let rid: string = HOST.rid() then
+                return (
+                    url = "{base()}/{ARCHIVE_TAG_PREFIX}{version}/{ARCHIVE_DIRECTORY}-{rid}.tar.gz",
+                    failure = null)
+            fi
+
+            return (
+                url = null,
+                failure = "there is no Native AOT compiler for this platform")
+        si
+
+        // Installs `version` from its Native AOT archive. Null on success, or
+        // the failure to report, which names the version and, where the
+        // release answered, the HTTP status.
+        install(version: string, say: (string) -> void) -> string? is
+            // The version names a directory and a URL, so anything that
+            // could reach outside a single name is refused outright.
+            if version.length == 0 \/ version.contains("/") \/ version.contains("\\") \/ version.contains("..") then
+                return "ghul.compiler {version} is not a version"
+            fi
+
+            let (url, url_failure) = archive_url(version)
+
+            if let problem: string = url_failure then
+                return problem
+            fi
+
+            Directory.create_directory(_store.root)
+
+            let archive_scratch =
+                Path.join([_store.root, ".download-{System.Environment.process_id}-{System.Guid.new_guid().to_string("N")}.tar.gz"])
+
+            try
+                say("downloading the Native AOT compiler ghul.compiler {version}...")
+
+                let download_failure = _download(url!, version, archive_scratch)
+
+                if let problem: string = download_failure then
+                    return problem
+                fi
+
+                let scratch_directory =
+                    Path.join([_store.root, "{version}.tmp-{System.Environment.process_id}-{System.Guid.new_guid().to_string("N")}"])
+
+                try
+                    let unpack_failure = _unpack(archive_scratch, scratch_directory)
+
+                    if let problem: string = unpack_failure then
+                        return problem
+                    fi
+
+                    let unpacked = Path.join([scratch_directory, ARCHIVE_DIRECTORY])
+
+                    if !File.exists(Path.join([unpacked, COMPILER_STORE.NATIVE_COMPILER_FILE_NAME])) then
+                        return "the Native AOT archive for ghul.compiler {version} carries no compiler"
+                    fi
+
+                    try
+                        Directory.move(unpacked, _store.directory(version))
+                    catch e: IO.IOException
+                        // Another process installed the same version first;
+                        // its copy is complete, ours is redundant.
+                        _delete_directory(unpacked)
+                    yrt
+
+                    return null
+                finally
+                    _delete_directory(scratch_directory)
+                yrt
+            finally
+                if File.exists(archive_scratch) then
+                    File.delete(archive_scratch)
+                fi
+            yrt
+        si
+
+        _download(url: string, version: string, destination: string) -> string? is
+            let client = System.Net.Http.HttpClient()
+
+            try
+                let response = client.get_async(url).result
+
+                if !response.is_success_status_code then
+                    return "ghul.compiler {version} has no Native AOT compiler for this platform (HTTP {cast int(response.status_code)})"
+                fi
+
+                let bytes = response.content.read_as_byte_array_async().result
+
+                File.write_all_bytes(destination, bytes)
+
+                return null
+            catch e: System.Exception
+                return "the Native AOT compiler for ghul.compiler {version} could not be downloaded ({e.get_type().name})"
+            finally
+                client.dispose()
+            yrt
+        si
+
+        // The archive is a gzip stream, which TarFile does not detect for
+        // itself, so it is decompressed on the way in. The permissions come
+        // through with it, which is what leaves the compiler executable once
+        // it lands in the store.
+        _unpack(archive: string, destination: string) -> string? is
+            Directory.create_directory(destination)
+
+            let input = FileStream(archive, FileMode.OPEN, FileAccess.READ, FileShare.READ)
+
+            try
+                let gzip = GZipStream(input, CompressionMode.DECOMPRESS)
+
+                try
+                    TarFile.extract_to_directory(gzip, destination, true)
+
+                    return null
+                finally
+                    gzip.dispose()
+                yrt
+            catch e: System.Exception
+                return "the Native AOT compiler archive could not be read ({e.get_type().name})"
+            finally
+                input.dispose()
+            yrt
+        si
+
+        _delete_directory(path: string) is
+            if Directory.exists(path) then
+                Directory.delete(path, true)
+            fi
+        si
+    si
+si

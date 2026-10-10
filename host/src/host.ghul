@@ -1,0 +1,108 @@
+namespace Ghul.Repl.Host is
+    use IO.File
+    use IO.Path
+
+    // What the machine this tool is running on can be asked to run: the
+    // tools a build is made and run with, and the platform the compiler
+    // release publishes for.
+    //
+    // Everything here is asked of the machine rather than configured, so a
+    // tree an install script laid out is recognised the same as one set up
+    // by hand, and a machine with no .NET is recognised as one rather than
+    // failing part-way through a build.
+    class HOST is
+        // The runtime identifier the compiler release names its Native AOT
+        // archives by - `linux-x64`, `osx-arm64`, `win-x64` - or null where
+        // this platform is not one an archive is built for.
+        //
+        // Assembled from the operating system and the architecture
+        // separately rather than read from
+        // RuntimeInformation.RuntimeIdentifier whole, which names the
+        // distribution too and would answer `ubuntu.24.04-x64` where the
+        // archive is `linux-x64`.
+        rid() -> string? static is
+            let system =
+                if System.OperatingSystem.is_windows() then
+                    "win"
+                elif System.OperatingSystem.is_linux() then
+                    "linux"
+                elif System.OperatingSystem.is_mac_o_s() then
+                    "osx"
+                else
+                    return null
+                fi
+
+            let identifier = System.Runtime.InteropServices.RuntimeInformation.runtime_identifier
+
+            let components = identifier.split(['-'])
+
+            if components.count < 2 then
+                return null
+            fi
+
+            let architecture = components[components.count - 1]
+
+            if architecture.length == 0 then
+                return null
+            fi
+
+            return "{system}-{architecture}"
+        si
+
+        // The .NET host, where one can be run: the interpreter DOTNET_ROOT
+        // names, or `dotnet` on PATH.
+        //
+        // A managed compiler is started through it, and so is a build for
+        // the dotnet target, which reads the SDK's reference assemblies
+        // through it. Its absence is what makes a Native AOT compiler the
+        // one to install, and the wasm target the one to build for.
+        dotnet() -> string? static is
+            if let root: string = System.Environment.get_environment_variable("DOTNET_ROOT") then
+                if root.length > 0 then
+                    let host = Path.join([root, DOTNET_FILE_NAME])
+
+                    if File.exists(host) then
+                        return host
+                    fi
+                fi
+            fi
+
+            return on_path(DOTNET_FILE_NAME)
+        si
+
+        has_dotnet() -> bool static => dotnet()?
+
+        // Node.js, which is what runs a wasm build. Without it a wasm build
+        // still compiles - it is the compiler, not the host, that produces
+        // the module - it just cannot be run.
+        has_node() -> bool static => on_path(NODE_FILE_NAME)?
+
+        // The first `name` that PATH finds, or null where PATH names none.
+        on_path(name: string) -> string? static is
+            if let path: string = System.Environment.get_environment_variable("PATH") then
+                for directory in path.split([PATH_SEPARATOR]) do
+                    if directory.length == 0 then
+                        continue
+                    fi
+
+                    let candidate = Path.join([directory, name])
+
+                    if File.exists(candidate) then
+                        return candidate
+                    fi
+                od
+            fi
+
+            return null
+        si
+
+        DOTNET_FILE_NAME: string static =>
+            if System.OperatingSystem.is_windows() then "dotnet.exe" else "dotnet" fi
+
+        NODE_FILE_NAME: string static =>
+            if System.OperatingSystem.is_windows() then "node.exe" else "node" fi
+
+        PATH_SEPARATOR: char static =>
+            if System.OperatingSystem.is_windows() then ';' else ':' fi
+    si
+si

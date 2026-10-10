@@ -100,7 +100,7 @@ namespace Ghul.Cli.Tests is
         _store() -> (store: COMPILER_STORE, root: string) is
             let root = Path.combine(Path.get_temp_path(), "ghul-download-{System.Guid.new_guid().to_string("N")}")
 
-            return (store = COMPILER_STORE(root), root = root)
+            return (store = COMPILER_STORE(root, null), root = root)
         si
 
         _delete(root: string) is
