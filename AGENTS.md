@@ -56,10 +56,12 @@ looks for them.
   uniquely-named scratch directory and renames it onto the real cache
   entry, so a reader's existence check never sees a half-written one and a
   losing racer just discards its redundant copy. `ghul cache clear` deletes
-  the whole cache root outright; `ghul version` reports the tool's own
+  the whole `ghul-cli` cache - compiled scripts, the libraries a wasm
+  build fetched, and the compilers - and says where it was; `ghul version`
+  reports the tool's own
   `AssemblyInformationalVersion` (the same reflection idiom `ghul`'s own
-  `--version` uses in `ghul/src/driver/main.ghul`) alongside the installed
-  `ghul.compiler` version, if any.
+  `--version` uses in `ghul/src/driver/main.ghul`) alongside the highest
+  `ghul.compiler` version held, if any.
 - `repl/` — the `ghul.repl` package: the session core, published so that
   the browser playground and a notebook kernel build on the same one.
   `SESSION` holds the accepted cells and generates each submission's
@@ -86,17 +88,18 @@ looks for them.
   reference under the referenced file's own name.
 - `host/` — the `ghul.repl.host` package: hosting a session in this
   process with an installed compiler, shared with the Jupyter kernel.
-  `COMPILER_STORE` owns where compilers live
-  (`~/.local/share/ghul-cli/compilers/<version>/`, several at once,
-  highest winning where none is named). A version there is either managed
-  - `dotnet` and its own `ghul.dll` - or the statically linked
+  `COMPILER_STORE` owns where compilers are held
+  (`$XDG_CACHE_HOME/ghul-cli/compilers/<version>/`, `~/.cache/ghul-cli/compilers`
+  where that is unset, several versions at once, highest winning where a
+  build names none). Nothing is installed: a manifest names the version a
+  project wants and the store makes it available, so a store sits in the
+  cache beside the compiled-script and library caches rather than in
+  `~/.local/share` - everything in it is re-fetchable and `ghul cache
+  clear` takes the lot. A version there is either managed - `dotnet` and
+  its own `ghul.dll` - or the statically linked
   `ghul-compiler` a Native AOT release ships, run with no assembly and no
-  .NET beside it, and the store reads either the same way. It also takes
-  a fallback root: `compilers/<version>/` beside the running executable
-  is where a `ghul.cli` release archive carries the compiler it ships, so
-  an installed bundle needs no download and no copy, while installs always
-  land in the user root and a version installed there outranks the
-  bundle's copy of it. `COMPILER_DOWNLOAD` installs a managed one from
+  .NET beside it, and the store reads either the same way.
+  `COMPILER_DOWNLOAD` installs a managed one from
   the NuGet flat-container feed with no `dotnet tool` call
   (`GHUL_COMPILER_FEED` names another feed) and `NATIVE_COMPILER_DOWNLOAD`
   installs the AOT one from the `ghul.compiler` release that carries it
@@ -185,9 +188,11 @@ looks for them.
   no SDK, no runtime, no build tooling, since the two binaries are
   statically linked and run on the C library alone. `GHUL_CLI_RELEASES`
   and `GHUL_CLI_API` name another base for a mirror or a test. The tool is
-  installed to `~/.local/opt/ghul` with its `compilers/<version>/`
-  bundled compiler, which is the store's fallback root, so the first run
-  needs no download. The REPL and the Jupyter kernel are not in this build:
+  installed to `~/.local/opt/ghul` and the compiler it ships is copied into
+  the compiler store the tool reads, which is the same single place every
+  other compiler goes, so there is one cache to clear and one directory to
+  look in. It says which version it put where.
+  The REPL and the Jupyter kernel are not in this build:
   both host a session in this process and need a .NET runtime, so a
   machine that wants them installs the SDK and `dotnet tool install -g
   ghul.cli` instead. The release job checks the archive is exactly the

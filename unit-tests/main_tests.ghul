@@ -54,7 +54,7 @@ namespace Ghul.Cli.Tests is
         @Test()
         highest_version__is_absent_when_no_compilers_are_installed() is
             let store = Ghul.Repl.Host.COMPILER_STORE(
-                IO.Path.combine(IO.Path.get_temp_path(), "ghul-empty-{System.Guid.new_guid().to_string("N")}"), null);
+                IO.Path.combine(IO.Path.get_temp_path(), "ghul-empty-{System.Guid.new_guid().to_string("N")}"));
 
             assert !store.highest_version()?;
         si

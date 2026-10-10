@@ -22,27 +22,7 @@ namespace Ghul.Cli.Tests is
                 _install(root, v)
             od
 
-            return (store = COMPILER_STORE(root, null), root = root)
-        si
-
-        // A store with a bundled fallback root beside it, as a release
-        // archive unpacked next to its own executable gives: the user root
-        // is empty and the fallback carries the versions.
-        _store_with_bundle(bundled: string[], versions: string[]) -> (store: COMPILER_STORE, root: string, bundle: string) is
-            let root = Path.combine(Path.get_temp_path(), "ghul-store-{System.Guid.new_guid().to_string("N")}")
-            let bundle = Path.combine(Path.get_temp_path(), "ghul-bundle-{System.Guid.new_guid().to_string("N")}")
-
-            Directory.create_directory(bundle)
-
-            for v in bundled do
-                _install_native(bundle, v)
-            od
-
-            for v in versions do
-                _install(root, v)
-            od
-
-            return (store = COMPILER_STORE(root, bundle), root = root, bundle = bundle)
+            return (store = COMPILER_STORE(root), root = root)
         si
 
         _delete(root: string) is
@@ -209,7 +189,7 @@ namespace Ghul.Cli.Tests is
                 _install_native(root, "1.0.0")
                 _install_native(root, "2.0.0")
 
-                let store = COMPILER_STORE(root, null)
+                let store = COMPILER_STORE(root)
 
                 assert (store.highest_version() ?? "none") =~ "2.0.0";
             finally
@@ -217,55 +197,34 @@ namespace Ghul.Cli.Tests is
             yrt
         si
 
-        // A release archive puts a compiler beside its own executable rather
-        // than in the user store, and it is found there - with no copy
-        // written and nothing installed.
+// One root, so a version is either held there or nowhere: there is
+        // no second place a compiler can come from, which is what
+        // `ghul cache clear` clearing everything at once depends on.
         @Test()
-        a_bundled_version_is_found_where_the_bundle_carries_it() is
-            let (store, root, bundle) = _store_with_bundle(["1.0.0"], [])
+        every_version_comes_from_the_one_root() is
+            let (store, root) = _store(["1.0.0"])
 
             try
-                assert store.is_installed("1.0.0");
-                assert (store.native_compiler("1.0.0") ?? "none") =~ Path.combine(bundle, "1.0.0", "ghul-compiler");
-                assert store.versions().count == 1;
-                assert (store.runtime_assembly("1.0.0") ?? "none") =~ Path.combine(bundle, "1.0.0", "ghul-runtime.dll");
-
-                // An install still lands in the user store, never into the
-                // directory the release archive was unpacked into.
                 assert store.directory("1.0.0") =~ Path.combine(root, "1.0.0");
                 assert store.directory("2.0.0") =~ Path.combine(root, "2.0.0");
-            finally
-                _delete(root)
-                _delete(bundle)
-            yrt
-        si
 
-        // Both roots may hold the same version - a bundle ships one, and the
-        // user installs the same version over the top of it - and the user
-        // store is authoritative for a version however different the two
-        // layouts are: an installed compiler is the one that runs.
-        @Test()
-        an_installed_version_wins_over_the_same_version_in_the_bundle() is
-            let (store, root, bundle) = _store_with_bundle(["1.0.0"], ["1.0.0"])
-
-            try
-                assert store.command("1.0.0").file_name =~ "dotnet";
-                assert !store.native_compiler("1.0.0")?;
-
-                // Named once, not twice, however many roots hold it.
+                // A version that was never fetched is not found anywhere,
+                // rather than being looked for somewhere else.
+                assert !store.is_installed("2.0.0");
+                assert !store.native_compiler("2.0.0")?;
+                assert !store.compiler_assembly("2.0.0")?;
+                assert !store.runtime_assembly("2.0.0")?;
                 assert store.versions().count == 1;
             finally
                 _delete(root)
-                _delete(bundle)
             yrt
         si
 
-        // Versions across both roots sort together, so a bundle's compiler
-        // and an installed one compete on version rather than on which root
-        // they came from.
+        // The store is the only root, so the versions it reports are the
+        // directories under it and nothing else.
         @Test()
-        versions_from_both_roots_sort_together() is
-            let (store, root, bundle) = _store_with_bundle(["1.0.0", "3.0.0"], ["2.0.0"])
+        versions_are_the_directories_under_the_one_root() is
+            let (store, root) = _store(["1.0.0", "2.0.0", "3.0.0"])
 
             try
                 let versions = store.versions()
@@ -277,7 +236,6 @@ namespace Ghul.Cli.Tests is
                 assert (store.highest_version() ?? "none") =~ "3.0.0";
             finally
                 _delete(root)
-                _delete(bundle)
             yrt
         si
     si

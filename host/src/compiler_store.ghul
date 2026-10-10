@@ -17,78 +17,48 @@ namespace Ghul.Repl.Host is
             if let dll: string = assembly then [dll] else [] fi
     si
 
-    // Where the compilers ghul-cli installs live: one directory per
-    // version under `~/.local/share/ghul-cli/compilers`, holding either
-    // what a `ghul.compiler` package carries in `tools/net10.0/any` - the
-    // compiler's own dll with the runtime and its dependencies beside it,
-    // run as `dotnet <dir>/ghul.dll` - or what the Native AOT archive a
-    // release carries holds, run as `<dir>/ghul-compiler` with no .NET at
-    // all. Several versions install at once and the highest is the one
-    // used where none is named.
+    // Where the compilers ghul-cli has live: one directory per version
+    // under `$XDG_CACHE_HOME/ghul-cli/compilers` (`~/.cache/ghul-cli/compilers`
+    // where that is unset), holding either what a `ghul.compiler` package
+    // carries in `tools/net10.0/any` - the compiler's own dll with the
+    // runtime and its dependencies beside it, run as `dotnet <dir>/ghul.dll`
+    // - or what the Native AOT archive a release carries holds, run as
+    // `<dir>/ghul-compiler` with no .NET at all. Several versions are held
+    // at once and the highest is the one used where a build names none.
     //
-    // `fallback` is a second root a `ghul.cli` release archive puts beside
-    // its own executable (`compilers/<version>/`), so a bundle's compiler
-    // is found where it was unpacked rather than copied into the user
-    // store. Installs always land in `root`.
-    class COMPILER_STORE(root: string, fallback: string?) is
-        // This user's store, with the bundle root where the executable was
-        // unpacked from a release archive that carries a compiler.
+    // A cache rather than installed state, because nothing here is ever
+    // installed: a manifest names the version a project wants and this
+    // makes it available, and every version here is re-fetchable from the
+    // release that published it. So it sits beside the compiled-script and
+    // library caches, and `ghul cache clear` takes it with them.
+    class COMPILER_STORE(root: string) is
+        // This user's store, under `XDG_CACHE_HOME` where that is set and
+        // under `~/.cache` where it is not, as the library and script
+        // caches beside it are.
         for_this_user() -> COMPILER_STORE static is
-            let home = System.Environment.get_environment_variable("HOME")
+            let xdg = System.Environment.get_environment_variable("XDG_CACHE_HOME")
 
-            let directory =
-                if home? /\ home.length > 0 then
-                    home
+            let base =
+                if xdg? /\ xdg.length > 0 then
+                    xdg
                 else
-                    System.Environment.get_folder_path(System.Environment_SpecialFolder.USER_PROFILE)
+                    let home = System.Environment.get_environment_variable("HOME")
+
+                    let directory =
+                        if home? /\ home.length > 0 then
+                            home
+                        else
+                            System.Environment.get_folder_path(System.Environment_SpecialFolder.USER_PROFILE)
+                        fi
+
+                    Path.join([directory, ".cache"])
                 fi
 
-            return COMPILER_STORE(
-                Path.join([directory, ".local", "share", "ghul-cli", "compilers"]), bundled_root())
+            return COMPILER_STORE(Path.join([base, "ghul-cli", "compilers"]))
         si
 
-        // The `compilers` directory beside the running executable, where a
-        // release archive carries the compiler it ships. Null wherever
-        // there is none: a .NET tool install, or a bare binary.
-        bundled_root() -> string? static is
-            let running = System.Environment.process_path ?? ""
-
-            if running.length == 0 then
-                return null
-            fi
-
-            let beside = Path.join([Path.get_directory_name(running) ?? "", "compilers"])
-
-            if Directory.exists(beside) then
-                return beside
-            fi
-
-            return null
-        si
-
-        // Where a version installs. A version already in the fallback is
-        // left where it is; existing_directory is what finds it.
+        // Where a version is held.
         directory(version: string) -> string => Path.join([root, version])
-
-        // Where a version is - under either root - or null where it is
-        // under neither.
-        existing_directory(version: string) -> string? is
-            let installed = Path.join([root, version])
-
-            if Directory.exists(installed) then
-                return installed
-            fi
-
-            if let bundled: string = fallback then
-                let beside = Path.join([bundled, version])
-
-                if Directory.exists(beside) then
-                    return beside
-                fi
-            fi
-
-            return null
-        si
 
         // The lock that serialises installing into this store. Held for
         // as long as the returned stream stays open.
@@ -100,26 +70,22 @@ namespace Ghul.Repl.Host is
         NATIVE_COMPILER_FILE_NAME: string static => "ghul-compiler"
 
         // The Native AOT compiler a release ships, where this version has
-        // one, or null where it is a managed build or is not installed.
+        // one, or null where it is a managed build or is not here.
         native_compiler(version: string) -> string? is
-            if let where: string = existing_directory(version) then
-                let compiler = Path.join([where, NATIVE_COMPILER_FILE_NAME])
+            let compiler = Path.join([directory(version), NATIVE_COMPILER_FILE_NAME])
 
-                if File.exists(compiler) then
-                    return compiler
-                fi
+            if File.exists(compiler) then
+                return compiler
             fi
 
             return null
         si
 
         compiler_assembly(version: string) -> string? is
-            if let where: string = existing_directory(version) then
-                let assembly = Path.join([where, "ghul.dll"])
+            let assembly = Path.join([directory(version), "ghul.dll"])
 
-                if File.exists(assembly) then
-                    return assembly
-                fi
+            if File.exists(assembly) then
+                return assembly
             fi
 
             return null
@@ -128,12 +94,10 @@ namespace Ghul.Repl.Host is
         // The runtime a version carries beside its compiler, which a
         // program the version compiled needs beside it too.
         runtime_assembly(version: string) -> string? is
-            if let where: string = existing_directory(version) then
-                let beside = Path.join([where, "ghul-runtime.dll"])
+            let beside = Path.join([directory(version), "ghul-runtime.dll"])
 
-                if File.exists(beside) then
-                    return beside
-                fi
+            if File.exists(beside) then
+                return beside
             fi
 
             return null
@@ -152,18 +116,13 @@ namespace Ghul.Repl.Host is
         is_installed(version: string) -> bool =>
             native_compiler(version)? \/ compiler_assembly(version)?
 
-        // Every installed version under either root, lowest first and
-        // named once. A directory counts as a version when it holds a
-        // compiler, so a scratch directory an interrupted install left
-        // behind is not mistaken for one.
+        // Every version held, lowest first. A directory counts as a version
+        // when it holds a compiler, so a scratch directory an interrupted
+        // fetch left behind is not mistaken for one.
         versions() -> string[] is
             let found = LIST[string]()
 
             _collect_versions(root, found)
-
-            if let bundled: string = fallback then
-                _collect_versions(bundled, found)
-            fi
 
             found.sort(_compare_versions)
 

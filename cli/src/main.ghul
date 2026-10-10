@@ -25,15 +25,22 @@ namespace Ghul.Cli is
         return System.Environment.get_folder_path(System.Environment_SpecialFolder.USER_PROFILE)
     si
 
-    cache_root() -> string is
+    // What this tool caches lives under one directory: the compiled
+    // scripts, the libraries a wasm build fetches, and the compilers a
+    // manifest's `compiler_version` resolves to. All of it is
+    // re-materialisable and none of it is installed, so `ghul cache clear`
+    // takes the lot and one `rm -rf` undoes the lot.
+    cache_home() -> string is
         let xdg = System.Environment.get_environment_variable("XDG_CACHE_HOME")
 
         if xdg? /\ xdg.length > 0 then
-            return "{xdg}/ghul-cli/scripts"
+            return Path.join([xdg, "ghul-cli"])
         fi
 
-        return "{home_directory()}/.cache/ghul-cli/scripts"
+        return Path.join([home_directory(), ".cache", "ghul-cli"])
     si
+
+    cache_root() -> string => Path.join([cache_home(), "scripts"])
 
     // Keyed on the source's own bytes plus the compiler version that will
     // build it, so a compiler update invalidates every cached script rather
@@ -573,7 +580,10 @@ namespace Ghul.Cli is
             return 1
         fi
 
-        let root = cache_root()
+        // The whole of it, not just the compiled scripts: the libraries a
+        // wasm build fetched and the compilers a manifest resolves to sit
+        // under the same directory and are re-fetched the same way.
+        let root = cache_home()
 
         if Directory.exists(root) then
             Directory.delete(root, true)

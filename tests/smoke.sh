@@ -193,15 +193,21 @@ compiled_no_cache="$(dotnet "$cli" compile --no-cache "$no_cache_script")"
 out="$(dotnet "$compiled_no_cache")"
 check "$out" "fourth version" "'ghul compile --no-cache' output"
 
-echo "smoke: 'ghul cache clear' empties the script cache..." >&2
-cache_root="$HOME/.cache/ghul-cli/scripts"
-if [[ ! -d "$cache_root" ]]; then
-    echo "smoke: expected a populated cache at $cache_root before clearing" >&2
+echo "smoke: 'ghul cache clear' empties the whole cache..." >&2
+cache_home="$HOME/.cache/ghul-cli"
+if [[ ! -d "$cache_home/scripts" ]]; then
+    echo "smoke: expected a populated script cache at $cache_home/scripts before clearing" >&2
+    exit 1
+fi
+# The compilers went in with it: nothing is installed, so a clear takes them
+# too and the next build fetches them again.
+if [[ ! -d "$cache_home/compilers" ]]; then
+    echo "smoke: expected the fetched compiler under $cache_home/compilers before clearing" >&2
     exit 1
 fi
 dotnet "$cli" cache clear >&2
-if [[ -d "$cache_root" ]]; then
-    echo "smoke: expected $cache_root to be gone after 'ghul cache clear'" >&2
+if [[ -d "$cache_home" ]]; then
+    echo "smoke: expected $cache_home to be gone after 'ghul cache clear'" >&2
     exit 1
 fi
 out="$(dotnet "$cli" "$script" world)"
@@ -257,10 +263,12 @@ done
 if (( fail )); then
     exit 1
 fi
-compilers="$fresh_home/.local/share/ghul-cli/compilers"
+# The compilers live in the cache beside the script cache, since nothing is
+# installed - a manifest names the version and the tool fetches it.
+compilers="$fresh_home/.cache/ghul-cli/compilers"
 installed_versions="$(ls "$compilers" 2>/dev/null | wc -l)"
 if [[ "$installed_versions" != "1" ]]; then
-    echo "smoke: expected exactly one installed compiler version after concurrent installs, found $installed_versions under $compilers" >&2
+    echo "smoke: expected exactly one compiler version after concurrent installs, found $installed_versions under $compilers" >&2
     exit 1
 fi
 
